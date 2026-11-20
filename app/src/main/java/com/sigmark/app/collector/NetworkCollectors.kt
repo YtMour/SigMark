@@ -22,6 +22,7 @@ import android.telephony.CellInfoWcdma
 import android.telephony.CellSignalStrengthLte
 import android.telephony.CellSignalStrengthNr
 import android.telephony.SubscriptionManager
+import android.telephony.ServiceState
 import android.telephony.TelephonyManager as Phone
 import com.sigmark.app.model.DeviceInfoItem
 import com.sigmark.app.model.DeviceSection
@@ -283,6 +284,7 @@ internal object CellularCollector : DeviceCollector {
             }
         }
         val subId = SubscriptionManager.getDefaultDataSubscriptionId()
+        addSubscriptionStates(context, phone, fields, subId)
         // Never fall back to another SIM's carrier and label it as the default data subscription.
         if (subId < 0 || subId == Int.MAX_VALUE) {
             fields.read("subscription", "数据订阅", "SubscriptionManager.getDefaultDataSubscriptionId()") { "未设置默认数据订阅" }
@@ -323,6 +325,58 @@ internal object CellularCollector : DeviceCollector {
         }
         addRegisteredCells(context, phone, fields, update)
         return DeviceSection(key, title, fields.items)
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun addSubscriptionStates(context: Context, phone: Phone, fields: NetworkFields, dataId: Int) {
+        val slotSource = "SubscriptionManager.getSlotIndex / activeSubscriptionInfoList"
+        val serviceSource = "SubscriptionManager.activeSubscriptionInfoList → TelephonyManager.serviceState"
+        val permitted = context.checkSelfPermission(Manifest.permission.READ_PHONE_STATE) == PackageManager.PERMISSION_GRANTED
+        val subscriptions = if (permitted) SafeReader.read("SubscriptionManager.activeSubscriptionInfoList") {
+            context.getSystemService(SubscriptionManager::class.java)?.activeSubscriptionInfoList
+        } else null
+        if (dataId != SubscriptionManager.INVALID_SUBSCRIPTION_ID && dataId >= 0 && dataId != Int.MAX_VALUE) {
+            if (Build.VERSION.SDK_INT >= 29 || permitted) {
+                val slot = SafeReader.read(slotSource, "只记录默认数据订阅对应的逻辑卡槽。") {
+                    val index = if (Build.VERSION.SDK_INT >= 29) SubscriptionManager.getSlotIndex(dataId)
+                    else subscriptions?.value?.firstOrNull { it.subscriptionId == dataId }?.simSlotIndex
+                    index?.takeIf { it >= 0 }?.let { "卡槽 ${it + 1}" }
+                }
+                fields.observation("defaultDataSlot", "默认移动数据卡槽", slot)
+            } else fields.missing("defaultDataSlot", "默认移动数据卡槽", slotSource, ReadReason.PERMISSION_REQUIRED,
+                "此 Android 版本需授权后通过活动订阅定位卡槽。")
+        } else fields.read("defaultDataSlot", "默认移动数据卡槽", "SubscriptionManager.getDefaultDataSubscriptionId") {
+            "未配置默认数据订阅"
+        }
+        if (Build.VERSION.SDK_INT < 28) {
+            fields.missing("slotService", "各卡槽服务状态", serviceSource, ReadReason.INTERFACE_UNSUPPORTED,
+                "该接口需要 Android 9（API 28）或更高版本。")
+            return
+        }
+        if (!permitted || !locationEnabled(context) || !hasFine(context)) {
+            val reason = if (!permitted || !hasFine(context)) ReadReason.PERMISSION_REQUIRED else ReadReason.LOCATION_DISABLED
+            fields.missing("slotService", "各卡槽服务状态", serviceSource, reason,
+                "此项需要电话状态权限、精确位置权限和位置开关；不读取号码、SIM 标识或运营商。")
+            return
+        }
+        val states = subscriptions?.map { active ->
+            val eligible = active.filter { it.simSlotIndex >= 0 }.sortedBy { it.simSlotIndex }.take(8)
+            if (eligible.isEmpty()) return@map "系统未列出可见活动订阅"
+            eligible.joinToString(" / ") { sub ->
+                val result = SafeReader.read(serviceSource) {
+                    phone.createForSubscriptionId(sub.subscriptionId).serviceState?.state?.let(::subscriptionServiceLabel)
+                }
+                val label = result.value ?: when (result.status) {
+                    ValueStatus.RESTRICTED -> "系统拒绝读取"
+                    ValueStatus.ERROR -> "读取异常"
+                    else -> "状态未上报"
+                }
+                "卡槽 ${sub.simSlotIndex + 1}：$label"
+            }
+        }?.let { it.copy(source = serviceSource, detail = it.detail ?: "反映各可见活动订阅的服务状态，不代表移动数据已连通。") }
+        if (states == null) {
+            fields.missing("slotService", "各卡槽服务状态", serviceSource, ReadReason.NOT_REPORTED, "系统未提供活动订阅。")
+        } else fields.observation("slotService", "各卡槽服务状态", states)
     }
 
     @SuppressLint("MissingPermission") // Checked before accessing getAllCellInfo().
@@ -452,6 +506,14 @@ internal fun simStateLabel(state: Int): String = when (state) {
     Phone.SIM_STATE_CARD_IO_ERROR -> "卡读取异常"
     Phone.SIM_STATE_CARD_RESTRICTED -> "卡受限"
     else -> "状态未确认"
+}
+
+internal fun subscriptionServiceLabel(state: Int): String? = when (state) {
+    ServiceState.STATE_IN_SERVICE -> "有服务"
+    ServiceState.STATE_OUT_OF_SERVICE -> "无服务"
+    ServiceState.STATE_EMERGENCY_ONLY -> "仅紧急呼叫"
+    ServiceState.STATE_POWER_OFF -> "无线电关闭"
+    else -> null
 }
 
 @Suppress("DEPRECATION") // Recognize older CDMA reports without assuming modern support.

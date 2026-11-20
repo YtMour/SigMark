@@ -129,6 +129,15 @@ func (s server) routes() http.Handler {
 				admin.Post("/builds/{id}/publish", s.publishBuild)
 				admin.Get("/reports", s.reports)
 				admin.Get("/report-count", s.reportCount)
+				admin.Get("/report-facets", s.reportFacets)
+				admin.Get("/repository-stats", s.repositoryStats)
+				admin.Get("/regression-baselines", s.listBaselines)
+				admin.Post("/regression-baselines", s.createBaseline)
+				admin.Delete("/regression-baselines/{id}", s.deleteBaseline)
+				admin.Get("/device-assets", s.deviceAssets)
+				admin.Post("/device-assets/assign", s.assignDeviceAsset)
+				admin.Post("/device-assets/merge", s.mergeDeviceAsset)
+				admin.Post("/reports/export", s.exportReports)
 				admin.Post("/reports/manage", s.manageReports)
 				admin.Get("/reports/{id}", s.reportDetail)
 				admin.Get("/summary", s.summary)
@@ -186,9 +195,12 @@ func (s server) submit(w http.ResponseWriter, r *http.Request) {
 		fail(w, 503, "uploads_paused")
 		return
 	}
-	var id string
-	err = s.db.QueryRow(ctx, `INSERT INTO reports (id,batch,request_id,body) VALUES (gen_random_uuid(),$1,$2,$3)
-	ON CONFLICT (batch, request_id) DO UPDATE SET body = reports.body WHERE reports.body = EXCLUDED.body RETURNING id`, config.Batch, report.RequestID, report).Scan(&id)
+	key := r.Header.Get("X-SigMark-Asset-Key")
+	if key != "" && (report.SchemaVersion != 4 || !requestPattern.MatchString(key)) {
+		fail(w, 400, "invalid_asset_key")
+		return
+	}
+	id, err := s.storeReport(ctx, config.Batch, report, key)
 	if errors.Is(err, pgx.ErrNoRows) {
 		fail(w, 409, "request_id_conflict")
 		return
@@ -207,6 +219,7 @@ type storedReport struct {
 	Received  time.Time  `json:"receivedAt"`
 	Report    Report     `json:"report"`
 	TrashedAt *time.Time `json:"trashedAt,omitempty"`
+	AssetID   *string    `json:"assetId,omitempty"`
 }
 
 type reportIndexRow struct {
@@ -226,7 +239,8 @@ func (s server) reportDetail(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 4*time.Second)
 	defer cancel()
 	var p storedReport
-	err := s.db.QueryRow(ctx, `SELECT id,batch,received_at,body,trashed_at FROM reports WHERE id=$1`, id).Scan(&p.ID, &p.Batch, &p.Received, &p.Report, &p.TrashedAt)
+	err := s.db.QueryRow(ctx, `SELECT id,batch,received_at,body,trashed_at,CASE WHEN $2 THEN asset_id END FROM reports WHERE id=$1`,
+		id, r.URL.Query().Get("include") == "asset").Scan(&p.ID, &p.Batch, &p.Received, &p.Report, &p.TrashedAt, &p.AssetID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		fail(w, 404, "report_not_found")
 		return
@@ -252,15 +266,18 @@ func reportFilters(w http.ResponseWriter, r *http.Request) (string, string, bool
 	return b, q, true
 }
 
-const archivePredicate = `($1='' OR batch=$1) AND ($2='' OR
- strpos(lower(concat_ws(' ', id::text, batch, body->>'model', body->>'appVersion', body->>'network',
+const archivePredicate = `($1='' OR batch=$1) AND (CASE
+ WHEN $2='' THEN true
+ WHEN $2='asset:unassigned' THEN asset_id IS NULL
+ WHEN left($2,6)='asset:' THEN asset_id::text=substr($2,7)
+ ELSE strpos(lower(concat_ws(' ', id::text, batch, body->>'model', body->>'appVersion', body->>'network',
    body->>'androidApi', (SELECT string_agg(p->>'value', ' ') FROM jsonb_array_elements(
      coalesce(body->'parameters','[]'::jsonb)) p
-     WHERE p->>'group'='system' AND p->>'key' IN ('release','patch','romHint','buildId'))
- )), lower($2))>0)`
+     WHERE p->>'group'='system' AND p->>'key' IN ('brand','device','release','patch','romHint','buildId'))
+ )), lower($2))>0 END)`
 
 func (s server) reports(w http.ResponseWriter, r *http.Request) {
-	batch, query, ok := reportFilters(w, r)
+	args, ok := reportScope(w, r)
 	if !ok {
 		return
 	}
@@ -279,12 +296,16 @@ func (s server) reports(w http.ResponseWriter, r *http.Request) {
 	const pageSize = 30
 	rows, err := s.db.Query(ctx, `SELECT id,batch,received_at,jsonb_build_object(
 	  'model',body->'model','androidApi',body->'androidApi','network',body->'network',
+	  'brand',nullif(brand,'~missing'),'android',nullif(android,'~missing'),'device',nullif(device,'~missing'),'assetId',asset_id,
+	  'capturedAtEpochMs',body->'capturedAtEpochMs',
+	  'buildId',jsonb_path_query_first(body,'$.parameters[*] ? (@.group == "system" && @.key == "buildId" && @.status == "AVAILABLE").value'),
+	  'romHint',jsonb_path_query_first(body,'$.parameters[*] ? (@.group == "system" && @.key == "romHint" && @.status == "AVAILABLE").value'),
 	  'appVersion',body->'appVersion','schemaVersion',body->'schemaVersion',
 	  'collectorVersion',body->'collectorVersion','fieldSetVersion',body->'fieldSetVersion'),trashed_at
-	  FROM reports WHERE `+archivePredicate+`
-	  AND (trashed_at IS NOT NULL)=$6
-	  AND ($3::timestamptz IS NULL OR (received_at,id)<($3::timestamptz,$4::uuid))
-	  ORDER BY received_at DESC,id DESC LIMIT $5`, batch, query, at, id, pageSize+1, trash)
+	  FROM reports `+reportDimensions+` WHERE `+archivePredicate+archiveFacets+`
+	  AND (trashed_at IS NOT NULL)=$8
+	  AND ($9::timestamptz IS NULL OR (received_at,id)<($9::timestamptz,$10::uuid))
+	  ORDER BY received_at DESC,id DESC LIMIT $11`, append(args, trash, at, id, pageSize+1)...)
 	if err != nil {
 		fail(w, 503, "storage_unavailable")
 		return
@@ -312,7 +333,7 @@ func (s server) reports(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s server) summary(w http.ResponseWriter, r *http.Request) {
-	batch, query, ok := reportFilters(w, r)
+	args, ok := reportScope(w, r)
 	if !ok {
 		return
 	}
@@ -324,7 +345,7 @@ func (s server) summary(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	var result json.RawMessage
 	err := s.db.QueryRow(ctx, `WITH filtered AS (
-	  SELECT body FROM reports WHERE `+archivePredicate+` AND (trashed_at IS NOT NULL)=$3
+	  SELECT body FROM reports `+reportDimensions+` WHERE `+archivePredicate+archiveFacets+` AND (trashed_at IS NOT NULL)=$8
 	), metrics AS (
 	  SELECT field
 	  FROM filtered CROSS JOIN LATERAL jsonb_array_elements(body->'metrics') field
@@ -340,7 +361,7 @@ func (s server) summary(w http.ResponseWriter, r *http.Request) {
 	SELECT jsonb_build_object('total',(SELECT count(*) FROM filtered),
 	'status',coalesce((SELECT jsonb_object_agg(key,n) FROM status),'{}'),
 	'network',coalesce((SELECT jsonb_object_agg(key,n) FROM network),'{}'),
-	'fields',coalesce((SELECT jsonb_agg(to_jsonb(by_field) ORDER BY restricted DESC,key) FROM by_field),'[]'))`, batch, query, trash).Scan(&result)
+	'fields',coalesce((SELECT jsonb_agg(to_jsonb(by_field) ORDER BY restricted DESC,key) FROM by_field),'[]'))`, append(args, trash)...).Scan(&result)
 	if err != nil {
 		fail(w, 503, "storage_unavailable")
 		return
@@ -349,7 +370,7 @@ func (s server) summary(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s server) reportCount(w http.ResponseWriter, r *http.Request) {
-	batch, query, ok := reportFilters(w, r)
+	args, ok := reportScope(w, r)
 	if !ok {
 		return
 	}
@@ -360,8 +381,8 @@ func (s server) reportCount(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 4*time.Second)
 	defer cancel()
 	var total int64
-	if err := s.db.QueryRow(ctx, `SELECT count(*) FROM reports WHERE `+archivePredicate+
-		` AND (trashed_at IS NOT NULL)=$3`, batch, query, trash).Scan(&total); err != nil {
+	if err := s.db.QueryRow(ctx, `SELECT count(*) FROM reports `+reportDimensions+` WHERE `+archivePredicate+archiveFacets+
+		` AND (trashed_at IS NOT NULL)=$8`, append(args, trash)...).Scan(&total); err != nil {
 		fail(w, 503, "storage_unavailable")
 		return
 	}

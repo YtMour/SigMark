@@ -94,6 +94,34 @@ func TestVersionedDiagnosticsAndMissingReasons(t *testing.T) {
 	if !p.valid() {
 		t.Fatal("field set 4 rejected independent SIM state")
 	}
+	slot, service := "卡槽 1", "卡槽 1：有服务"
+	p.Parameters = append(p.Parameters,
+		Parameter{Group: "cellular", Key: "defaultDataSlot", Label: "数据卡槽", Value: &slot, Source: "SubscriptionManager", Status: "AVAILABLE"},
+		Parameter{Group: "cellular", Key: "slotService", Label: "卡槽服务", Value: &service, Source: "TelephonyManager", Status: "AVAILABLE"})
+	p.Coverage[len(p.Coverage)-1].Available += 2
+	if p.valid() {
+		t.Fatal("field set 4 accepted field set 5 data")
+	}
+	p.FieldSetVersion = 5
+	if !p.valid() {
+		t.Fatal("field set 5 rejected slot diagnostics")
+	}
+	locked, encrypted := "是", "已启用（按用户加密）"
+	p.Parameters = append(p.Parameters,
+		Parameter{Group: "environment", Key: "keyguardSecure", Label: "锁屏凭证", Source: "KeyguardManager", Status: "AVAILABLE", Value: &locked},
+		Parameter{Group: "environment", Key: "storageEncryption", Label: "存储加密", Source: "DevicePolicyManager", Status: "AVAILABLE", Value: &encrypted})
+	p.Coverage = append(p.Coverage, Coverage{Group: "environment", Available: 2})
+	if p.valid() {
+		t.Fatal("field set 5 accepted field set 6 data")
+	}
+	p.FieldSetVersion = 6
+	if !p.valid() {
+		t.Fatal("field set 6 rejected protection readings")
+	}
+	p.Parameters[len(p.Parameters)-1].Key = "subscriptionId"
+	if p.valid() {
+		t.Fatal("private subscription identifier accepted")
+	}
 }
 
 func synthetic() Report {

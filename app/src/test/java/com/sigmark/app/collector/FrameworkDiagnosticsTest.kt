@@ -6,6 +6,14 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class FrameworkDiagnosticsTest {
+    @org.junit.Test fun readableBootPropertyDoesNotCarryMissingNote() {
+        val available = SafeReader.readPropertyValue("getprop fixture") { "green" }
+        org.junit.Assert.assertEquals("green", available.value)
+        org.junit.Assert.assertNull(available.detail)
+        val empty = SafeReader.readPropertyValue("getprop fixture") { "" }
+        org.junit.Assert.assertEquals(com.sigmark.app.model.ReadReason.NOT_REPORTED, empty.reason)
+        org.junit.Assert.assertNotNull(empty.detail)
+    }
     @Test fun estimatesEnergyFromIndependentReadings() {
         assertEquals(7.6, estimateEnergyWh(2_000_000, 3800)!!, 0.0001)
         assertNull(estimateEnergyWh(Int.MIN_VALUE, 3800))

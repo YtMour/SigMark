@@ -16,7 +16,7 @@ internal val reportFields = linkedMapOf(
 )
 
 internal data class LanMetric(val key: String, val status: String, val reason: String?)
-internal const val LanFieldSetVersion = 4
+internal const val LanFieldSetVersion = 6
 
 internal data class LanReport(
     val model: String, val androidApi: Int, val network: String, val wifiBand: String, val radio: String,
@@ -96,7 +96,7 @@ internal fun lanEndpoint(raw: String): URI? {
 internal fun validFeedback(text: String): Boolean = text.codePointCount(0,text.length) <= 300 &&
     text.none { Character.isISOControl(it) }
 
-internal fun sendLanReport(endpoint: URI, report: LanReport): String {
+internal fun sendLanReport(endpoint: URI, report: LanReport, assetKey: String? = null): String {
     check(lanEndpoint("http://${endpoint.host}:${endpoint.port}") == endpoint)
     val http = endpoint.toURL().openConnection(Proxy.NO_PROXY) as HttpURLConnection
     return try {
@@ -106,6 +106,7 @@ internal fun sendLanReport(endpoint: URI, report: LanReport): String {
         http.doOutput = true
         http.setRequestProperty("Content-Type", "application/json")
         http.setRequestProperty("X-SigMark-Client", "android-lan")
+        assetKey?.let { http.setRequestProperty("X-SigMark-Asset-Key", it) }
         val payload = report.json()
         http.setFixedLengthStreamingMode(payload.size)
         http.outputStream.use { it.write(payload) }

@@ -5,6 +5,14 @@ import org.junit.Assert.assertNull
 import org.junit.Test
 
 class RadioMathTest {
+    @Test fun reportsServiceStateWithoutAssumingDataConnectivity() {
+        assertEquals("有服务", subscriptionServiceLabel(android.telephony.ServiceState.STATE_IN_SERVICE))
+        assertEquals("无服务", subscriptionServiceLabel(android.telephony.ServiceState.STATE_OUT_OF_SERVICE))
+        assertEquals("仅紧急呼叫", subscriptionServiceLabel(android.telephony.ServiceState.STATE_EMERGENCY_ONLY))
+        assertEquals("无线电关闭", subscriptionServiceLabel(android.telephony.ServiceState.STATE_POWER_OFF))
+        assertNull(subscriptionServiceLabel(Int.MAX_VALUE))
+    }
+
     @Test fun simUnknownIsNotEquivalentToAbsent() {
         assertEquals("未检测到 SIM", simStateLabel(android.telephony.TelephonyManager.SIM_STATE_ABSENT))
         assertEquals("就绪", simStateLabel(android.telephony.TelephonyManager.SIM_STATE_READY))

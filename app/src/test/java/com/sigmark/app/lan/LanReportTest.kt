@@ -9,6 +9,22 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class LanReportTest {
+    @Test fun sharesProtectionFlagsButNotLocalIdentityEvidence() {
+        val values = mapOf("keyguardSecure" to "是", "storageEncryption" to "已启用", "configurationDigest" to "private",
+            "strongBiometrics" to "private", "virtualDeviceHints" to "private")
+        val snapshot = DeviceSnapshot(0, listOf(DeviceSection("environment", "environment", values.map { (key,value) ->
+            DeviceInfoItem(key,key,value,"public Android API")
+        })))
+        assertEquals(setOf("keyguardSecure","storageEncryption"),lanParameters(snapshot).map { it.key }.toSet())
+        assertEquals(6,LanFieldSetVersion)
+    }
+    @Test fun assetIdentityIsScopedToTheBackendAddressAndPort() {
+        fun scope(origin: String) = assetIdentityScope(requireNotNull(lanEndpoint(origin)))
+        assertEquals(scope("http://192.168.1.10:48272"),scope("http://192.168.1.10:48272/"))
+        assertNotEquals(scope("http://192.168.1.10:48272"),scope("http://192.168.1.10:48273"))
+        assertNotEquals(scope("http://192.168.1.10:48272"),scope("http://192.168.1.11:48272"))
+    }
+
     @Test fun keepsPrivateDiagnosticsOffTheWire() {
         val keys = mapOf(
             "app" to listOf("permissions", "installedAt", "certSha256", "visibleLauncherApps"),
@@ -17,6 +33,8 @@ class LanReportTest {
             "runtime" to listOf("locale", "timeZone", "featureList"),
             "media" to listOf("camera_0"),
             "sensors" to listOf("sensor_0"),
+            "timeline" to listOf("events"),
+            "cellular" to listOf("subscriptionId", "iccid", "phoneNumber"),
         )
         val snapshot = DeviceSnapshot(0, keys.map { (group, fields) ->
             DeviceSection(group, group, fields.map { DeviceInfoItem(it, it, "local", "test") })
@@ -97,7 +115,8 @@ class LanReportTest {
             "battery" to mapOf("powerSaver" to "关闭", "thermalStatus" to "正常"),
             "network" to mapOf("defaultRouteFamilies" to "IPv4 / IPv6", "privateDnsActive" to "已启用",
                 "linkMtu" to "1500 字节", "visibleTransports" to "Wi-Fi / 蜂窝网络", "wifiRouteRole" to "默认网络"),
-            "cellular" to mapOf("simState" to "卡槽 1：就绪", "dataState" to "已连接")
+            "cellular" to mapOf("simState" to "卡槽 1：就绪", "dataState" to "已连接",
+                "defaultDataSlot" to "卡槽 1", "slotService" to "卡槽 1：有服务")
         )
         val snapshot = DeviceSnapshot(1800000000000, fields.map { (group, values) ->
             DeviceSection(group, group, values.map { (key, value) ->

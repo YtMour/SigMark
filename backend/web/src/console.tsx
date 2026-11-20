@@ -13,17 +13,43 @@ export class RequestError extends Error {
       publish_version_not_newer: '发布版本的内部版本号须高于当前发布版。可单独下载此构建。',
       publish_signer_changed: '产物签名和当前发布版不一致或未登记。请在原签名构建机重新构建。',
       report_selection_changed: '所选报告状态已变化。请关闭此窗口，刷新列表后重新选择。',
+      report_export_limit: '导出范围超过 250 份或 32 MiB，请缩小筛选范围后重试。',
+      report_export_empty: '当前范围没有报告可导出。',
+      export_busy: '导出任务繁忙，请稍候重试。',
+      rate_limited: '请求较多，请稍候重试。',
+      invalid_device_assignment: '请检查设备别名或资产编号。',
+      device_assignment_changed: '部分报告已归组、移入回收站或已移除，请刷新后重试。',
+      device_asset_not_found: '未找到该设备资产，请核对完整编号。',
+      baseline_name_exists: '该基线名称已存在，请换一个名称。',
+      baseline_limit: '已保存 100 条基线，请移除不再使用的基线。',
+      baseline_report_not_available: '此报告已不在档案库，请换一份在库报告。',
+      baseline_not_found: '此基线已移除，刷新后再试。',
+      invalid_baseline: '请输入有效的基线名称并选择一份在库报告。',
     } as Record<string, string>)[code] ?? '请求失败 · HTTP ' + status);
   }
 }
 
-export async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+export async function requestResponse(path: string, init: RequestInit = {}): Promise<Response> {
   const headers = new Headers(init.headers);
   if (init.method && init.method !== 'GET') {
     headers.set('Content-Type', 'application/json');
     headers.set('X-SigMark-Admin', '1');
   }
-  const response = await fetch(path, { ...init, headers, credentials: 'same-origin', cache: 'no-store' });
+  const send = () => fetch(path, { ...init, headers, credentials: 'same-origin', cache: 'no-store' });
+  let response = await send();
+  if ((!init.method || init.method === 'GET') && response.status === 429 && !init.signal?.aborted) {
+    const waitSeconds = Math.min(3, Math.max(1, Number(response.headers.get('Retry-After')) || 2));
+    await new Promise<void>(resolve => {
+      const finish = () => {
+        clearTimeout(timer);
+        init.signal?.removeEventListener('abort',finish);
+        resolve();
+      };
+      const timer = setTimeout(finish,waitSeconds*1000);
+      init.signal?.addEventListener('abort',finish,{once:true});
+    });
+    if (!init.signal?.aborted) response = await send();
+  }
   if (!response.ok) {
     if (response.status === 401 && path !== '/api/admin/login' && path !== '/api/admin/session') {
       window.dispatchEvent(new Event('sigmark:session-expired'));
@@ -31,7 +57,11 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
     const body = await response.json().catch(() => ({}));
     throw new RequestError(response.status, typeof body?.error === 'string' ? body.error : '');
   }
-  return response.json() as Promise<T>;
+  return response;
+}
+
+export async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  return (await requestResponse(path,init)).json() as Promise<T>;
 }
 
 export function errorMessage(error: unknown) {

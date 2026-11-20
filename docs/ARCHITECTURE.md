@@ -40,11 +40,18 @@ Debug 内网试验分支：冻结当前本地快照 → `lan/LanReport.kt` 按�
 - 稳定字段标识为 `group + key`；标签仅供显示。记录有 `value`、`status`、`source`，可带 `reason`、`errno`、`note`。非可用值固定为 JSON null。`/api/admin/reports/{id}` 返回原始结构化报告，不通过抓网页获取。
 - v3 在报告正文新增 `coverage`。每个 `group` 有 `available`、`restricted`、`unavailable`、`errors` 四项快照计数。每组各状态的计数覆盖对应归档行。自动化分析应使用 `parameters` 读明细，使用 `coverage` 对照快照口径。历史 v1/v2 缺少此元数据。
 - v4 新增 `collectorVersion`（采集实现版本）和 `fieldSetVersion`（归档字段语义版本）。状态保留已有四类；`OPTIONAL_UNSET`、`INTERFACE_UNSUPPORTED`、`MODEM_NOT_REPORTED`、`NO_REGISTERED_LTE` 在 `UNAVAILABLE` 下细分原因。历史报告缺行只在对比视图标作「报告未记录」，不改写为采集状态或设备不支持。
+- 字段集 5 增加 `cellular.defaultDataSlot`、`cellular.slotService`；两端白名单按分类和键匹配，字段集 2–4 继续接收。链路时间线使用独立本地 JSON（`schemaVersion: 1`；毫秒和 dBm 显式标注），不进入报告白名单。
+- 字段集 6 增加 `environment.keyguardSecure` 和 `environment.storageEncryption`。安全分析规则只读取归档字段与采样时间，不保存派生评分；没有证明链时不生成设备认证结论。参见 [安全证据](SECURITY-EVIDENCE.md)。
 - 0.12 的 v4 使用字段集 3，新增可选 `cellular.carrierBandwidths`。v4 字段集 2 仍可接收。电池能量粗估留在本地，不进入上传白名单。
 - 0.13 的字段集 4 新增 `cellular.simState`、`network.visibleTransports` 和 `network.wifiRouteRole`。字段集 2/3 继续兼容。默认路由仍是原来的 `network.transport`；其他网络信号分别对照。
 - 前端归档查看在 `main.tsx`，批量资产管理在 `assets.tsx`，共享报告类型、标签和导出在 `reports.ts`。资产页用 `/api/admin/report-count` 获取过滤后的两种资产数量，不扫描参数状态摘要。
+- 报告列表、计数、摘要和 ZIP 共用查询范围：`q`、`batch`、`view=archive|trash`，以及精确匹配的 `android`、`api`、`brand`、`model`、`device`。品牌、Android 版本和设备代号取已归档的 `AVAILABLE` 字段，型号和 API 取报告头。没有有效归档值用 `~missing` 筛选；不从相邻报告回填。鉴权接口 `GET /api/admin/report-facets` 返回这些维度的值和匹配报告数，不受列表分页影响（每维最多 150 个常用值，缺项分类另保留）。
+- `POST /api/admin/reports/export` 使用管理鉴权及 `X-SigMark-Admin: 1`。请求是 `{"mode":"selected","ids":["<uuid>"]}` 或 `{"mode":"filtered"}`，查询参数与列表相同。所选项移出范围返回 409，并且不产生部分 ZIP；超限返回 413。ZIP 的 `manifest.json` 包含格式版本、导出时间、数量和文件名。
+- `repository_stats.go` 的字段覆盖 v2 按匹配报告计数；指标为 `available/restricted/unavailable/errors/legacy/missing`。历史 v1 的状态项只算 `legacy`。字段词表直接来自服务端归档白名单。
+- 设备归组独立于 JSON：上传预览明确同意后，Android 发送发往当前 LAN 地址的随机安装标记（`X-SigMark-Asset-Key`），服务器将摘要映射为 `device_assets.id`。报告只增加关系列 `asset_id`，原始 JSON 和 ZIP 不变。老版本或未同意的报告默认未关联。事务保证同一标记并发上传不会创建设备副本，管理员合并设备时一并迁移报告关系和安装映射；这不是硬件识别或上传认证。脱库的服务器资产 UUID 与发送的安装标记不同。
 - 列表/详情分离，游标由接收时间和 UUID 组成；分析脚本保持相同 `q` 和 `batch`、使用 `nextCursor` 翻页并按 `id` 去重。PostgreSQL 默认不自动清理。旧报告没有的值不反推，不应把旧版缺字段当作设备异常。界面比较逻辑见 `backend/web/src/compare.ts`。
 - `backend/web/src/main.tsx` 根据 URL 片段选择工作区页面。会话和接收设置在 `backend/cmd/sigmark/admin.go`。构建中心由 Go API 写入文件队列，主机上的 `backend/scripts/build_worker.py` 从已登记的 Git SHA 构建并验证 APK。公开下载只读取当前发布记录，构建完成后由管理端独立发布。
+- 持久回归基线由 `baselines.go` / `regression_baselines` 保存引用和实验预期，不复制报告。前端 `security-rules.ts` 负责解释证据，`regression.ts` 生成版本化对比导出，均可独立测试。读数缺失、字段未归档、跨资产对照与当前读数变化是独立信号。详见 [复测工作流](REGRESSION-WORKFLOW.md)。
 
 ### 普通设备兼容策略
 

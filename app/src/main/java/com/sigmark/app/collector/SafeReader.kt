@@ -185,7 +185,7 @@ internal object SafeReader {
     fun property(property: Property): ReadResult<String> {
         val source = "getprop ${property.key}"
         return bounded(source, propertyTimeoutMs + 50) {
-            read(source, "属性未设置或对当前应用不可见。") {
+            readPropertyValue(source) {
                 val p = ProcessBuilder("/system/bin/getprop", property.key).redirectErrorStream(true).start()
                 try {
                     if (!p.waitFor(propertyTimeoutMs, TimeUnit.MILLISECONDS)) throw TimeoutException()
@@ -199,4 +199,7 @@ internal object SafeReader {
             }
         }
     }
+
+    internal fun readPropertyValue(source: String, block: () -> String): ReadResult<String> =
+        read(source, block = block).explainMissing(ReadReason.NOT_REPORTED, "属性未设置或对当前应用不可见。")
 }

@@ -1,9 +1,9 @@
 import type { Parameter } from './compare';
 
 type Metric = {key:string;status:string;reason?:string};
-export type Row = {id:string;batch:string;receivedAt:string;trashedAt?:string;report:{schemaVersion:number;model:string;androidApi:number;appVersion:string;network:string;collectorVersion?:string|null;fieldSetVersion?:number|null}};
+export type Row = {id:string;batch:string;receivedAt:string;trashedAt?:string;report:{schemaVersion:number;model:string;androidApi:number;appVersion:string;network:string;collectorVersion?:string|null;fieldSetVersion?:number|null;brand?:string|null;android?:string|null;device?:string|null;assetId?:string|null;capturedAtEpochMs?:number|null;buildId?:string|null;romHint?:string|null}};
 export type CoverageGroup = {group:string;available:number;restricted:number;unavailable:number;errors:number};
-export type Report = Row & {report:{capturedAtEpochMs:number;feedback?:string;metrics:Metric[];parameters?:Parameter[];coverage?:CoverageGroup[]}};
+export type Report = Row & {assetId?:string;report:{capturedAtEpochMs:number;feedback?:string;metrics:Metric[];parameters?:Parameter[];coverage?:CoverageGroup[]}};
 export type Page = {items:Row[];nextCursor:string};
 export type Summary = {total:number;status:Record<string,number>;network:Record<string,number>};
 export const groups:Record<string,string>={system:'系统与固件',cpu:'内核与 CPU',memory:'内存与存储',display:'屏幕与显示',battery:'电池',sensors:'传感器',network:'Wi-Fi 与网络',cellular:'移动网络',runtime:'系统能力与运行时',media:'相机、音频与外设',environment:'安全与环境线索',app:'应用与权限'};
@@ -15,10 +15,14 @@ export const date=(value:string|number)=>new Date(value).toLocaleString('zh-CN',
 export const shortDate=(v:string)=>new Date(v).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false});
 
 export function saveJson(data:Report){
-  const url=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));
+  saveDownload(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}),'SigMark-'+data.id+'.json');
+}
+
+export function saveDownload(blob:Blob, filename:string){
+  const url=URL.createObjectURL(blob);
   const link=document.createElement('a');
   link.href=url;
-  link.download='SigMark-'+data.id+'.json';
+  link.download=filename;
   link.click();
   setTimeout(()=>URL.revokeObjectURL(url),1500);
 }

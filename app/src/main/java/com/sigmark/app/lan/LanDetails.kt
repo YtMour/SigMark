@@ -22,7 +22,7 @@ private val legacyFields = mapOf(
 )
 
 private val diagnosticFields = mapOf(
-    "cellular" to setOf("carrierBandwidths", "simState"),
+    "cellular" to setOf("carrierBandwidths", "simState", "defaultDataSlot", "slotService"),
     "network" to setOf("visibleTransports", "wifiRouteRole"),
     "system" to setOf("display", "incremental", "buildTime", "board", "sku", "baseOs", "tags", "device", "product", "bootloader"),
     "cpu" to setOf("arch", "abi32", "abi64"),
@@ -31,7 +31,8 @@ private val diagnosticFields = mapOf(
     "battery" to setOf("capacityPercent", "chargeCounter", "energyCounter", "currentAverage"),
     "runtime" to setOf("featureCount", "openGlEs", "virtualMachine", "heapMax", "heapAllocated", "heapFree", "standbyBucket", "backgroundRestricted"),
     "media" to setOf("cameraCount", "bluetoothCapabilities", "audioCapabilities", "audioSampleRate", "audioBuffer", "codecs"),
-    "environment" to setOf("selinuxDomain", "buildSignals", "systemDebuggable", "verifiedBoot", "vbmetaState", "flashLock"),
+    "environment" to setOf("selinuxDomain", "buildSignals", "systemDebuggable", "verifiedBoot", "vbmetaState", "flashLock",
+        "keyguardSecure", "storageEncryption"),
     "app" to setOf("version", "appDebuggable", "debuggerConnected"),
 )
 

@@ -53,6 +53,20 @@ var diagnosticKeys = map[string][]string{
 	"app":         {"version", "appDebuggable", "debuggerConnected"},
 }
 
+type versionedParameter struct {
+	group string
+	key   string
+	since int
+}
+
+var versionedParameters = []versionedParameter{
+	{"cellular", "carrierBandwidths", 3},
+	{"cellular", "simState", 4},
+	{"network", "visibleTransports", 4}, {"network", "wifiRouteRole", 4},
+	{"cellular", "defaultDataSlot", 5}, {"cellular", "slotService", 5},
+	{"environment", "keyguardSecure", 6}, {"environment", "storageEncryption", 6},
+}
+
 func textValid(s string, max int) bool {
 	return utf8.RuneCountInString(s) <= max && strings.IndexFunc(s, unicode.IsControl) < 0
 }
@@ -66,10 +80,15 @@ func stateValid(status, reason string) bool {
 }
 
 func (p Parameter) valid(schema, fieldSet int) bool {
-	allowed := oneOf(p.Key, parameterKeys[p.Group]...) || (schema >= 3 && oneOf(p.Key, diagnosticKeys[p.Group]...)) ||
-		(schema >= 4 && fieldSet >= 3 && p.Group == "cellular" && p.Key == "carrierBandwidths") ||
-		(schema >= 4 && fieldSet >= 4 && ((p.Group == "cellular" && p.Key == "simState") ||
-			(p.Group == "network" && oneOf(p.Key, "visibleTransports", "wifiRouteRole"))))
+	allowed := oneOf(p.Key, parameterKeys[p.Group]...) || (schema >= 3 && oneOf(p.Key, diagnosticKeys[p.Group]...))
+	if !allowed && schema >= 4 {
+		for _, item := range versionedParameters {
+			if p.Group == item.group && p.Key == item.key && fieldSet >= item.since {
+				allowed = true
+				break
+			}
+		}
+	}
 	if !allowed || !stateValid(p.Status, p.Reason) ||
 		strings.TrimSpace(p.Label) == "" || !textValid(p.Label, 64) ||
 		strings.TrimSpace(p.Source) == "" || !textValid(p.Source, 160) || !textValid(p.Note, 280) {
@@ -197,7 +216,7 @@ func (p Report) valid() bool {
 		(p.SchemaVersion >= 3 && (len(p.Parameters) == 0 || len(p.Parameters) > 160)) ||
 		(p.SchemaVersion < 3 && p.Coverage != nil) ||
 		(p.SchemaVersion < 4 && (p.CollectorVersion != "" || p.FieldSetVersion != 0)) ||
-		(p.SchemaVersion == 4 && (!versionPattern.MatchString(p.CollectorVersion) || p.FieldSetVersion < 2 || p.FieldSetVersion > 4)) {
+		(p.SchemaVersion == 4 && (!versionPattern.MatchString(p.CollectorVersion) || p.FieldSetVersion < 2 || p.FieldSetVersion > 6)) {
 		return false
 	}
 	seen := map[string]bool{}

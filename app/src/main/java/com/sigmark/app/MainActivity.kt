@@ -101,16 +101,19 @@ class MainActivity : ComponentActivity() {
     private val diagnosticSettings = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
         viewModel.refresh()
     }
-    private var pendingExport: DeviceSnapshot? = null
+    private val phonePermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) {
+        viewModel.refresh()
+    }
+    private var pendingExport: String? = null
     private val createDocument = registerForActivityResult(
         ActivityResultContracts.CreateDocument("application/json")
     ) { uri ->
-        val snapshot = pendingExport
+        val json = pendingExport
         pendingExport = null
-        if (uri != null && snapshot != null) {
+        if (uri != null && json != null) {
             try {
                 contentResolver.openOutputStream(uri)?.use { stream ->
-                    stream.write(snapshot.toJson().toByteArray(Charsets.UTF_8))
+                    stream.write(json.toByteArray(Charsets.UTF_8))
                 } ?: error("打开文件失败")
                 Toast.makeText(this, "JSON 报告已保存", Toast.LENGTH_SHORT).show()
             } catch (e: Exception) {
@@ -139,8 +142,13 @@ class MainActivity : ComponentActivity() {
                     diagnosticSettings.launch(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", packageName, null)))
                 }, onLocationSettings = {
                     diagnosticSettings.launch(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS))
+                }, onPhonePermission = {
+                    phonePermission.launch(Manifest.permission.READ_PHONE_STATE)
+                }, onTimelineExport = { json ->
+                    pendingExport = json
+                    createDocument.launch("SigMark-network-${System.currentTimeMillis()}.json")
                 }, onExport = { snapshot ->
-                    pendingExport = snapshot
+                    pendingExport = snapshot.toJson()
                     createDocument.launch("SigMark-${SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date(snapshot.collectedAt))}.json")
                 })
             }
@@ -155,6 +163,8 @@ private fun SigMarkScreen(
     onCellPermission: () -> Unit,
     onAppSettings: () -> Unit,
     onLocationSettings: () -> Unit,
+    onPhonePermission: () -> Unit,
+    onTimelineExport: (String) -> Unit,
     onExport: (DeviceSnapshot) -> Unit,
 ) {
     var query by rememberSaveable { mutableStateOf("") }
@@ -165,6 +175,9 @@ private fun SigMarkScreen(
     var showSensors by rememberSaveable { mutableStateOf(false) }
     var showVisibleApps by rememberSaveable { mutableStateOf(false) }
     var showUpdate by remember { mutableStateOf(false) }
+    var showTimeline by remember { mutableStateOf(false) }
+    var showSecurity by rememberSaveable { mutableStateOf(false) }
+    var showPhoneExplanation by remember { mutableStateOf(false) }
     val context = LocalContext.current
     var lanSnapshot by remember { mutableStateOf<DeviceSnapshot?>(null) }
     val snapshot = withWindowObservations(state.snapshot)
@@ -186,6 +199,8 @@ private fun SigMarkScreen(
     }
     val listState = rememberLazyListState()
     val permissionMissing = snapshot?.sections?.any { it.key == "cellular" && it.items.any { row -> row.key == "cellDiagnostics" && row.reason == ReadReason.PERMISSION_REQUIRED } } == true
+    val phoneMissing = context.checkSelfPermission(Manifest.permission.READ_PHONE_STATE) != android.content.pm.PackageManager.PERMISSION_GRANTED &&
+        snapshot?.sections?.any { it.key == "cellular" && it.items.any { row -> row.key == "slotService" && row.reason == ReadReason.PERMISSION_REQUIRED } } == true
 
     Scaffold(containerColor = Ink, topBar = { AppHeader(snapshot, state.refreshing, onRefresh, onExportRequest = { showExportConfirmation = true }) }) { padding ->
         LazyColumn(
@@ -203,6 +218,11 @@ private fun SigMarkScreen(
                         if (BuildConfig.DEBUG && BuildConfig.LAN_ORIGIN.isNotEmpty()) {
                             TextButton(onClick = { showUpdate = true }, modifier = Modifier.weight(1f)) { Text("检查更新") }
                         }
+                    }
+                    if (snapshot != null) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        TextButton(onClick = { showTimeline = true }, modifier = Modifier.weight(1f)) { Text("链路切换记录") }
+                        TextButton(onClick = { showSecurity = true }, modifier = Modifier.weight(1f)) { Text("指纹安全") }
+                        if (phoneMissing) TextButton(onClick = { showPhoneExplanation = true }, modifier = Modifier.weight(1f)) { Text("授权查看各卡状态") }
                     }
                     if (permissionMissing || BuildConfig.DEBUG) {
                         Surface(color = CardColor, shape = RoundedCornerShape(12.dp), modifier = Modifier.padding(top = 9.dp)) {
@@ -308,6 +328,15 @@ private fun SigMarkScreen(
     )
     lanSnapshot?.let { frozen -> LanReportDialog(frozen) { lanSnapshot = null } }
     if (showSensors) SensorMonitor { showSensors = false }
+    if (showTimeline) NetworkTimeline(onTimelineExport) { showTimeline = false }
+    if (showSecurity && snapshot != null) SecurityPanel(snapshot) { showSecurity = false }
+    if (showPhoneExplanation) AlertDialog(
+        onDismissRequest = { showPhoneExplanation = false },
+        title = { Text("查看各卡槽服务状态") },
+        text = { Text("需电话状态及精确位置权限，并开启系统位置。只记录逻辑卡槽和服务状态，不读取号码或 SIM 标识。只有你选择上传报告时，这些状态才会进入内网后台。") },
+        confirmButton = { TextButton(onClick = { showPhoneExplanation = false; onPhonePermission() }) { Text("请求电话状态权限") } },
+        dismissButton = { TextButton(onClick = { showPhoneExplanation = false }) { Text("暂不授权") } },
+    )
     if (showVisibleApps) VisibleApps { showVisibleApps = false }
     if (showUpdate) AppUpdate(context) { showUpdate = false }
 }

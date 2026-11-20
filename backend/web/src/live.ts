@@ -10,7 +10,7 @@ export function refreshSeconds():number {
 export function saveRefreshSeconds(value:number) {
   localStorage.setItem(key,String(value));
 }
-export function useVisiblePoll(enabled:boolean, fetchLatest:(signal:AbortSignal)=>Promise<void>) {
+export function useVisiblePoll(enabled:boolean, fetchLatest:(signal:AbortSignal)=>Promise<void>, scope='') {
   const task=useRef(fetchLatest);
   useEffect(()=>{task.current=fetchLatest;},[fetchLatest]);
   const seconds=refreshSeconds();
@@ -28,5 +28,5 @@ export function useVisiblePoll(enabled:boolean, fetchLatest:(signal:AbortSignal)
     const timer=setInterval(tick,seconds*1000);
     document.addEventListener('visibilitychange',tick);
     return ()=>{clearInterval(timer);document.removeEventListener('visibilitychange',tick);controller.abort();};
-  },[enabled,seconds]);
+  },[enabled,seconds,scope]);
 }

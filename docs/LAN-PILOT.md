@@ -19,6 +19,7 @@
 - v1/v2 按历史提交的粒度呈现。新版上线后，用同一手机重新采集并上传以取得扩展明细。
 - 0.11 使用 `schemaVersion: 4`、`collectorVersion` 和 `fieldSetVersion: 2`。v1–v3 仍保留原值。字段键缺失表示归档未记录；字段键存在且值为 `null` 时，用 `status` 和 `reason` 说明原因。
 - 用 `docker compose ps` 查看状态，`docker compose stop` 停机并保留报告。升级保留现有 PostgreSQL 卷及原 DB 密码，避免 `docker compose down -v`。使用 `go test ./...`、`go vet ./...`（`backend/`）及 `npm ci`、`npm test`、`npm run build`（`backend/web/`）复测。
+- 仓库统计的数据库集成测试：为测试 PostgreSQL 17 实例设置 `SIGMARK_TEST_DATABASE_URL`，在 `backend/` 执行 `go test -run '^TestRepositoryStatsPostgres$' -count=1 ./cmd/sigmark`。测试只使用该连接的临时表；未配置时跳过。优先使用独立测试实例。
 
 ## 构建中心
 
@@ -48,12 +49,31 @@ python -u backend/scripts/build_worker.py work --origin http://<LAN_BIND>:<LAN_P
 
 用同一测试批次和相近测试条件采集两次。选中第一份报告点「设为基线」，搜索/翻页选择第二份后点「与基线对比」。可以只看差异或只看系统与内核。基线只在当前浏览器工作区保留，不改写原报告；差异按 `group + key` 比较值、状态、原因、errno 和来源。电量、网络和可用内存随环境变化，不是 ROM 缺陷的直接证据。单份报告可下载原始结构化 JSON。
 
-「报告档案」提供查询、参数筛选、基线对比和导出。「资产管理」可勾选单份或本页最多 30 份报告，确认后移入回收站。回收站保留原报告和移入时间，支持恢复、下载 JSON 和永久删除。永久删除需输入 `DELETE` 确认。报告默认长期保存，回收站由管理员手动清理。PostgreSQL 的完整备份及恢复由 `pg_dump` 等数据库工具处理。
+「报告档案」顶部提供搜索及分类；Android 版本、API 级别、品牌、型号和设备代号可组合筛选。品牌会收窄型号和设备代号。左侧只展示采样列表、基线和分页。分类只依据现有归档值，没有值的历史报告可选「未记录」。使用「管理当前筛选」或「查看字段覆盖」可将查询范围带入资产管理。
+
+### 资产管理：仓库统计与字段覆盖
+
+- 设备数按至少有一份在库报告的资产统计。同一资产无论上传多少份都算一部；两台同型号手机不自动合并。单列显示在库、未归组和回收站报告数，未归组不是一部设备，也不代表多少部未知设备。
+- App 0.15+ 可在上传预览主动勾选「关联到同一设备资产」。该安装随后向同一后台上传时使用专用随机标记。新安装可能生成新标记；确认刷机前后确实是同一部手机，可在设备档案显式合并两个资产。合并把历史报告和今后的上传归到目标、保留目标别名，移除源资产；暂不支持一键撤销。没有标记的旧报告可勾选后新建设备，或归入已存在设备；先确认实际归属再操作。同一批次并不等于同一设备。
+- 「字段覆盖」的样本单位仍是报告。可按机型、版本、批次和字段集缩小范围，再检查每项有值率、受限原因、系统未上报、异常、历史仅状态和未归档。可导出当前筛选的覆盖 JSON；不含其他报告正文，也不是备份。
+- 「仓库总览」直接显示在资产管理顶部，支持刷新、导出统计 JSON、看全部报告、过滤未归组及打开回收站。从品牌、型号、Android 版本、API 级别或批次分布可直接筛选下方报告。分组设备数按各分类独立去重，因此切过 ROM 的设备可能出现在多个分类，分组设备数不可求和。
+- 「按设备查看」是同一部手机的已归档报告列表，包括采样时间、接收时间、构建号和字段集。安全分析无需打开设备历史：直接使用顶部导航或报告行的「安全分析」。选两份报告可直达安全对比，或在安全页内选择基线。字段覆盖仍是资产管理的独立子页。
+
+### 资产维护
+
+「资产管理」可勾选单份或本页最多 30 份报告。选择「导出所选 ZIP」可导出勾选项，「导出筛选结果 ZIP」跨页导出当前视图的匹配项（含回收站视图），单次最多 250 份、原始报告正文合计最多 32 MiB。超限不截断，请先缩小筛选范围。ZIP 包含 `manifest.json` 及 `reports/<id>.json`；各 JSON 与单份导出使用相同报告结构。导出不更改归档。
+
+管理员还可移入回收站、恢复、下载单份 JSON 和永久删除。永久删除需输入 `DELETE` 确认。报告默认长期保存，回收站由管理员手动清理。ZIP 是分析资料，不是 PostgreSQL 备份；完整备份和恢复使用 `pg_dump` 等工具。
 
 ### 报告管理接口
 
 - `GET /api/admin/reports` 和 `/api/admin/summary` 支持 `view=archive`（默认）或 `view=trash`，并可继续使用批次、搜索和分页。已移入回收站的报告含 `trashedAt`。详情仍可按 ID 读取，用于核查及导出。
-- `GET /api/admin/report-count` 使用相同的 `view`、`batch`、`q`，仅返回 `{total}`。资产工作台用它展示匹配的在库与回收站计数。单条「查看报告」可从资产页直达档案中的报告详情。
+- `GET /api/admin/report-count` 使用相同筛选参数，仅返回 `{total}`。资产工作台用它展示匹配的在库与回收站计数。单条「查看报告」可从资产页直达档案中的报告详情。
+- 列表、计数、摘要和导出支持精确分类参数 `android`、`api`、`brand`、`model`、`device`；`~missing` 匹配未记录项。用 `GET /api/admin/report-facets` 查看分类值及数量。
+- `POST /api/admin/reports/export` 使用列表的筛选参数，以及管理鉴权和 `X-SigMark-Admin: 1`。请求为 `{"mode":"filtered"}` 或 `{"mode":"selected","ids":["<UUID>"]}`；成功返回 `application/zip`，响应头 `X-SigMark-Report-Count` 为实际份数。自动化脚本应以 `manifest.json` 为目录，不解析 ZIP 文件名判断数据范围。
+- `GET /api/admin/repository-stats` 现为字段覆盖接口（`schemaVersion: 2`）。接受档案筛选及 `fieldSet`（正整数或 `legacy`），各状态之和等于 `scope.archived`。原因按枚举计数。
+- `GET /api/admin/device-assets?q=…&before=…` 返回全库 `totals`（`devices/reports/unassigned/trash`）、设备页和 `nextCursor`。档案、覆盖与 ZIP 可使用 `q=asset:<UUID>` 或 `q=asset:unassigned` 精确定位报告。管理写操作使用同一会话和 `X-SigMark-Admin: 1`。用 `POST /api/admin/device-assets/assign` 提交 `{"ids":[…],"label":"…"}` 或 `{"ids":[…],"assetId":"…"}`（1–30 份仅限在库未归组报告，冲突整批回滚）；用 `POST /api/admin/device-assets/merge` 提交 `{"source":"…","target":"…","confirmed":true}`。
+- `GET /api/admin/device-assets?summary=1` 返回仓库总览 v1：`generatedAt`、`totals`、按五种维度的 `distributions`。每维最多 8 个分类，`otherBuckets` 表示其余分类数。报告详情可用 `?include=asset` 取得外层归组关系；不改报告正文及默认导出。
 - `POST /api/admin/reports/manage` 接收 `{"action":"trash","ids":["<UUID>"]}`。动作包括 `trash`、`restore`、`purge`，每次 1 至 30 个独立 ID。永久删除还需 `"confirmation":"DELETE"`。请求需管理会话或 Bearer 令牌以及 `X-SigMark-Admin: 1`。任一 ID 已不存在或状态变化时整批回滚，返回 `409 report_selection_changed`。客户端按相同视图刷新。
 - 升级 Compose 时由启动迁移添加 `reports.trashed_at`，已有数据库卷和报告继续使用。
 

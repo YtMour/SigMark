@@ -17,18 +17,72 @@ type Metric struct {
 	Reason string `json:"reason,omitempty"`
 }
 
+type Parameter struct {
+	Group  string  `json:"group"`
+	Key    string  `json:"key"`
+	Label  string  `json:"label"`
+	Value  *string `json:"value"`
+	Source string  `json:"source"`
+	Status string  `json:"status"`
+	Reason string  `json:"reason,omitempty"`
+	Errno  *int    `json:"errno,omitempty"`
+	Note   string  `json:"note,omitempty"`
+}
+
+var parameterKeys = map[string][]string{
+	"system":  {"release", "api", "patch", "type", "manufacturer", "brand", "model", "buildId", "romHint", "uptime", "selinux", "selinuxPolicy", "selinuxBootHint", "selinuxBuildHint"},
+	"cpu":     {"kernel", "kernelFull", "abis", "hardware", "cores", "pageSize", "cpuInfo", "features", "cpu0MaxFrequency"},
+	"memory":  {"totalRam", "availableRam", "lowMemory", "lowMemoryThreshold", "swap", "internalTotal", "internalAvailable", "sharedState"},
+	"display": {"resolution", "densityDpi", "density", "fontScale", "refresh", "modes", "hdr", "sizeEstimate"},
+	"battery": {"level", "status", "plugged", "temperature", "voltage", "health", "current"},
+	"sensors": {"count"},
+	"network": {"transport", "internetValidation", "metered", "captivePortal", "bandwidthEstimate", "wifiDetails", "wifiFrequency", "wifiBandChannel", "wifiRssi", "wifiLinkSpeed", "wifiStandard", "wifiSecurity"},
+	"cellular": {"support", "subscription", "dataState", "mobileDataToggle", "roaming", "dataRat", "modemSignalLevel", "cellDiagnostics",
+		"cellLTEBands", "cellLTEBandRange", "cellLTEBandwidth", "cellLTESignal", "cellNRBands", "cellNRSignal"},
+}
+
+func textValid(s string, max int) bool {
+	return utf8.RuneCountInString(s) <= max && strings.IndexFunc(s, unicode.IsControl) < 0
+}
+
+func stateValid(status, reason string) bool {
+	return oneOf(status, "AVAILABLE", "UNAVAILABLE", "RESTRICTED", "ERROR") && (reason == "" ||
+		(status == "RESTRICTED" && oneOf(reason, "PERMISSION_REQUIRED", "LOCATION_DISABLED", "ACCESS_DENIED")) ||
+		(status == "UNAVAILABLE" && oneOf(reason, "NOT_REPORTED", "NODE_MISSING", "INVALID_VALUE")) ||
+		(status == "ERROR" && reason == "READ_FAILED"))
+}
+
+func (p Parameter) valid() bool {
+	if !oneOf(p.Key, parameterKeys[p.Group]...) || !stateValid(p.Status, p.Reason) ||
+		strings.TrimSpace(p.Label) == "" || !textValid(p.Label, 64) ||
+		strings.TrimSpace(p.Source) == "" || !textValid(p.Source, 160) || !textValid(p.Note, 280) {
+		return false
+	}
+	if p.Errno != nil && (!((p.Group == "system" && oneOf(p.Key, "selinux", "selinuxPolicy")) ||
+		(p.Group == "cpu" && oneOf(p.Key, "cpuInfo", "features", "cpu0MaxFrequency", "kernelFull", "pageSize")) ||
+		(p.Group == "memory" && p.Key == "swap")) ||
+		p.Status == "AVAILABLE" || *p.Errno < 1 || *p.Errno > 4095) {
+		return false
+	}
+	if p.Status == "AVAILABLE" {
+		return p.Value != nil && strings.TrimSpace(*p.Value) != "" && textValid(*p.Value, 512)
+	}
+	return p.Value == nil
+}
+
 type Report struct {
-	SchemaVersion int      `json:"schemaVersion"`
-	RequestID     string   `json:"requestId"`
-	CapturedAt    int64    `json:"capturedAtEpochMs"`
-	Model         string   `json:"model"`
-	AndroidAPI    int      `json:"androidApi"`
-	AppVersion    string   `json:"appVersion"`
-	Network       string   `json:"network"`
-	WifiBand      string   `json:"wifiBand"`
-	Radio         string   `json:"radio"`
-	Metrics       []Metric `json:"metrics"`
-	Feedback      string   `json:"feedback,omitempty"`
+	SchemaVersion int         `json:"schemaVersion"`
+	RequestID     string      `json:"requestId"`
+	CapturedAt    int64       `json:"capturedAtEpochMs"`
+	Model         string      `json:"model"`
+	AndroidAPI    int         `json:"androidApi"`
+	AppVersion    string      `json:"appVersion"`
+	Network       string      `json:"network"`
+	WifiBand      string      `json:"wifiBand"`
+	Radio         string      `json:"radio"`
+	Metrics       []Metric    `json:"metrics"`
+	Feedback      string      `json:"feedback,omitempty"`
+	Parameters    []Parameter `json:"parameters,omitempty"`
 }
 
 var (
@@ -60,13 +114,14 @@ func decodeStrict(r io.Reader, dst any) error {
 }
 
 func (p Report) valid() bool {
-	if p.SchemaVersion != 1 || !requestPattern.MatchString(p.RequestID) || p.AndroidAPI < 0 || p.AndroidAPI > 999 ||
+	if (p.SchemaVersion != 1 && p.SchemaVersion != 2) || !requestPattern.MatchString(p.RequestID) || p.AndroidAPI < 0 || p.AndroidAPI > 999 ||
 		!modelPattern.MatchString(p.Model) || !versionPattern.MatchString(p.AppVersion) ||
 		p.CapturedAt < 946684800000 || p.CapturedAt >= 4102444800000 ||
 		!oneOf(p.Network, "wifi", "cellular", "ethernet", "vpn", "none", "other", "unknown") ||
 		!oneOf(p.WifiBand, "2.4", "4.9", "5", "6", "60", "unknown") ||
 		!oneOf(p.Radio, "lte", "nr", "iwlan", "other", "unknown") ||
-		utf8.RuneCountInString(p.Feedback) > 300 || strings.IndexFunc(p.Feedback, unicode.IsControl) >= 0 || len(p.Metrics) == 0 || len(p.Metrics) > 6 {
+		!textValid(p.Feedback, 300) || len(p.Metrics) == 0 || len(p.Metrics) > 6 ||
+		(p.SchemaVersion == 1 && len(p.Parameters) != 0) || (p.SchemaVersion == 2 && (len(p.Parameters) == 0 || len(p.Parameters) > 96)) {
 		return false
 	}
 	seen := map[string]bool{}
@@ -75,13 +130,16 @@ func (p Report) valid() bool {
 			return false
 		}
 		seen[m.Key] = true
-		if !oneOf(m.Status, "AVAILABLE", "UNAVAILABLE", "RESTRICTED", "ERROR") {
+		if !stateValid(m.Status, m.Reason) {
 			return false
 		}
-		if m.Reason != "" && !((m.Status == "RESTRICTED" && oneOf(m.Reason, "PERMISSION_REQUIRED", "LOCATION_DISABLED", "ACCESS_DENIED")) ||
-			(m.Status == "UNAVAILABLE" && m.Reason == "NOT_REPORTED") || (m.Status == "ERROR" && m.Reason == "READ_FAILED")) {
+	}
+	for _, field := range p.Parameters {
+		key := field.Group + "/" + field.Key
+		if seen[key] || !field.valid() {
 			return false
 		}
+		seen[key] = true
 	}
 	return true
 }

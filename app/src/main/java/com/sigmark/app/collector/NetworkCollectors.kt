@@ -37,24 +37,15 @@ private class NetworkFields {
     val items = mutableListOf<DeviceInfoItem>()
 
     fun read(key: String, label: String, source: String, note: String? = null, value: () -> String?) {
-        try {
-            val result = normalizeValue(value())
-            if (result != null) items += DeviceInfoItem(key, label, result, source, note = note)
-            else missing(key, label, source, ReadReason.NOT_REPORTED,
-                listOfNotNull("系统未返回有效值。", note).joinToString(" "))
-        } catch (_: SecurityException) {
-            missing(key, label, source, ReadReason.ACCESS_DENIED, "Android 拒绝此应用访问该接口。")
-        } catch (_: UnsupportedOperationException) {
-            missing(key, label, source, ReadReason.NOT_REPORTED, "设备未实现此接口。")
-        } catch (e: Exception) {
-            missing(key, label, source, ReadReason.READ_FAILED, "读取异常：${e.javaClass.simpleName}")
-        }
+        val result = SafeReader.read(source, note) { normalizeValue(value()) }
+        items += (if (result.reason == ReadReason.NOT_REPORTED && note != null && result.detail == note)
+            result.copy(detail = "系统未返回有效值。 $note") else result).item(key, label)
     }
 
     fun missing(key: String, label: String, source: String, reason: ReadReason, note: String) {
         val status = when (reason) {
             ReadReason.PERMISSION_REQUIRED, ReadReason.LOCATION_DISABLED, ReadReason.ACCESS_DENIED -> ValueStatus.RESTRICTED
-            ReadReason.NOT_REPORTED -> ValueStatus.UNAVAILABLE
+            ReadReason.NOT_REPORTED, ReadReason.NODE_MISSING, ReadReason.INVALID_VALUE -> ValueStatus.UNAVAILABLE
             ReadReason.READ_FAILED -> ValueStatus.ERROR
         }
         items += DeviceInfoItem(key, label, null, source, status, note, reason)

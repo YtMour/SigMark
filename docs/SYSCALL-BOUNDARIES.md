@@ -10,6 +10,8 @@ SigMark 可以使用 `android.system.Os` 或 NDK/libc 读取某些底层信息�
 
 0.4.0 在已有精确位置授权的真机上再测，应用仍返回 `EACCES`；Android 位置授权与该节点权限无关。若项目确实需要普通安装版范围之外的现场状态，可由自有 ROM 提供经过系统策略授权的只读诊断接口，或在测试记录独立标注系统侧观测；这不是普通 APK 的可采集值。不得通过关闭 SELinux 达成采集。
 
+0.5 把实时状态与辅助线索分开展示：直接读 `enforce` 时仅 1/0 确认 Enforcing/Permissive；EACCES/EPERM 标为受限，ENOENT 标记节点未暴露，非 0/1 标为未确认。辅助检查仅尝试只读打开 `policy`，不读取策略正文；固定查询 `ro.boot.selinux` 与 `ro.build.selinux`，使用 App 原有身份，不申请额外权限。任何辅助结果都不替换实时状态。
+
 ## 后续技术选项
 
 - **普通安装版**：继续优先使用公开 Android API、`android.system.Os` 与可读节点；权限错误记录 `errno` 和来源。

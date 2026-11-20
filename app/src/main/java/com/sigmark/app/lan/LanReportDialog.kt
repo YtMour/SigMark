@@ -35,6 +35,7 @@ internal fun LanReportDialog(snapshot: DeviceSnapshot, onClose: () -> Unit) {
     var sending by remember { mutableStateOf(false) }
     var receipt by remember { mutableStateOf("") }
     var error by remember { mutableStateOf("") }
+    var details by remember { mutableStateOf(false) }
     AlertDialog(
         onDismissRequest = { if (!sending) onClose() },
         title = { Text(if (receipt.isNotEmpty()) "报告已上传" else "上传报告") },
@@ -49,8 +50,11 @@ internal fun LanReportDialog(snapshot: DeviceSnapshot, onClose: () -> Unit) {
                         Text("应用观察型号：${data.model} · API ${data.androidApi} · App ${data.appVersion}")
                         Text("默认网络：${data.network}；Wi-Fi 频段：${data.wifiBand}；蜂窝制式：${data.radio}")
                         Text("采样时间：${java.text.DateFormat.getDateTimeInstance().format(java.util.Date(data.capturedAt))}")
-                        Text("随报告发送 ${data.metrics.size} 项采集状态、原因和采样时间；不发送构建指纹、运营商、精确频点或位置。")
-                        Text(data.metrics.joinToString("；") { "${reportFields[it.key]}：${it.status}" })
+                        Text("随报告保存 ${data.parameters.size} 项参数及来源，包括 ROM/构建版本、Wi-Fi 信号、内存和电池读数。后台默认长期保存；不发送构建指纹、运营商、精确小区频点或位置。")
+                        TextButton(onClick = { details = !details }) { Text(if (details) "收起参数" else "查看上传参数") }
+                        if (details) data.parameters.forEach { field ->
+                            Text("${field.label}：${field.value ?: field.status}\n来源：${field.source}${field.note?.let { "\n$it" }.orEmpty()}")
+                        }
                         OutlinedTextField(feedback, { if (validFeedback(it)) feedback = it }, Modifier.fillMaxWidth(),
                             label = { Text("反馈（可选，勿填写个人信息）") }, singleLine = true, enabled = pending == null)
                     }

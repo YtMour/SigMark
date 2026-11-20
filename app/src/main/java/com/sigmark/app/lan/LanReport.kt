@@ -20,10 +20,11 @@ internal data class LanMetric(val key: String, val status: String, val reason: S
 internal data class LanReport(
     val model: String, val androidApi: Int, val network: String, val wifiBand: String, val radio: String,
     val capturedAt: Long, val appVersion: String, val metrics: List<LanMetric>, val feedback: String,
+    val parameters: List<LanParameter>,
     val requestId: String = UUID.randomUUID().toString(),
 ) {
     fun json(): ByteArray = JSONObject().apply {
-        put("schemaVersion", 1); put("requestId", requestId); put("capturedAtEpochMs", capturedAt)
+        put("schemaVersion", 2); put("requestId", requestId); put("capturedAtEpochMs", capturedAt)
         put("model", model); put("androidApi", androidApi); put("appVersion", appVersion)
         put("network", network); put("wifiBand", wifiBand); put("radio", radio)
         if (feedback.isNotEmpty()) put("feedback", feedback)
@@ -31,6 +32,14 @@ internal data class LanReport(
             metrics.forEach { add -> put(JSONObject().apply {
                 put("key", add.key); put("status", add.status)
                 if (add.reason != null) put("reason", add.reason)
+            }) }
+        })
+        put("parameters", JSONArray().apply {
+            parameters.forEach { field -> put(JSONObject().apply {
+                put("group", field.group); put("key", field.key); put("label", field.label)
+                put("value", field.value ?: JSONObject.NULL); put("source", field.source); put("status", field.status)
+                field.reason?.let { put("reason", it) }; field.errno?.let { put("errno", it) }
+                field.note?.let { put("note", it) }
             }) }
         })
     }.toString().toByteArray(Charsets.UTF_8)
@@ -56,10 +65,10 @@ internal fun lanReport(snapshot: DeviceSnapshot, appVersion: String, feedback: S
     }
     val metrics = reportFields.keys.mapNotNull { key -> fields[key]?.let { LanMetric(key,it.status.name,it.reason?.name) } }
     return LanReport(model, get("system.api").toIntOrNull()?.takeIf { it in 1..999 } ?: 0,
-        network, band, radio, snapshot.collectedAt, appVersion, metrics, feedback)
+        network, band, radio, snapshot.collectedAt, appVersion, metrics, feedback, lanParameters(snapshot))
 }
 
-// Numeric IPv4 only: avoids sending an invite to a hostname that later resolves outside the lab.
+// Numeric IPv4 only: keeps test reports on the configured local endpoint.
 internal fun lanEndpoint(raw: String): URI? {
     val input = raw.trim()
     if (input.length > 64) return null
@@ -106,6 +115,7 @@ internal fun sendLanReport(endpoint: URI, report: LanReport): String {
             }
             403 -> throw LanFailure("后台未接受当前客户端，请确认手机和管理台版本匹配。")
             400 -> throw LanFailure("报告未通过校验。请检查设备时间，刷新采集后重试。")
+            413 -> throw LanFailure("报告超过后台接收上限。")
             409 -> throw LanFailure("提交编号冲突，请关闭预览后重新打开。")
             429 -> throw LanFailure("提交过快，请稍候再试。")
             else -> throw LanFailure("服务端暂未接收报告（HTTP ${http.responseCode}）。")

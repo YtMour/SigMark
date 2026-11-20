@@ -30,9 +30,27 @@ class LanReportTest {
         assertEquals("5",report.wifiBand)
         assertEquals("lte",report.radio)
         assertEquals(setOf("network.wifiFrequency","cellular.dataRat","cellular.cellDiagnostics"),report.metrics.map { it.key }.toSet())
-        for (private in listOf("5745","149","raw-id","private-operator","localized info")) assertFalse(report.toString().contains(private))
+        assertEquals("5745 MHz", report.parameters.single { it.key == "wifiFrequency" }.value)
+        for (private in listOf("raw-id","private-operator")) assertFalse(report.toString().contains(private))
         assertTrue(validFeedback("a".repeat(300)))
         assertFalse(validFeedback("a".repeat(301)))
         assertFalse(validFeedback("\n"))
+    }
+
+    @Test fun detailedProjectionKeepsErrnoButExcludesExactCellChannels() {
+        val snapshot = DeviceSnapshot(1800000000000, listOf(
+            DeviceSection("system","system", listOf(DeviceInfoItem("selinux","SELinux",null,"/sys/fs/selinux/enforce",
+                ValueStatus.RESTRICTED,"EACCES",ReadReason.ACCESS_DENIED,13))),
+            DeviceSection("cellular","mobile", listOf(
+                DeviceInfoItem("cellLTESignal","信号","RSRP -95 dBm","test"),
+                DeviceInfoItem("cellLTEChannel","信道号","39001","test"),
+                DeviceInfoItem("cellLTEFrequency","精确下行","1805.123 MHz","test"),
+            )),
+        ))
+        val projected = lanParameters(snapshot)
+        assertEquals(2, projected.size)
+        assertEquals(13, projected.single { it.key == "selinux" }.errno)
+        assertNull(projected.single { it.key == "selinux" }.value)
+        assertEquals("RSRP -95 dBm", projected.single { it.key == "cellLTESignal" }.value)
     }
 }

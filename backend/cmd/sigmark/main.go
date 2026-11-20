@@ -52,7 +52,6 @@ func main() {
 		log.Fatal("database schema initialization failed")
 	}
 	s := server{db, token, batch}
-	go s.prune(ctx)
 	srv := listener(":8080", s.routes())
 	go func() {
 		if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
@@ -116,6 +115,7 @@ func (s server) routes() http.Handler {
 			admin.Use(limit(rate.NewLimiter(6, 20)), s.requireAdmin)
 			admin.Get("/session", func(w http.ResponseWriter, _ *http.Request) { send(w, 200, map[string]bool{"ok": true}) })
 			admin.Get("/reports", s.reports)
+			admin.Get("/reports/{id}", s.reportDetail)
 			admin.Get("/summary", s.summary)
 		})
 	})
@@ -158,7 +158,7 @@ func (s server) submit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var report Report
-	if err := decodeStrict(http.MaxBytesReader(w, r.Body, 8<<10), &report); err != nil {
+	if err := decodeStrict(http.MaxBytesReader(w, r.Body, 128<<10), &report); err != nil {
 		var large *http.MaxBytesError
 		if errors.As(err, &large) {
 			fail(w, 413, "report_too_large")
@@ -195,46 +195,103 @@ type storedReport struct {
 	Report   Report    `json:"report"`
 }
 
-func batchFilter(w http.ResponseWriter, r *http.Request) (string, bool) {
+type reportIndexRow struct {
+	ID       string          `json:"id"`
+	Batch    string          `json:"batch"`
+	Received time.Time       `json:"receivedAt"`
+	Report   json.RawMessage `json:"report"`
+}
+
+func (s server) reportDetail(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if !requestPattern.MatchString(id) {
+		fail(w, 400, "invalid_report_id")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 4*time.Second)
+	defer cancel()
+	var p storedReport
+	err := s.db.QueryRow(ctx, `SELECT id,batch,received_at,body FROM reports WHERE id=$1`, id).Scan(&p.ID, &p.Batch, &p.Received, &p.Report)
+	if errors.Is(err, pgx.ErrNoRows) {
+		fail(w, 404, "report_not_found")
+		return
+	}
+	if err != nil {
+		fail(w, 503, "storage_unavailable")
+		return
+	}
+	send(w, 200, p)
+}
+
+func reportFilters(w http.ResponseWriter, r *http.Request) (string, string, bool) {
 	b := r.URL.Query().Get("batch")
 	if b != "" && !batchPattern.MatchString(b) {
 		fail(w, 400, "invalid_batch")
-		return "", false
+		return "", "", false
 	}
-	return b, true
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	if !textValid(q, 80) {
+		fail(w, 400, "invalid_query")
+		return "", "", false
+	}
+	return b, q, true
 }
 
+const archivePredicate = `($1='' OR batch=$1) AND ($2='' OR
+ strpos(lower(concat_ws(' ', id::text, batch, body->>'model', body->>'appVersion', body->>'network',
+   body->>'androidApi', (SELECT string_agg(p->>'value', ' ') FROM jsonb_array_elements(
+     coalesce(body->'parameters','[]'::jsonb)) p
+     WHERE p->>'group'='system' AND p->>'key' IN ('release','patch','romHint','buildId'))
+ )), lower($2))>0)`
+
 func (s server) reports(w http.ResponseWriter, r *http.Request) {
-	batch, ok := batchFilter(w, r)
+	batch, query, ok := reportFilters(w, r)
 	if !ok {
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 4*time.Second)
 	defer cancel()
-	rows, err := s.db.Query(ctx, `SELECT id,batch,received_at,body FROM reports WHERE ($1='' OR batch=$1) AND received_at >= now()-interval '30 days' ORDER BY received_at DESC,id DESC LIMIT 100`, batch)
+	cursor := r.URL.Query().Get("before")
+	at, id, err := parseCursor(cursor)
+	if err != nil {
+		fail(w, 400, "invalid_cursor")
+		return
+	}
+	const pageSize = 30
+	rows, err := s.db.Query(ctx, `SELECT id,batch,received_at,jsonb_build_object(
+	  'model',body->'model','androidApi',body->'androidApi','network',body->'network',
+	  'appVersion',body->'appVersion','schemaVersion',body->'schemaVersion')
+	  FROM reports WHERE `+archivePredicate+`
+	  AND ($3::timestamptz IS NULL OR (received_at,id)<($3::timestamptz,$4::uuid))
+	  ORDER BY received_at DESC,id DESC LIMIT $5`, batch, query, at, id, pageSize+1)
 	if err != nil {
 		fail(w, 503, "storage_unavailable")
 		return
 	}
 	defer rows.Close()
-	out := []storedReport{}
+	out := make([]reportIndexRow, 0, pageSize+1)
 	for rows.Next() {
-		var p storedReport
-		if rows.Scan(&p.ID, &p.Batch, &p.Received, &p.Report) != nil {
+		var item reportIndexRow
+		if rows.Scan(&item.ID, &item.Batch, &item.Received, &item.Report) != nil {
 			fail(w, 503, "storage_unavailable")
 			return
 		}
-		out = append(out, p)
+		out = append(out, item)
 	}
 	if rows.Err() != nil {
 		fail(w, 503, "storage_unavailable")
 		return
 	}
-	send(w, 200, out)
+	next := ""
+	if len(out) > pageSize {
+		out = out[:pageSize]
+		next = makeCursor(out[pageSize-1].Received, out[pageSize-1].ID)
+	}
+	send(w, 200, map[string]any{"items": out, "nextCursor": next})
 }
 
 func (s server) summary(w http.ResponseWriter, r *http.Request) {
-	batch, ok := batchFilter(w, r)
+	batch, query, ok := reportFilters(w, r)
 	if !ok {
 		return
 	}
@@ -242,36 +299,26 @@ func (s server) summary(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	var result json.RawMessage
 	err := s.db.QueryRow(ctx, `WITH filtered AS (
-	  SELECT body FROM reports WHERE ($1='' OR batch=$1) AND received_at >= now()-interval '30 days'
-	), metrics AS (SELECT field FROM filtered CROSS JOIN LATERAL jsonb_array_elements(body->'metrics') field),
+	  SELECT body FROM reports WHERE `+archivePredicate+`
+	), metrics AS (
+	  SELECT field
+	  FROM filtered CROSS JOIN LATERAL jsonb_array_elements(body->'metrics') field
+	  WHERE body->>'schemaVersion' = '1'
+	  UNION ALL
+	  SELECT jsonb_build_object('key',(p->>'group')||'.'||(p->>'key'),'status',p->>'status')
+	  FROM filtered CROSS JOIN LATERAL jsonb_array_elements(body->'parameters') p
+	  WHERE body->>'schemaVersion' = '2'
+	),
 	status AS (SELECT field->>'status' AS key, count(*) AS n FROM metrics GROUP BY 1),
 	network AS (SELECT body->>'network' AS key,count(*) AS n FROM filtered GROUP BY 1),
 	by_field AS (SELECT field->>'key' AS key,count(*) AS observed,count(*) FILTER (WHERE field->>'status'='RESTRICTED') AS restricted FROM metrics GROUP BY 1)
 	SELECT jsonb_build_object('total',(SELECT count(*) FROM filtered),
 	'status',coalesce((SELECT jsonb_object_agg(key,n) FROM status),'{}'),
 	'network',coalesce((SELECT jsonb_object_agg(key,n) FROM network),'{}'),
-	'fields',coalesce((SELECT jsonb_agg(to_jsonb(by_field) ORDER BY restricted DESC,key) FROM by_field),'[]'))`, batch).Scan(&result)
+	'fields',coalesce((SELECT jsonb_agg(to_jsonb(by_field) ORDER BY restricted DESC,key) FROM by_field),'[]'))`, batch, query).Scan(&result)
 	if err != nil {
 		fail(w, 503, "storage_unavailable")
 		return
 	}
 	send(w, 200, result)
-}
-
-func (s server) prune(ctx context.Context) {
-	ticker := time.NewTicker(time.Hour)
-	defer ticker.Stop()
-	for {
-		cleanup, cancel := context.WithTimeout(ctx, 10*time.Second)
-		_, err := s.db.Exec(cleanup, `DELETE FROM reports WHERE received_at < now()-interval '30 days'`)
-		cancel()
-		if err != nil && ctx.Err() == nil {
-			log.Print("retention cleanup failed")
-		}
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-		}
-	}
 }

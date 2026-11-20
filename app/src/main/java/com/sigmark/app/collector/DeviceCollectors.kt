@@ -14,15 +14,12 @@ import android.os.StatFs
 import android.os.SystemClock
 import android.system.Os
 import android.system.OsConstants
-import android.system.ErrnoException
 import com.sigmark.app.model.DeviceInfoItem
 import com.sigmark.app.model.DeviceSection
 import com.sigmark.app.model.DeviceSnapshot
 import com.sigmark.app.model.ReadReason
 import com.sigmark.app.model.ValueStatus
 import com.sigmark.app.model.normalizeValue
-import java.io.File
-import java.io.IOException
 import java.util.Locale
 
 interface DeviceCollector {
@@ -35,31 +32,14 @@ private class SectionBuilder(private val key: String, private val title: String)
     private val items = mutableListOf<DeviceInfoItem>()
 
     fun value(key: String, label: String, source: String, note: String? = null, block: () -> String?) {
-        items += try {
-            val result = normalizeValue(block())
-            DeviceInfoItem(key, label, result, source,
-                if (result == null) ValueStatus.UNAVAILABLE else ValueStatus.AVAILABLE, note)
-        } catch (e: SecurityException) {
-            DeviceInfoItem(key, label, null, source, ValueStatus.RESTRICTED,
-                "系统拒绝应用读取；${note ?: source}", ReadReason.ACCESS_DENIED)
-        } catch (e: ErrnoException) {
-            val restricted = e.errno == OsConstants.EACCES || e.errno == OsConstants.EPERM
-            DeviceInfoItem(key, label, null, source,
-                if (restricted) ValueStatus.RESTRICTED else ValueStatus.ERROR,
-                "errno=${e.errno}；${note ?: "读取失败"}",
-                if (restricted) ReadReason.ACCESS_DENIED else ReadReason.READ_FAILED)
-        } catch (e: IOException) {
-            val restricted = e.message?.contains("Permission denied", ignoreCase = true) == true ||
-                e.message?.contains("EACCES", ignoreCase = true) == true
-            DeviceInfoItem(key, label, null, source,
-                if (restricted) ValueStatus.RESTRICTED else ValueStatus.ERROR,
-                if (restricted) "系统拒绝应用读取；${note ?: "此节点权限不足"}"
-                else "读取异常：${e.javaClass.simpleName}")
-        } catch (e: Exception) {
-            DeviceInfoItem(key, label, null, source, ValueStatus.ERROR,
-                "读取异常：${e.javaClass.simpleName}")
-        }
+        items += SafeReader.read(source, note) { normalizeValue(block()) }.item(key, label)
     }
+
+    fun observation(key: String, label: String, result: ReadResult<String>) {
+        items += result.item(key, label)
+    }
+
+    fun add(items: List<DeviceInfoItem>) { this.items += items }
 
     fun build() = DeviceSection(key, title, items.toList())
 }
@@ -67,26 +47,7 @@ private class SectionBuilder(private val key: String, private val title: String)
 private fun section(key: String, title: String, block: SectionBuilder.() -> Unit): DeviceSection =
     SectionBuilder(key, title).apply(block).build()
 
-private fun readFirstLine(path: String): String? = File(path).useLines { it.firstOrNull() }
 private fun bytes(value: Long): String = String.format(Locale.US, "%.2f GiB", value / 1073741824.0)
-private fun readSelinuxMode(): String? {
-    val fd = Os.open("/sys/fs/selinux/enforce", OsConstants.O_RDONLY, 0)
-    return try {
-        val data = ByteArray(4)
-        when (Os.read(fd, data, 0, data.size)) {
-            0 -> null
-            else -> when (data[0].toInt().toChar()) {
-                '1' -> "Enforcing"
-                '0' -> "Permissive"
-                else -> null
-            }
-        }
-    } finally {
-        Os.close(fd)
-    }
-}
-private fun cpuFrequency(path: String): String =
-    String.format(Locale.US, "%.0f MHz", readFirstLine(path)!!.trim().toLong() / 1000.0)
 
 private object SystemCollector : DeviceCollector {
     override val key = "system"
@@ -111,8 +72,13 @@ private object SystemCollector : DeviceCollector {
             val minutes = SystemClock.elapsedRealtime() / 60_000
             "${minutes / 1440} 天 ${minutes % 1440 / 60} 小时 ${minutes % 60} 分钟"
         }
-        value("selinux", "SELinux 模式", "Os.open(/sys/fs/selinux/enforce)",
-            "Android 普通应用没有此节点的读取权限时，位置授权和 Native 调用均不改变访问结果；不据此推断模式。") { readSelinuxMode() }
+        add(SelinuxProbe.collect())
+        val hints = listOf(SafeReader.Property.HYPEROS, SafeReader.Property.MIUI,
+            SafeReader.Property.COLOR_OS, SafeReader.Property.ONE_UI)
+        val hint = hints.asSequence().map(SafeReader::property).firstOrNull { it.value != null }
+        observation("romHint", "ROM 版本线索",
+            hint?.copy(detail = "厂商属性，仅反映当前应用读取结果。") ?: SafeReader.missing(
+                hints.joinToString(" / ") { it.key }, ReadReason.NOT_REPORTED, "常见厂商属性未返回可用值。"))
     }
 }
 
@@ -133,17 +99,16 @@ private object CpuCollector : DeviceCollector {
         value("pageSize", "内存页大小", "Os.sysconf(_SC_PAGESIZE)") {
             "${Os.sysconf(OsConstants._SC_PAGESIZE)} B"
         }
-        val cpuFields by lazy { CpuInfoParser.fields(File("/proc/cpuinfo").readText()) }
-        value("cpuInfo", "CPU 描述", "/proc/cpuinfo", "字段组合，不等于 SoC 商品名") {
-            CpuInfoParser.description(cpuFields)
+        val cpuFields = SafeReader.node(SafeReader.Node.CPU_INFO).map(CpuInfoParser::fields)
+        observation("cpuInfo", "CPU 描述", cpuFields.map(CpuInfoParser::description))
+        observation("features", "CPU 指令特性", cpuFields.map(CpuInfoParser::features))
+        val frequency = SafeReader.node(SafeReader.Node.CPU0_MAX).map {
+            it.trim().toLongOrNull()?.takeIf { khz -> khz > 0 }?.let { khz ->
+                String.format(Locale.US, "%.0f MHz", khz / 1000.0)
+            }
         }
-        value("features", "CPU 指令特性", "/proc/cpuinfo: Features") {
-            CpuInfoParser.features(cpuFields)
-        }
-        value("cpu0MaxFrequency", "首核最高频率", "/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq",
-            "首核样本，不代表整颗处理器峰值") {
-            cpuFrequency("/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq")
-        }
+        observation("cpu0MaxFrequency", "首核最高频率",
+            if (frequency.value != null) frequency.copy(detail = "首核样本，不代表整颗处理器峰值。") else frequency)
     }
 }
 
@@ -166,11 +131,9 @@ private object MemoryCollector : DeviceCollector {
         value("lowMemoryThreshold", "低内存阈值", "ActivityManager.MemoryInfo.threshold") {
             if (memory == null) null else bytes(info.threshold)
         }
-        value("swap", "Swap 总量", "/proc/meminfo") {
-            File("/proc/meminfo").useLines { lines ->
-                lines.firstOrNull { it.startsWith("SwapTotal:") }?.substringAfter(':')?.trim()
-            }
-        }
+        observation("swap", "Swap 总量", SafeReader.node(SafeReader.Node.MEM_INFO).map { text ->
+            text.lineSequence().firstOrNull { it.startsWith("SwapTotal:") }?.substringAfter(':')?.trim()
+        })
         value("internalTotal", "内部存储总量", "StatFs(dataDirectory)") {
             bytes(StatFs(Environment.getDataDirectory().path).totalBytes)
         }
@@ -204,6 +167,17 @@ private object DisplayCollector : DeviceCollector {
                 String.format(Locale.US, "%d×%d @ %.1f Hz", it.physicalWidth, it.physicalHeight, it.refreshRate)
             }?.distinct()?.joinToString("；")
         }
+        value("hdr", "HDR 能力", "Display.hdrCapabilities", "显示器公开的 HDR 类型，不等于当前内容正在以 HDR 播放。") {
+            display?.hdrCapabilities?.supportedHdrTypes?.map {
+                when (it) { 1 -> "Dolby Vision"; 2 -> "HDR10"; 3 -> "HLG"; 4 -> "HDR10+"; else -> "类型 $it" }
+            }?.let { if (it.isEmpty()) "未声明支持" else it.distinct().joinToString(" / ") }
+        }
+        value("sizeEstimate", "屏幕尺寸（估算）", "Display.mode / DisplayMetrics.xdpi,ydpi", "由系统 DPI 标定推算，不是实测尺寸。") {
+            val mode = display?.mode ?: return@value null
+            val x = metrics.xdpi.takeIf { it.isFinite() && it in 30f..1500f } ?: return@value null
+            val y = metrics.ydpi.takeIf { it.isFinite() && it in 30f..1500f } ?: return@value null
+            String.format(Locale.ROOT, "%.1f 英寸", kotlin.math.hypot(mode.physicalWidth / x.toDouble(), mode.physicalHeight / y.toDouble()))
+        }
     }
 }
 
@@ -216,7 +190,7 @@ private object BatteryCollector : DeviceCollector {
         value("level", "电量", "ACTION_BATTERY_CHANGED") {
             val level = extra(BatteryManager.EXTRA_LEVEL)
             val scale = extra(BatteryManager.EXTRA_SCALE)
-            if (level == null || scale == null || scale <= 0) null else "${level * 100 / scale}%"
+            if (level == null || scale == null || scale <= 0 || level !in 0..scale) null else "${level.toLong() * 100 / scale}%"
         }
         value("status", "充电状态", "BatteryManager.EXTRA_STATUS") {
             when (extra(BatteryManager.EXTRA_STATUS)) {
@@ -252,10 +226,10 @@ private object BatteryCollector : DeviceCollector {
             }
         }
         value("current", "充放电电流", "BatteryManager.BATTERY_PROPERTY_CURRENT_NOW",
-            "单位 mA；正负方向随设备实现变化") {
+            "Android API 以 µA 返回，显示为 mA； |电流| 超过 30 A 的异常样本不展示，不改写正负号。") {
             val manager = context.getSystemService(BatteryManager::class.java)
             manager?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_NOW)
-                ?.takeUnless { it == Int.MIN_VALUE }?.let {
+                ?.takeIf { it in -30_000_000..30_000_000 }?.let {
                     String.format(Locale.US, "%.1f mA", it / 1000.0)
                 }
         }

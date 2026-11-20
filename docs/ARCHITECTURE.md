@@ -9,6 +9,7 @@ SigMark 当前采用单模块 Kotlin / Compose 结构，目标是让每一项信
 Debug 内网试验分支：冻结当前本地快照 → `lan/LanReport.kt` 按白名单投影 → 用户确认上传 → 内置局域网地址的 Go API → PostgreSQL。管理台同源，通过独立 Bearer 令牌读取；App 不携带管理员令牌。与完整 JSON 导出独立；详细契约和运行说明见 [内网试验手册](LAN-PILOT.md)。
 
 - `collector/DeviceCollectors.kt`：各分类独立采集；字段级捕获异常，分类级兜底，避免单项失败导致整页空白。当前只在进入页面和手动刷新时采集，不做后台定时轮询。
+- `collector/SafeReader.kt`：`ReadResult<T>` 统一返回值、来源、状态、原因、详情及可选 errno。只读固定节点设字节上限与等待上限，使用有限线程池；固定属性查询仅通过应用自身身份调用 `getprop`，带进程超时。若驱动忽略非阻塞，超时停止等待不等于保证内核调用立刻结束；线程和队列上限限制影响范围。
 - `collector/CpuInfoParser.kt`：将厂商格式差异较大的 `/proc/cpuinfo` 文本解析为可显示字段，不推断 SoC 商品名。
 - `collector/NetworkCollectors.kt`：默认网络、Wi-Fi 链路和移动网络分开展示；`RadioMath.kt` 负责可单测的频率/信道换算。手动刷新且已授权时尝试一次公开小区更新，最多等待 2.5 秒再回退到缓存。
 - `model/DeviceInfo.kt`：`DeviceInfoItem` 包含稳定 key、标签、值、来源、状态、说明。JSON 使用 `schemaVersion`，消费者应按 key 而非中文 label 解析。
@@ -30,7 +31,20 @@ Debug 内网试验分支：冻结当前本地快照 → `lan/LanReport.kt` 按�
 
 受限状态不等同于设备关闭某项能力。例如 `/sys/fs/selinux/enforce` 被拒绝，只能表示当前应用读取受限，不能据此推断 SELinux 模式。
 
-JSON `schemaVersion: 1` 的字段结构兼容旧报告。消费者允许新增分类/字段，并应忽略未知属性；字段的可选 `reason` 可返回 `PERMISSION_REQUIRED`、`LOCATION_DISABLED`、`ACCESS_DENIED`、`NOT_REPORTED`、`READ_FAILED`；不存在时仅按 `status` 判断，不从中文说明推断原因码。
+本地 JSON `schemaVersion: 1` 向后兼容，增加可选数值 `errno`，`reason` 新增 `NODE_MISSING`、`INVALID_VALUE`。不存在时仅按 `status` 判断；不要从中文说明推断原因码。本地快照与 LAN API 独立版本化。
+
+### LAN v2 · 开发与自动化入口
+
+- Android 上传投影：`lan/LanDetails.kt`；服务端独立白名单和类型校验：`backend/cmd/sigmark/protocol.go`。新增上传字段时同步更新两端、用户预览、隐私文档和测试。
+- 稳定字段标识为 `group + key`；标签仅供显示。记录有 `value`、`status`、`source`，可带 `reason`、`errno`、`note`。非可用值固定为 JSON null。`/api/admin/reports/{id}` 返回原始结构化报告，不通过抓网页获取。
+- 列表/详情分离，游标由接收时间和 UUID 组成；分析脚本保持相同 `q` 和 `batch`、使用 `nextCursor` 翻页并按 `id` 去重。PostgreSQL 默认不自动清理。旧报告没有的值不反推，不应把旧版缺字段当作设备异常。界面比较逻辑见 `backend/web/src/compare.ts`。
+
+### 普通设备兼容策略
+
+- 公开 API 优先：Build、ActivityManager、StatFs、Display、BatteryManager、SensorManager、ConnectivityManager。CPU 文本、首核频率、Swap、SELinux 与厂商属性是可选补充，不阻断其他参数。
+- EACCES/EPERM 标记 `RESTRICTED`；ENOENT/ENODEV 映射 `UNAVAILABLE / NODE_MISSING`。`UNAVAILABLE` 是兼容旧版 JSON 的“暂无数据/不支持”状态，不另造 `UNSUPPORTED` 枚举。属性无返回值为 `NOT_REPORTED`；真正的失败或超时标记 `ERROR`。不根据缺失或受限推断风险。
+- ROM 版本线索依次尝试 HyperOS、MIUI、ColorOS、One UI 的常见公开可读属性。HDR 是显示器声明的能力；尺寸来自系统 DPI 推算。电流按 BatteryManager 的 µA 转 mA，保留正负号，排除无效或明显异常的样本。
+- Android ID 等额外设备标识、持续传感器监听、风险指纹方案尚未接入；台账用途不依赖持久设备标识。不以这台设备的成功率代表不同厂商和版本的兼容性。
 
 ## 扩展约定
 

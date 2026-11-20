@@ -1,98 +1,157 @@
 import { StrictMode, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
+import { diffParameters, parameterKey, type Parameter } from './compare';
 import './style.css';
 
-type Metric = {key: string; status: string; reason?: string};
-type Report = {id: string; batch: string; receivedAt: string; report: {model: string; androidApi: number; network: string; radio: string; wifiBand: string; appVersion: string; capturedAtEpochMs: number; feedback?: string; metrics: Metric[]}};
-type Summary = {total: number; status: Record<string, number>; network: Record<string, number>; fields: {key: string; observed: number; restricted: number}[]};
-const names: Record<string,string> = {
-  wifi:'Wi‑Fi', cellular:'移动网络', vpn:'VPN', ethernet:'以太网', none:'无网络', unknown:'未知', other:'其他',
-  lte:'LTE', nr:'NR', iwlan:'IWLAN', AVAILABLE:'可用', RESTRICTED:'受限', UNAVAILABLE:'未上报', ERROR:'读取异常',
-  'system.selinux':'SELinux 模式', 'cpu.kernelFull':'内核编译信息', 'network.wifiFrequency':'Wi-Fi 频率',
-  'network.internetValidation':'互联网验证', 'cellular.dataRat':'蜂窝制式', 'cellular.cellDiagnostics':'小区无线参数',
-  PERMISSION_REQUIRED:'需用户授权', LOCATION_DISABLED:'系统位置关闭', ACCESS_DENIED:'系统拒绝访问', NOT_REPORTED:'系统未上报', READ_FAILED:'读取失败',
-};
-const name = (x: string) => names[x] ?? x;
-const date = (x: string|number) => new Date(x).toLocaleString('zh-CN', {hour12:false});
+type Metric = {key:string;status:string;reason?:string};
+type Row = {id:string;batch:string;receivedAt:string;report:{schemaVersion:number;model:string;androidApi:number;appVersion:string;network:string}};
+type Report = Row & {report:{capturedAtEpochMs:number;feedback?:string;metrics:Metric[];parameters?:Parameter[]}};
+type Page = {items:Row[];nextCursor:string};
+type Summary = {total:number;status:Record<string,number>;network:Record<string,number>};
+const groups:Record<string,string>={system:'系统与固件',cpu:'内核与 CPU',memory:'内存与存储',display:'屏幕与显示',battery:'电池',sensors:'传感器',network:'Wi-Fi 与网络',cellular:'移动网络'};
+const labels:Record<string,string>={AVAILABLE:'可用',RESTRICTED:'受限',UNAVAILABLE:'暂无数据',ERROR:'读取异常',wifi:'Wi-Fi',cellular:'移动网络',ethernet:'以太网',vpn:'VPN',none:'离线',unknown:'未知',other:'其他',
+  PERMISSION_REQUIRED:'需用户授权',LOCATION_DISABLED:'系统位置关闭',ACCESS_DENIED:'系统拒绝访问',NOT_REPORTED:'未上报或未暴露',READ_FAILED:'读取失败',NODE_MISSING:'节点未暴露',INVALID_VALUE:'状态未确认',
+  'system.selinux':'SELinux 实时模式','cpu.kernelFull':'内核编译信息','network.wifiFrequency':'Wi-Fi 频率','network.internetValidation':'互联网验证','cellular.dataRat':'蜂窝制式','cellular.cellDiagnostics':'小区无线参数'};
+const caption=(value:string)=>labels[value]??value;
+const date=(value:string|number)=>new Date(value).toLocaleString('zh-CN',{hour12:false});
+const shortDate=(v:string)=>new Date(v).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false});
+class RequestError extends Error {
+  constructor(readonly status:number){super(status===401?'管理令牌无效或已更换。':'请求失败 · HTTP '+status);}
+}
+async function api<T>(path:string, token:string, signal?:AbortSignal):Promise<T>{
+  const response=await fetch(path,{headers:{Authorization:'Bearer '+token},signal,cache:'no-store',credentials:'omit'});
+  if(!response.ok) throw new RequestError(response.status);
+  return response.json() as Promise<T>;
+}
+const message=(e:unknown)=>e instanceof RequestError?e.message:'连接中断。请检查内网服务后重试。';
 
-class RequestError extends Error { constructor(readonly status: number) { super(status===401?'令牌无效，请重新输入。':`请求失败 · HTTP ${status}`); } }
-
-async function api<T>(path: string, token: string, signal?: AbortSignal): Promise<T> {
-  const r = await fetch(path, {headers:{Authorization:`Bearer ${token}`}, signal, cache:'no-store', credentials:'omit'});
-  if (!r.ok) throw new RequestError(r.status);
-  return r.json() as Promise<T>;
+function Brand({onLock}:{onLock?:()=>void}){
+  return <header className="mast"><div className="brand"><img src="/sigmark-icon.png" alt="" width="36" height="36"/><div><strong>印迹</strong><span> / SigMark</span></div></div>
+    <span className="mast-caption">设备报告档案库</span><div className="mast-actions"><span className="lan"><i/> 内网工作区</span>{onLock&&<button className="secondary" onClick={onLock}>锁定</button>}</div></header>;
 }
 
-function App() {
-  const [token,setToken] = useState('');
-  const [input,setInput] = useState('');
-  const [signing,setSigning] = useState(false);
-  const [error,setError] = useState('');
-  if(token) return <Dashboard token={token} onLock={()=>setToken('')}/>;
-  return <main><Mast/><section className="panel login">
-    <p className="kicker">SIGMARK / ADMIN ACCESS</p><h1>打开诊断台</h1>
-    <p className="muted">输入管理员令牌查看报告。本页不要求账号，刷新页面后需要重新输入。</p>
-    <form onSubmit={async e=>{
-      e.preventDefault(); if(signing) return; setSigning(true); setError('');
-      try { const supplied=input.trim(); await api('/api/admin/session',supplied,AbortSignal.timeout(8000)); setInput('');setToken(supplied); }
-      catch(e){setError(e instanceof RequestError?e.message:'内网服务暂不可用，请稍后重试。');}
-      finally {setSigning(false);}
-    }}>
-      <label>管理员令牌<input type="password" autoComplete="off" maxLength={256} value={input} onChange={e=>setInput(e.target.value)} required /></label>
-      <button disabled={signing||!input.trim()}>{signing?'验证中…':'进入管理台'}</button>
-      {error&&<p role="alert" className="warning">{error}</p>}
-    </form>
-  </section></main>;
+function App(){
+  const [token,setToken]=useState('');
+  const [input,setInput]=useState('');
+  const [busy,setBusy]=useState(false);
+  const [error,setError]=useState('');
+  if(token) return <Archive token={token} lock={()=>{setToken('');setInput('');}}/>;
+  return <><Brand/><main className="login"><p className="eyebrow">SIGMARK / REPORT ARCHIVE</p><h1>打开报告档案库</h1><p className="muted">查看设备采集报告，并比较不同 ROM 版本的读数与兼容性。</p>
+    <form onSubmit={async e=>{e.preventDefault();if(busy)return;setBusy(true);setError('');
+      try{const key=input.trim();await api('/api/admin/session',key,AbortSignal.timeout(8000));setInput('');setToken(key);}
+      catch(e){setError(message(e));}finally{setBusy(false);}
+    }}><label>管理员令牌<input type="password" autoComplete="off" maxLength={256} value={input} onChange={e=>setInput(e.target.value)} required/></label>
+    <button disabled={busy||!input.trim()}>{busy?'正在验证…':'进入档案库'}</button>{error&&<p role="alert" className="error">{error}</p>}</form></main></>;
 }
 
-function Mast({onLock}:{onLock?:()=>void}) {
-  return <header className="mast"><span className="mark" aria-hidden="true">印</span><div><div className="kicker">SIGMARK / LAN PILOT</div><strong>印迹 · 诊断台</strong></div><span className="pill">仅受控内网</span>{onLock&&<button className="lock" onClick={onLock}>锁定</button>}</header>;
-}
-
-function Dashboard({token,onLock}:{token:string;onLock:()=>void}) {
-  const [batchInput,setBatchInput] = useState(''); const [batch,setBatch] = useState('');
-  const [serial,reload] = useState(0); const [data,setData] = useState<{summary:Summary; reports:Report[]}|null>(null);
-  const [busy,setBusy] = useState(true); const [error,setError] = useState(''); const [selected,setSelected] = useState('');
-  useEffect(() => {
-    const ctl = new AbortController(); setBusy(true); setError('');
-    const query = new URLSearchParams({batch});
-    Promise.all([api<Summary>(`/api/admin/summary?${query}`,token,ctl.signal),api<Report[]>(`/api/admin/reports?${query}`,token,ctl.signal)])
-      .then(([summary,reports]) => {if(!ctl.signal.aborted) setData({summary,reports});})
-      .catch(e => {if(!ctl.signal.aborted) {setData(null);setError(String(e.message));}})
-      .finally(() => {if(!ctl.signal.aborted) setBusy(false);});
-    return () => ctl.abort();
-  },[batch,serial,token]);
-  const stats = data?.summary;
-  const focused = data?.reports.find(r => r.id===selected);
-  return <main>
-    <Mast onLock={onLock}/>
-    <section className="intro"><p className="kicker">01 / COLLECTION OVERVIEW</p><h1>采集报告</h1><p>查看用户主动提交的诊断报告。设备型号与无线能力均为应用进程观察值。</p></section>
-    <form className="filters" onSubmit={e=>{e.preventDefault();setSelected('');setBatch(batchInput.trim());reload(n=>n+1);}}>
-      <label>测试批次<input value={batchInput} onChange={e=>setBatchInput(e.target.value)} placeholder="留空查看所有批次" pattern="[a-z0-9][a-z0-9\x2d]{0,31}" /></label><button>筛选 / 刷新</button>
-      <span className="muted" aria-live="polite">{busy?'正在读取…':batch?`当前批次：${batch}`:'最近 30 天 · 所有批次'}</span>
-    </form>
-    {error && <p role="alert" className="warning">{error}</p>}
-    <div className="stats" aria-busy={busy}>
-      {[['收到报告',stats?.total],['可用字段',stats?.status.AVAILABLE ?? (stats?0:undefined)],['受限字段',stats?.status.RESTRICTED ?? (stats?0:undefined)]].map(([label,value])=><div className="panel stat" key={label}><span>{label}</span><strong>{busy?'—':value??'—'}</strong></div>)}
-    </div>
-    <div className="columns">
-      <section className="panel"><p className="kicker">02 / FIELD COVERAGE</p><h2>字段受限分析</h2>
-        {!busy && !stats?.fields.length ? <p className="muted">尚无字段可分析。</p> : !busy && stats?.fields.map(f=><div className="coverage" key={f.key}><span>{name(f.key)}</span><meter aria-label={`${name(f.key)}受限比例`} max={f.observed} value={f.restricted}/><b>{f.restricted} / {f.observed}</b></div>)}
-        {!busy && stats && <p className="muted">默认网络：{Object.entries(stats.network).map(([k,v])=>`${name(k)} ${v}`).join(' · ')||'暂无'}</p>}
+function Archive({token,lock}:{token:string;lock:()=>void}){
+  const [query,setQuery]=useState(''),[batchInput,setBatchInput]=useState('');
+  const [filters,setFilters]=useState({q:'',batch:''});
+  const [pages,setPages]=useState(['']);
+  const [refresh,setRefresh]=useState(0);
+  const [data,setData]=useState<Page|null>(null),[summary,setSummary]=useState<Summary|null>(null);
+  const [status,setStatus]=useState(''),[busy,setBusy]=useState(true);
+  const [selected,setSelected]=useState<Row|null>(null);
+  const [baseline,setBaseline]=useState<Row|null>(null);
+  const [compare,setCompare]=useState<{left:Row;right:Row}|null>(null);
+  const [mobileMode,setMobileMode]=useState<'list'|'detail'>('list');
+  const cursor=pages[pages.length-1];
+  useEffect(()=>{
+    const ctl=new AbortController(); setSummary(null);
+    api<Summary>('/api/admin/summary?'+new URLSearchParams(filters),token,ctl.signal)
+      .then(r=>{if(!ctl.signal.aborted)setSummary(r);}).catch(()=>{});
+    return ()=>ctl.abort();
+  },[filters,refresh,token]);
+  useEffect(()=>{
+    const ctl=new AbortController();setBusy(true);setStatus('');
+    const params=new URLSearchParams(filters);if(cursor)params.set('before',cursor);
+    api<Page>('/api/admin/reports?'+params,token,ctl.signal).then(r=>{if(!ctl.signal.aborted)setData(r);})
+      .catch(e=>{if(!ctl.signal.aborted){setStatus(message(e));setData(null);}})
+      .finally(()=>{if(!ctl.signal.aborted)setBusy(false);});
+    return ()=>ctl.abort();
+  },[filters,cursor,refresh,token]);
+  function open(r:Row){setSelected(r);setCompare(null);setMobileMode('detail');}
+  function runQuery(){setPages(['']);setFilters({q:query.trim(),batch:batchInput.trim()});setRefresh(n=>n+1);}
+  return <><Brand onLock={lock}/><main className="workspace">
+    <section className="page-heading"><div><p className="eyebrow">ROM VALIDATION WORKSPACE</p><h1>报告档案库</h1><p className="muted">从手机采集、归档到 ROM 版本对比。只展示应用进程观测值。</p></div><div className="archive-facts"><div><strong>{summary?.total??'—'}</strong><span>匹配报告</span></div><div><strong>{summary?.status.RESTRICTED??(summary?0:'—')}</strong><span>受限字段样本</span></div><div><b>长期保存</b><span>无自动清理</span></div></div></section>
+    <form className="filters panel" onSubmit={e=>{e.preventDefault();runQuery();}}><label className="main-search">搜索档案<input placeholder="型号、ROM / 构建号、报告编号…" value={query} maxLength={80} onChange={e=>setQuery(e.target.value)}/></label>
+      <label>批次<input placeholder="全部批次" pattern="[a-z0-9][a-z0-9\x2d]{0,31}" value={batchInput} onChange={e=>setBatchInput(e.target.value)}/></label>
+      <button>搜索 / 刷新</button>{(filters.q||filters.batch)&&<button className="secondary" type="button" onClick={()=>{setQuery('');setBatchInput('');setPages(['']);setFilters({q:'',batch:''});}}>清除筛选</button>}</form>
+    {baseline&&<div className="baseline"><span><b>对比基线</b> {baseline.report.model} · <code>{baseline.id.slice(0,8)}</code> · {shortDate(baseline.receivedAt)}</span><button className="secondary" onClick={()=>{setBaseline(null);setCompare(null);}}>移除基线</button></div>}
+    <div className={'workbench show-'+mobileMode}>
+      <section className="panel index" aria-label="报告列表"><div className="pane-title"><div><p className="eyebrow">01 / ARCHIVE INDEX</p><h2>报告列表</h2></div><span className="tag">{busy?'读取中':'第 '+pages.length+' 页'}</span></div>
+        {status&&<p role="alert" className="error inset">{status}</p>}
+        {!busy&&!status&&!data?.items.length&&<p className="empty">没有匹配报告。上传新报告或清除筛选后重试。</p>}
+        <div className="report-list" aria-busy={busy}>{!busy&&data?.items.map(row=><button className="report-row" type="button" key={row.id} aria-pressed={selected?.id===row.id} onClick={()=>open(row)}>
+          <span className="row-top"><strong>{row.report.model}</strong><span>{shortDate(row.receivedAt)}</span></span>
+          <span className="row-tags"><span>{row.batch}</span><span>API {row.report.androidApi||'—'}</span><span>{caption(row.report.network)}</span><code>{row.id.slice(0,8)}</code></span>
+        </button>)}</div>
+        <nav className="pages" aria-label="报告分页"><button className="secondary" disabled={busy||pages.length===1} onClick={()=>setPages(p=>p.slice(0,-1))}>上一页</button><span>每页 30 份</span><button className="secondary" disabled={busy||!data?.nextCursor} onClick={()=>data?.nextCursor&&setPages(p=>[...p,data.nextCursor])}>下一页</button></nav>
       </section>
-      <section className="panel"><p className="kicker">03 / DEVICE REPORTING</p><h2>从 App 上传</h2>
-        <p className="muted">手机和后台接入同一局域网。在印迹首页点「上传报告」，查看预览后确认。手机不需要填写地址或管理令牌。</p>
-        <p className="muted">此服务在局域网接收报告。仅用于受控内网测试，勿对公网开放。</p>
+      <section className="panel reader" aria-label="报告工作区">
+        <button className="mobile-back secondary" onClick={()=>setMobileMode('list')}>返回报告列表</button>
+        {compare?<Compare key={compare.left.id+compare.right.id} left={compare.left} right={compare.right} token={token} close={()=>setCompare(null)}/>:selected?
+          <Details key={selected.id} row={selected} token={token} pin={()=>setBaseline(selected)} hasBaseline={!!baseline&&baseline.id!==selected.id} startCompare={()=>{if(baseline)setCompare({left:baseline,right:selected});}}/>:
+          <div className="welcome"><p className="eyebrow">02 / REPORT INSPECTOR</p><h2>从报告列表选择一份样本</h2><p>查看参数、来源和错误码。要比较定制 ROM，先将一份报告设为基线，再选择另一份报告查看变化。</p></div>}
       </section>
     </div>
-    <section className="panel records"><p className="kicker">04 / REPORT LOG</p><h2>报告明细</h2><p className="muted">最多显示符合筛选条件的最近 100 份。点报告查看字段状态与反馈。</p>
-      {!busy && !!data?.reports.length ? <div className="table-wrap"><table><thead><tr><th>报告 / 批次</th><th>App 观察型号</th><th>API</th><th>默认网络</th><th>服务端接收</th></tr></thead><tbody>
-        {data.reports.map(r=><tr key={r.id}><td><button className="link" aria-expanded={selected===r.id} onClick={()=>setSelected(v=>v===r.id?'':r.id)}>{r.id.slice(0,8)} <small>{r.batch}</small></button></td><td>{r.report.model}</td><td>{r.report.androidApi||'—'}</td><td>{name(r.report.network)}</td><td>{date(r.receivedAt)}</td></tr>)}
-      </tbody></table></div> : <p className="empty">{busy?'正在加载报告…':error?'读取失败。':'当前筛选还没有报告。'}</p>}
-      {!busy && focused&&<article className="details"><h3>报告 {focused.id}</h3><p className="muted">采样 {date(focused.report.capturedAtEpochMs)} · App {focused.report.appVersion} · 蜂窝 {name(focused.report.radio)} · Wi-Fi {focused.report.wifiBand==='unknown'?'未知':`${focused.report.wifiBand} GHz`}</p>
-        <ul>{(focused.report.metrics??[]).map(m=><li key={m.key}><span>{name(m.key)}</span><span className={m.status==='RESTRICTED'?'warning':''}>{name(m.status)}{m.reason?` · ${name(m.reason)}`:''}</span></li>)}</ul><p>反馈：{focused.report.feedback||'未填写'}</p></article>}
-    </section>
-  </main>;
+  </main></>;
+}
+
+function useReport(id:string,token:string){
+  const [data,setData]=useState<Report|null>(null),[error,setError]=useState('');
+  useEffect(()=>{const ctl=new AbortController();
+    api<Report>('/api/admin/reports/'+id,token,ctl.signal).then(v=>{if(!ctl.signal.aborted)setData(v);}).catch(e=>{if(!ctl.signal.aborted)setError(message(e));});
+    return ()=>ctl.abort();
+  },[id,token]);
+  return {data,error};
+}
+function saveJson(data:Report){
+  const url=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));
+  const link=document.createElement('a'); link.href=url;link.download='SigMark-'+data.id+'.json';link.click();setTimeout(()=>URL.revokeObjectURL(url),1500);
+}
+function Details({row,token,pin,hasBaseline,startCompare}:{row:Row;token:string;pin:()=>void;hasBaseline:boolean;startCompare:()=>void}){
+  const {data,error}=useReport(row.id,token);
+  const [query,setQuery]=useState(''),[group,setGroup]=useState(''),[state,setState]=useState('');
+  const fields=data?.report.parameters??[];
+  const fieldsShown=fields.filter(p=>(!group||p.group===group)&&(!state||p.status===state)&&[p.label,p.key,p.value,p.source,p.note,p.reason,p.errno!=null?'errno='+p.errno:undefined].some(v=>v?.toLowerCase().includes(query.trim().toLowerCase())));
+  return <><div className="pane-title"><div><p className="eyebrow">02 / REPORT INSPECTOR</p><h2>{row.report.model}</h2><code className="report-id">{row.id}</code></div><div className="actions">
+    <button type="button" className="secondary" onClick={pin} disabled={!fields.length}>设为基线</button><button onClick={startCompare} disabled={!hasBaseline||!fields.length}>与基线对比</button><button className="secondary" disabled={!data} onClick={()=>data&&saveJson(data)}>下载 JSON</button>
+    </div></div>
+    {error?<p role="alert" className="error inset">{error}</p>:!data?<p className="empty" aria-live="polite">正在读取报告…</p>:<>
+      <div className="meta"><span>{row.batch}</span><span>API {row.report.androidApi||'—'}</span><span>App {row.report.appVersion}</span><span>采集 {date(data.report.capturedAtEpochMs)}</span></div>
+      {data.report.feedback&&<p className="feedback"><b>测试反馈：</b>{data.report.feedback}</p>}
+      {fields.length?<>
+        <div className="tools"><label>搜索参数<input placeholder="数值、来源、errno…" value={query} onChange={e=>setQuery(e.target.value)}/></label>
+          <label>分类<select value={group} onChange={e=>setGroup(e.target.value)}><option value="">全部分类</option>{[...new Set(fields.map(p=>p.group))].map(g=><option value={g} key={g}>{groups[g]??g}</option>)}</select></label>
+          <label>状态<select value={state} onChange={e=>setState(e.target.value)}><option value="">全部状态</option>{['AVAILABLE','RESTRICTED','UNAVAILABLE','ERROR'].map(v=><option key={v} value={v}>{caption(v)}</option>)}</select></label>
+          <span className="muted" aria-live="polite">{fieldsShown.length} / {fields.length} 项</span></div>
+        {fieldsShown.length?<div className="table-wrap"><table><thead><tr><th>参数</th><th>采集值</th><th>状态与来源</th></tr></thead><tbody>
+          {fieldsShown.map(p=><tr key={parameterKey(p)}><td><strong>{p.label}</strong><small>{groups[p.group]??p.group} · {p.key}</small></td>
+            <td className="value">{p.value??'—'}</td><td><Reading p={p}/></td></tr>)}</tbody></table></div>:<p className="empty">没有匹配参数。</p>}
+      </>:<div className="empty"><p>旧报告只保存了采集状态。重新上传可取得参数值，也可下载现有 JSON。</p><ul>{(data.report.metrics??[]).map(m=><li key={m.key}>{caption(m.key)} · {caption(m.status)}</li>)}</ul></div>}
+    </>}
+  </>;
+}
+function Reading({p}:{p:Parameter}){
+  return <><span className={'state '+p.status.toLowerCase()}>{caption(p.status)}{p.reason?' · '+caption(p.reason):''}</span><small><code>{p.source}</code>{p.errno!=null&&<code> · errno={p.errno}</code>}</small>{p.note&&<small>{p.note}</small>}</>;
+}
+
+function Compare({left,right,token,close}:{left:Row;right:Row;token:string;close:()=>void}){
+  const a=useReport(left.id,token), b=useReport(right.id,token);
+  const [onlyChanged,setOnlyChanged]=useState(true);
+  const [onlySystem,setOnlySystem]=useState(false);
+  const result=diffParameters(a.data?.report.parameters??[],b.data?.report.parameters??[]);
+  const visible=result.filter(r=>(!onlyChanged||r.changed)&&(!onlySystem||r.group==='system'||r.group==='cpu'));
+  return <><div className="pane-title"><div><p className="eyebrow">03 / ROM COMPARISON</p><h2>报告对比</h2></div><button className="secondary" onClick={close}>返回详情</button></div>
+    <div className="comparison-head"><div><b>基线</b><strong>{left.report.model}</strong><code>{left.id.slice(0,8)} · {shortDate(left.receivedAt)}</code></div><div><b>当前</b><strong>{right.report.model}</strong><code>{right.id.slice(0,8)} · {shortDate(right.receivedAt)}</code></div></div>
+    {a.error||b.error?<p role="alert" className="error inset">{a.error||b.error}</p>:!a.data||!b.data?<p className="empty">正在读取两份报告…</p>:!result.length?<p className="empty">没有可对比的参数值。</p>:<>
+      <div className="tools compare-tools"><label><input type="checkbox" checked={onlyChanged} onChange={e=>setOnlyChanged(e.target.checked)}/> 仅看差异</label><label><input type="checkbox" checked={onlySystem} onChange={e=>setOnlySystem(e.target.checked)}/> 仅系统与内核</label><span>{visible.length} 项</span></div>
+      <p className="hint inset">变化仅反映两次采样；电量、网络和可用内存会随环境变化。未采集不等于不支持。</p>
+      {visible.length?<div className="table-wrap"><table><thead><tr><th>参数</th><th>基线</th><th>当前</th></tr></thead><tbody>{visible.map(r=><tr key={r.id}><td><strong>{r.label}</strong><small>{groups[r.group]??r.group}</small></td>
+        {[r.before,r.after].map((p,i)=><td key={i}>{p?<><div className="value">{p.value??'—'}</div><Reading p={p}/></>:<span className="muted">该报告未记录</span>}</td>)}</tr>)}</tbody></table></div>:<p className="empty">当前条件下没有差异。</p>}
+    </>}
+  </>;
 }
 
 createRoot(document.getElementById('root')!).render(<StrictMode><App/></StrictMode>);

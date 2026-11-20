@@ -1,5 +1,19 @@
 # 设备验证记录与复测清单
 
+## 0.6.0：报告档案库与普通应用读取（2026-11-20，Asia/Shanghai）
+
+- Debug 构建、Lint、14 项 Android 单测通过；已升级安装到 Pixel 6 / Android 14 并冷启动。APK SHA-256：`A6351782769CB5648675CD648C78170F5E14975582B4D3FBE599DC64B56722A1`。
+- App 启动与本地 JSON 导出：`enforce` 和 `policy` 均保持 `RESTRICTED / ACCESS_DENIED`、`errno=13`。ENOENT、ENODEV 与其他 errno 走主机单测。已验证本机 CPU 频率与 Swap 仍可读；HDR、估算尺寸和 ROM 属性均有应用视角读数。未验证所有厂商 ROM 或底层阻塞驱动。
+- 手机确认上传后，后台保存并读回 68 项白名单参数。Chrome 验证 favicon、报告检索、参数搜 `errno=13`、基线对比、JSON 下载及 390 px 移动布局，无页面级横向溢出。Go 测试/vet、Web 3 项单测与生产构建通过。
+- 临时插入 127 条接收时间为 90 天前且时间戳相同的合成报告。按构建号搜索时，列表无重漏、统计为 127、详情可读；随后只清除了该合成批次。保留已有 PostgreSQL 卷；未配置自动备份或验证恢复。截图及本地报告放在忽略目录 `app/build/archive-v06/`。
+
+## 0.5.0：SELinux 状态与参数管理台（2026-11-20，Asia/Shanghai）
+
+- Debug 构建、Lint、13 项 Android 单测通过；已覆盖安装到 Pixel 6 / Android 14 并冷启动。APK SHA-256：`01F3EDE467D81F0C28B9E18C7E7A4155D857FCCC2BF1D13A4DCCF7601544C014`。
+- App 视角：`enforce` 与 `policy` 均为 EACCES / 13，启动和构建属性未返回可识别的值。实时模式依旧未确认。ENOENT、其他 errno、标准 0/1 和非法值走主机单测，本机未出现这些分支。真机本地导出仍为 schema 1，含结构化 `errno: 13`、来源和空状态值。
+- 真机确认上传后，服务端收存 schema 2 的 64 个白名单参数。读回验证 Wi-Fi 2462 MHz、RAM 12.00 GiB、LTE 信号及 SELinux errno。上报不含构建指纹、运营商或精确小区频点。Chrome 验证详情、按值搜索、仅看待确认及旧版报告说明；Go 单测和 vet、Web 构建通过。
+- 单独批次写入 127 条同时间戳的合成报告，经部署 API 读出 30/30/30/30/7 条，无重复或遗漏。测试后仅清除该合成批次。既有报告及 30 天保留策略不变。原始证据留在忽略目录 `app/build/lan-v05/`。
+
 ## 0.4.0：单地址直传与移动网络（2026-11-20，Asia/Shanghai）
 
 - **构建与装机**：Debug 预设同一局域网后台地址，构建、10 项单测和 Lint 通过；Release 合并清单仍无 `INTERNET`。Pixel 6 / Android 14 覆盖安装并冷启动。Debug SHA-256：`AA6BF13E7534B0453F11824627F56F0F83B80E3B703F08AA29EC2F1AE9ECF2DD`。

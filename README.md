@@ -1,6 +1,6 @@
 # SigMark / 印迹
 
-Android 设备信息采集 App。当前为 **0.4.0**：本机读取、分类展示、待确认项筛查和 JSON 导出。正式 Release 不联网；配置了后台地址的 Debug APK 可以在首页确认后直接 [上传内网报告](docs/LAN-PILOT.md)。
+Android 设备信息采集 App。当前为 **0.6.0**：本机读取、分类展示和 JSON 导出。正式 Release 不联网；配置后台地址的 Debug APK 可确认后 [上传报告到内网档案库](docs/LAN-PILOT.md)，支持长期保存、版本搜索、参数对比和 JSON 下载。
 
 ## 构建
 

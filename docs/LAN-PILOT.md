@@ -1,4 +1,4 @@
-# SigMark 0.4 · 内网试验手册
+# SigMark 0.6 · 内网报告档案库
 
 ## 连接方式
 
@@ -11,11 +11,17 @@
 
 ## 接口与维护
 
-- `GET /readyz` 检查 PostgreSQL 连通。默认保留最近 30 天；明细最多显示 100 条，汇总覆盖所有匹配的近 30 天数据。
-- `POST /api/v1/reports`：JSON 8 KiB 上限，应用协议头、限流和字段白名单校验。部署配置确定批次，不接收客户端自报批次。批次 + UUID 幂等；内容不一致返回 409。应用协议头不是鉴权。
-- `GET /api/admin/session`、`/api/admin/reports?batch=…`、`/api/admin/summary?batch=…`：使用 `Authorization: Bearer <token>`。无账号密码和邀请码接口。
-- 上传独立最小化载荷，包含网络类别、频段名称、制式、精选字段状态、型号、版本、采样时间与可选反馈，不包含完整快照、运营商、精确频点、小区标识或位置。不要在反馈中填写个人信息。
-- 用 `docker compose ps` 查看状态，`docker compose stop` 停机并保留报告。升级保留现有 PostgreSQL 卷及原 DB 密码。使用 `go test ./...`、`go vet ./...`（`backend/`）及 `npm ci && npm run build`（`backend/web/`）复测。
+- `GET /readyz` 检查 PostgreSQL 连通。报告保存在 PostgreSQL 命名卷，**不按时间自动删除**，包括旧版仍存在的数据。已被旧版清理的记录不会复原。列表每页 30 条，无总数上限；汇总覆盖所有匹配报告。
+- `POST /api/v1/reports`：JSON 128 KiB 上限，应用协议头、限流和字段白名单校验。部署配置确定批次；批次 + UUID 幂等。应用协议头不是鉴权。
+- 管理接口使用 `Authorization: Bearer <token>`。列表 `GET /api/admin/reports?batch=…&q=…&before=…` 返回 `{items,nextCursor}`，列表与统计均支持批次和文本搜索（型号、构建/ROM 线索、API、App 版本、网络或 ID）。首请求省略 `before`，后续透传服务端游标。报告值通过 `GET /api/admin/reports/{id}` 获取，汇总用 `/api/admin/summary?batch=…&q=…`。
+- 0.5 上传 `schemaVersion: 2`，包含各类白名单参数的实测值或空值，以及来源、状态、原因、说明和适用的 errno。包含实际 Wi-Fi 主链路频率/信道、信号、内存与电池等；不发送完整快照、运营商、精确小区频点/信道、小区标识或位置。旧版报告兼容，但仅能查看原来保存的状态，需用新版重新上传才有具体值。
+- 用 `docker compose ps` 查看状态，`docker compose stop` 停机并保留报告。升级保留现有 PostgreSQL 卷及原 DB 密码，避免 `docker compose down -v`。使用 `go test ./...`、`go vet ./...`（`backend/`）及 `npm ci`、`npm test`、`npm run build`（`backend/web/`）复测。
+
+## ROM 对比与留存
+
+用同一测试批次和相近测试条件采集两次。选中第一份报告点「设为基线」，搜索/翻页选择第二份后点「与基线对比」。可以只看差异或只看系统与内核。基线只在当前浏览器工作区保留，不改写原报告；差异按 `group + key` 比较值、状态、原因、errno 和来源。电量、网络和可用内存随环境变化，不是 ROM 缺陷的直接证据。单份报告可下载原始结构化 JSON。
+
+单份 JSON 下载不是数据库备份。长期实验前应对 PostgreSQL 做 `pg_dump` 备份并在独立数据库演练恢复；此版未配置定时备份。数据需要淘汰时先备份，再由维护者按保留策略人工处理。归档时间无限制不等于容量无限，需监控命名卷磁盘。
 
 ## 服务器部署前
 

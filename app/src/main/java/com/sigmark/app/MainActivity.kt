@@ -463,11 +463,19 @@ private fun InfoRow(item: DeviceInfoItem) {
             Spacer(Modifier.width(10.dp))
             val value = when (item.status) {
                 ValueStatus.AVAILABLE -> item.value.orEmpty()
-                ValueStatus.UNAVAILABLE -> "暂无数据"
-                ValueStatus.RESTRICTED -> "访问受限"
+                ValueStatus.UNAVAILABLE -> when (item.reason) {
+                    ReadReason.NODE_MISSING -> "节点未暴露"
+                    ReadReason.INVALID_VALUE -> "状态未确认"
+                    else -> "暂无数据"
+                }
+                ValueStatus.RESTRICTED -> if (item.key == "selinux") "受限 · 模式未确认" else "访问受限"
                 ValueStatus.ERROR -> "读取异常"
             }
-            Text(value, color = if (item.status == ValueStatus.AVAILABLE) Color.White else Color(0xFFFFC58A),
+            Text(value, color = when (item.status) {
+                ValueStatus.AVAILABLE -> Color.White
+                ValueStatus.ERROR -> Color(0xFFFFC58A)
+                else -> Muted
+            },
                 fontSize = 12.sp, lineHeight = 17.sp, fontWeight = FontWeight.Medium,
                 modifier = Modifier.weight(0.58f))
         }
@@ -475,7 +483,7 @@ private fun InfoRow(item: DeviceInfoItem) {
             Text(buildString {
                 append("来源：${item.source}")
                 if (item.note != null) append(" · ${item.note}")
-            }, color = if (item.status == ValueStatus.AVAILABLE) Muted else Color(0xFFFFC58A),
+            }, color = Muted,
                 fontSize = 11.sp, lineHeight = 15.sp,
                 modifier = Modifier.padding(top = 5.dp))
         }

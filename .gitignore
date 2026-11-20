@@ -1,0 +1,10 @@
+.gradle/
+build/
+**/build/
+local.properties
+.idea/
+*.iml
+.DS_Store
+安卓采集.md
+技术栈方案.md
+指纹采集.md

@@ -1,4 +1,4 @@
-# SigMark 0.7 · 内网报告工作区
+# SigMark · 内网报告工作区
 
 ## 连接方式
 
@@ -15,6 +15,7 @@
 - `POST /api/v1/reports` 支持最大 128 KiB JSON、应用协议头、限流、字段白名单及批次 + UUID 幂等。「设置」可以存储新报告批次并暂停接收。历史报告仍留在各自的批次。暂停时返回 `503 uploads_paused`，手机仍可导出本地报告。首次保存前的默认批次取自 `LAN_BATCH`。
 - 管理接口支持浏览器会话和 `Authorization: Bearer <token>`。管理端写请求还需 `X-SigMark-Admin: 1`。列表 `GET /api/admin/reports?batch=…&q=…&before=…` 返回 `{items,nextCursor}`，列表与统计均支持批次和文本搜索（型号、构建/ROM 线索、API、App 版本、网络或 ID）。首请求省略 `before`，后续透传服务端游标。报告值通过 `GET /api/admin/reports/{id}` 获取，汇总用 `/api/admin/summary?batch=…&q=…`。
 - 0.5 上传 `schemaVersion: 2`，包含各类白名单参数的实测值或空值，以及来源、状态、原因、说明和适用的 errno。包含实际 Wi-Fi 主链路频率/信道、信号、内存与电池等；不发送完整快照、运营商、精确小区频点/信道、小区标识或位置。旧版报告兼容，但仅能查看原来保存的状态，需用新版重新上传才有具体值。
+- 0.8 新增的普通应用诊断面向本地导出。当前服务器仍接收已有的 v2 白名单。安装应用清单和传感器实时值各自在面板内查看。详见 [采集字段说明](FRAMEWORK-DIAGNOSTICS.md)。
 - 用 `docker compose ps` 查看状态，`docker compose stop` 停机并保留报告。升级保留现有 PostgreSQL 卷及原 DB 密码，避免 `docker compose down -v`。使用 `go test ./...`、`go vet ./...`（`backend/`）及 `npm ci`、`npm test`、`npm run build`（`backend/web/`）复测。
 
 ## 构建中心
@@ -35,7 +36,17 @@ python -u backend/scripts/build_worker.py work --origin http://<LAN_BIND>:<LAN_P
 
 用同一测试批次和相近测试条件采集两次。选中第一份报告点「设为基线」，搜索/翻页选择第二份后点「与基线对比」。可以只看差异或只看系统与内核。基线只在当前浏览器工作区保留，不改写原报告；差异按 `group + key` 比较值、状态、原因、errno 和来源。电量、网络和可用内存随环境变化，不是 ROM 缺陷的直接证据。单份报告可下载原始结构化 JSON。
 
-单份 JSON 下载不是数据库备份。长期实验前应对 PostgreSQL 做 `pg_dump` 备份并在独立数据库演练恢复；此版未配置定时备份。数据需要淘汰时先备份，再由维护者按保留策略人工处理。归档时间无限制不等于容量无限，需监控命名卷磁盘。
+档案页可勾选单份或本页最多 30 份报告，确认后移入回收站。回收站保留原报告和移入时间，支持恢复、下载 JSON 和永久删除。永久删除需输入 `DELETE` 确认。报告默认长期保存，回收站由管理员手动清理。PostgreSQL 的完整备份及恢复由 `pg_dump` 等数据库工具处理。
+
+### 报告管理接口
+
+- `GET /api/admin/reports` 和 `/api/admin/summary` 支持 `view=archive`（默认）或 `view=trash`，并可继续使用批次、搜索和分页。已移入回收站的报告含 `trashedAt`。详情仍可按 ID 读取，用于核查及导出。
+- `POST /api/admin/reports/manage` 接收 `{"action":"trash","ids":["<UUID>"]}`。动作包括 `trash`、`restore`、`purge`，每次 1 至 30 个独立 ID。永久删除还需 `"confirmation":"DELETE"`。请求需管理会话或 Bearer 令牌以及 `X-SigMark-Admin: 1`。任一 ID 已不存在或状态变化时整批回滚，返回 `409 report_selection_changed`。客户端按相同视图刷新。
+- 升级 Compose 时由启动迁移添加 `reports.trashed_at`，已有数据库卷和报告继续使用。
+
+### App 内更新
+
+0.9 系列内网 Debug 测试包首页提供「检查更新」。0.8 及更早版本从下载页覆盖安装一次。当前 App 以发布元数据的 `versionCode` 判定新版本，验证 APK 大小、SHA-256、包名、版本及安装签名后，唤起 Android 安装界面。首次使用时，在系统设置允许印迹作为安装来源，再返回点「安装更新」。系统如显示选择器，请选择其安装器。后续版本须使用同一签名，且逐次增加 `versionCode`。未带 `versionCode` 的旧构建产物仍可从网页下载。
 
 ## 服务器部署前
 

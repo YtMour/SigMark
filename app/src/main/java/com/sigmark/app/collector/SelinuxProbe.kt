@@ -6,14 +6,7 @@ import java.util.Locale
 
 internal object SelinuxProbe {
     fun collect(): List<DeviceInfoItem> {
-        val mode = SafeReader.node(SafeReader.Node.SELINUX_ENFORCE)
-        val decoded = mode.value?.let(::decodeMode)
-        val result = when {
-            decoded != null -> mode.copy(value = decoded.first, detail = decoded.second)
-            mode.value != null -> SafeReader.missing(mode.source, ReadReason.INVALID_VALUE,
-                "节点可读，但没有返回标准 0/1；实时模式未确认。")
-            else -> mode.copy(detail = "${mode.detail} 此结果不代表 SELinux 已关闭或处于某一模式。")
-        }
+        val result = modeResult(SafeReader.node(SafeReader.Node.SELINUX_ENFORCE))
         val policy = SafeReader.node(SafeReader.Node.SELINUX_POLICY)
         return listOf(
             result.item("selinux", "SELinux 实时模式"),
@@ -23,6 +16,22 @@ internal object SelinuxProbe {
             property("selinuxBuildHint", "SELinux 构建属性（参考）", SafeReader.Property.SELINUX_BUILD),
         )
     }
+
+    internal fun modeResult(mode: ReadResult<String>): ReadResult<String> {
+        val decoded = mode.value?.let(::decodeMode)
+        return when {
+            decoded != null -> mode.copy(value = decoded.first, detail = decoded.second)
+            mode.value != null -> SafeReader.missing(mode.source, ReadReason.INVALID_VALUE,
+                "节点可读，但没有返回标准 0/1。实时模式未确认。")
+            else -> mode.copy(detail = listOfNotNull(mode.detail,
+                "本机实时模式未确认。常规量产设备通常为 Enforcing。").joinToString(" "))
+        }
+    }
+
+    internal fun processDomain(raw: String): String? =
+        raw.trim { it == '\u0000' || it.isWhitespace() }
+            .split(':', limit = 4).takeIf { it.size == 4 }
+            ?.get(2)?.takeIf { it.matches(Regex("[a-zA-Z0-9_]{1,80}")) }
 
     private fun property(key: String, label: String, prop: SafeReader.Property): DeviceInfoItem {
         val reading = SafeReader.property(prop)

@@ -50,7 +50,7 @@ internal fun LanReportDialog(snapshot: DeviceSnapshot, onClose: () -> Unit) {
                         Text("应用观察型号：${data.model} · API ${data.androidApi} · App ${data.appVersion}")
                         Text("默认网络：${data.network}；Wi-Fi 频段：${data.wifiBand}；蜂窝制式：${data.radio}")
                         Text("采样时间：${java.text.DateFormat.getDateTimeInstance().format(java.util.Date(data.capturedAt))}")
-                        Text("随报告保存 ${data.parameters.size} 项参数及来源，包括 ROM/构建版本、Wi-Fi 信号、内存和电池读数。后台默认长期保存；不发送构建指纹、运营商、精确小区频点或位置。")
+                        Text("后台长期保存预览中的 ${data.parameters.size} 项白名单参数。设备配置摘要、应用安装及权限信息、实时传感器和精确小区频点仅供本地使用。")
                         TextButton(onClick = { details = !details }) { Text(if (details) "收起参数" else "查看上传参数") }
                         if (details) data.parameters.forEach { field ->
                             Text("${field.label}：${field.value ?: field.status}\n来源：${field.source}${field.note?.let { "\n$it" }.orEmpty()}")

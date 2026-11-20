@@ -9,6 +9,22 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class LanReportTest {
+    @Test fun excludesNewLocalDiagnosticsFromLanProjection() {
+        val keys = mapOf(
+            "app" to listOf("permissions", "installedAt", "certSha256", "visibleLauncherApps"),
+            "environment" to listOf("configurationDigest", "selinuxDomain", "suFileHint"),
+            "system" to listOf("board", "buildHost", "buildUser", "sku"),
+            "runtime" to listOf("locale", "timeZone", "featureList"),
+            "display" to listOf("windowSize", "cutoutInsets"),
+            "media" to listOf("cameraCount", "camera_0"),
+            "sensors" to listOf("sensor_0"),
+        )
+        val snapshot = DeviceSnapshot(0, keys.map { (group, fields) ->
+            DeviceSection(group, group, fields.map { DeviceInfoItem(it, it, "local", "test") })
+        })
+        assertTrue(lanParameters(snapshot).isEmpty())
+    }
+
     @Test fun endpointRequiresPrivateNumericHostAndPort() {
         assertEquals("http://192.168.1.10:48271/api/v1/reports", lanEndpoint("http://192.168.1.10:48271/").toString())
         assertNotNull(lanEndpoint("http://127.0.0.1:48271"))

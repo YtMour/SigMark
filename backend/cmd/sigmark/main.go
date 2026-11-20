@@ -127,6 +127,7 @@ func (s server) routes() http.Handler {
 				admin.Post("/builds", s.requestBuild)
 				admin.Post("/builds/{id}/publish", s.publishBuild)
 				admin.Get("/reports", s.reports)
+				admin.Post("/reports/manage", s.manageReports)
 				admin.Get("/reports/{id}", s.reportDetail)
 				admin.Get("/summary", s.summary)
 			})
@@ -199,17 +200,19 @@ func (s server) submit(w http.ResponseWriter, r *http.Request) {
 }
 
 type storedReport struct {
-	ID       string    `json:"id"`
-	Batch    string    `json:"batch"`
-	Received time.Time `json:"receivedAt"`
-	Report   Report    `json:"report"`
+	ID        string     `json:"id"`
+	Batch     string     `json:"batch"`
+	Received  time.Time  `json:"receivedAt"`
+	Report    Report     `json:"report"`
+	TrashedAt *time.Time `json:"trashedAt,omitempty"`
 }
 
 type reportIndexRow struct {
-	ID       string          `json:"id"`
-	Batch    string          `json:"batch"`
-	Received time.Time       `json:"receivedAt"`
-	Report   json.RawMessage `json:"report"`
+	ID        string          `json:"id"`
+	Batch     string          `json:"batch"`
+	Received  time.Time       `json:"receivedAt"`
+	Report    json.RawMessage `json:"report"`
+	TrashedAt *time.Time      `json:"trashedAt,omitempty"`
 }
 
 func (s server) reportDetail(w http.ResponseWriter, r *http.Request) {
@@ -221,7 +224,7 @@ func (s server) reportDetail(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 4*time.Second)
 	defer cancel()
 	var p storedReport
-	err := s.db.QueryRow(ctx, `SELECT id,batch,received_at,body FROM reports WHERE id=$1`, id).Scan(&p.ID, &p.Batch, &p.Received, &p.Report)
+	err := s.db.QueryRow(ctx, `SELECT id,batch,received_at,body,trashed_at FROM reports WHERE id=$1`, id).Scan(&p.ID, &p.Batch, &p.Received, &p.Report, &p.TrashedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		fail(w, 404, "report_not_found")
 		return
@@ -259,6 +262,10 @@ func (s server) reports(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	trash, ok := trashFilter(w, r)
+	if !ok {
+		return
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), 4*time.Second)
 	defer cancel()
 	cursor := r.URL.Query().Get("before")
@@ -270,10 +277,11 @@ func (s server) reports(w http.ResponseWriter, r *http.Request) {
 	const pageSize = 30
 	rows, err := s.db.Query(ctx, `SELECT id,batch,received_at,jsonb_build_object(
 	  'model',body->'model','androidApi',body->'androidApi','network',body->'network',
-	  'appVersion',body->'appVersion','schemaVersion',body->'schemaVersion')
+	  'appVersion',body->'appVersion','schemaVersion',body->'schemaVersion'),trashed_at
 	  FROM reports WHERE `+archivePredicate+`
+	  AND (trashed_at IS NOT NULL)=$6
 	  AND ($3::timestamptz IS NULL OR (received_at,id)<($3::timestamptz,$4::uuid))
-	  ORDER BY received_at DESC,id DESC LIMIT $5`, batch, query, at, id, pageSize+1)
+	  ORDER BY received_at DESC,id DESC LIMIT $5`, batch, query, at, id, pageSize+1, trash)
 	if err != nil {
 		fail(w, 503, "storage_unavailable")
 		return
@@ -282,7 +290,7 @@ func (s server) reports(w http.ResponseWriter, r *http.Request) {
 	out := make([]reportIndexRow, 0, pageSize+1)
 	for rows.Next() {
 		var item reportIndexRow
-		if rows.Scan(&item.ID, &item.Batch, &item.Received, &item.Report) != nil {
+		if rows.Scan(&item.ID, &item.Batch, &item.Received, &item.Report, &item.TrashedAt) != nil {
 			fail(w, 503, "storage_unavailable")
 			return
 		}
@@ -305,11 +313,15 @@ func (s server) summary(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	trash, ok := trashFilter(w, r)
+	if !ok {
+		return
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), 4*time.Second)
 	defer cancel()
 	var result json.RawMessage
 	err := s.db.QueryRow(ctx, `WITH filtered AS (
-	  SELECT body FROM reports WHERE `+archivePredicate+`
+	  SELECT body FROM reports WHERE `+archivePredicate+` AND (trashed_at IS NOT NULL)=$3
 	), metrics AS (
 	  SELECT field
 	  FROM filtered CROSS JOIN LATERAL jsonb_array_elements(body->'metrics') field
@@ -325,7 +337,7 @@ func (s server) summary(w http.ResponseWriter, r *http.Request) {
 	SELECT jsonb_build_object('total',(SELECT count(*) FROM filtered),
 	'status',coalesce((SELECT jsonb_object_agg(key,n) FROM status),'{}'),
 	'network',coalesce((SELECT jsonb_object_agg(key,n) FROM network),'{}'),
-	'fields',coalesce((SELECT jsonb_agg(to_jsonb(by_field) ORDER BY restricted DESC,key) FROM by_field),'[]'))`, batch, query).Scan(&result)
+	'fields',coalesce((SELECT jsonb_agg(to_jsonb(by_field) ORDER BY restricted DESC,key) FROM by_field),'[]'))`, batch, query, trash).Scan(&result)
 	if err != nil {
 		fail(w, 503, "storage_unavailable")
 		return

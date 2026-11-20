@@ -1,5 +1,20 @@
 # 设备验证记录与复测清单
 
+## 0.9.1 档案管理、App 内更新和网络回退（2026-11-20，Asia/Shanghai）
+
+- 归档中的 MI 8 / Android 10 / 0.8.0 共 69 个上传字段。63 项可用，2 项 SELinux 节点受限，启动及构建 SELinux 属性、MTU 和 LTE 带宽共 4 项暂无数据。
+- 在已连接的 Pixel 6 / Android 14 上，从 0.9.0 打开「检查更新」，发现 0.9.1 并下载。APK 校验通过，经 Android 系统界面确认覆盖安装。安装结果为 versionCode 10，重新启动并完成本地导出。网络接口回退取得 MTU 1500 字节。LTE 带宽本机仍未回报。ADB 系统侧记录读出 Enforcing，App 按自身来源保留节点受限。MI 8 的 0.9.1 回退和更新待实机验证。
+- Chrome 使用独立合成批次跑通单份移动、恢复、批量移动、批量永久删除以及状态冲突回滚。既有 MI 8 报告可查询和按状态筛选，验证包括 390 px 页面。Go test、vet、Web 测试及生产构建通过。
+- Android 22 项单测、Debug 构建及 Lint 通过，已发布到内网下载页。验证证据位于忽略目录 `app/build/lan-qa/v09/`。
+
+## 0.8.0 普通应用诊断（2026-11-20，Asia/Shanghai）
+
+- Debug APK 构建、21 项 Android 单测、Lint 和 Release 合并清单检查通过。Go 单测通过。APK 通过签名校验，免登录下载的 SHA-256 与构建产物相同，值为 `8AC3C65F0D7E220A6C60F89CB263F9A437865C320C12F202F3D2E970C3EE9502`。
+- Pixel 6 / Android 14（ADB 代号 `oriole`）覆盖安装并启动。首页显示 12 类、192 项。实时面板收到加速度 XYZ 读数，切到后台后通过 SensorService 观察到注销。可见应用面板展示了所选应用的声明权限及授权状态。
+- 通过系统文件选择器保存本地 JSON，读回 179 项可用、2 项受限、11 项暂无数据。系统特性、窗口边距、相机计数、存储加密和配置摘要可读。剩余能量暂无数据。SELinux 进程域可读，`enforce` 及 `policy` 均为 `RESTRICTED / ACCESS_DENIED / errno=13`。
+- 内网上传预览实际展示 76 项白名单参数。单测断言本地诊断字段排除在上传投影之外。本轮验证止于上传预览，其他手机和厂商 ROM 待复测。
+- APK 校验文件、界面记录及本地报告位于忽略目录 `app/build/lan-qa/diagnostics-v08/`。
+
 ## 0.7.0 · 会话、构建中心与公开下载（2026-11-20，Asia/Shanghai）
 
 - 构建通过 `assembleDebug`、15 项 Android 单测、`lintDebug` 和 Release 合并清单检查。内网 Debug APK 签名校验通过，经免登录 HTTP 下载后 SHA-256 与本地产物一致，值为 `5441A05464AB86BEEC7348DC2145B766F2DE2076963F40304ECF7188D8CA4711`。

@@ -8,6 +8,8 @@ CREATE TABLE IF NOT EXISTS reports (
 );
 CREATE INDEX IF NOT EXISTS reports_received ON reports (received_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS reports_batch_received ON reports (batch, received_at DESC, id DESC);
+ALTER TABLE reports ADD COLUMN IF NOT EXISTS trashed_at timestamptz;
+CREATE INDEX IF NOT EXISTS reports_trash ON reports (trashed_at) WHERE trashed_at IS NOT NULL;
 CREATE TABLE IF NOT EXISTS admin_sessions (
   digest text PRIMARY KEY,
   credential_version text NOT NULL,

@@ -23,6 +23,9 @@ class RadioMathTest {
     }
 
     @Test fun lteUsesDownlinkRasterAndAvoidsUnknownBands() {
+        assertEquals(3, RadioMath.lteBandForEarfcn(1625))
+        assertEquals(39, RadioMath.lteBandForEarfcn(38250))
+        assertNull(RadioMath.lteBandForEarfcn(5000))
         assertEquals(2110000, RadioMath.lteDownlinkKhz(0))
         assertEquals(1847500, RadioMath.lteDownlinkKhz(1625))
         assertEquals(2593000, RadioMath.lteDownlinkKhz(40620))

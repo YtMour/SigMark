@@ -29,6 +29,9 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.displayCutout
+import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -60,6 +63,9 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.res.painterResource
 import androidx.compose.foundation.Image
 import androidx.compose.ui.text.font.FontFamily
@@ -74,6 +80,7 @@ import com.sigmark.app.model.DeviceSnapshot
 import com.sigmark.app.model.ReadReason
 import com.sigmark.app.model.ValueStatus
 import com.sigmark.app.lan.LanReportDialog
+import com.sigmark.app.lan.AppUpdate
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -154,18 +161,22 @@ private fun SigMarkScreen(
     var issuesOnly by rememberSaveable { mutableStateOf(false) }
     var showExportConfirmation by rememberSaveable { mutableStateOf(false) }
     var showCellExplanation by rememberSaveable { mutableStateOf(false) }
+    var showSensors by rememberSaveable { mutableStateOf(false) }
+    var showVisibleApps by rememberSaveable { mutableStateOf(false) }
+    var showUpdate by remember { mutableStateOf(false) }
+    val context = LocalContext.current
     var lanSnapshot by remember { mutableStateOf<DeviceSnapshot?>(null) }
-    val snapshot = state.snapshot
+    val snapshot = withWindowObservations(state.snapshot)
     val issueCount = snapshot?.sections?.sumOf { section ->
         section.items.count { it.status != ValueStatus.AVAILABLE }
     } ?: 0
     val sections = remember(snapshot, query, selected, issuesOnly) {
         snapshot?.sections?.filter { selected == "all" || it.key == selected }
-            ?.mapNotNull { section ->
+                    ?.mapNotNull { section ->
                 val matches = section.items.filter { item ->
                     (!issuesOnly || item.status != ValueStatus.AVAILABLE) &&
                     (query.isBlank() || listOf(section.title, item.label, item.value.orEmpty(),
-                        item.source, item.note.orEmpty(), item.status.name)
+                        item.source, item.note.orEmpty(), item.status.name, item.key)
                         .any { it.contains(query.trim(), ignoreCase = true) }
                     )
                 }
@@ -185,6 +196,13 @@ private fun SigMarkScreen(
             item {
                 Column(Modifier.padding(horizontal = 16.dp)) {
                     OverviewCard(snapshot)
+                    if (snapshot != null) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        TextButton(onClick = { showSensors = true }, modifier = Modifier.weight(1f)) { Text("实时传感器") }
+                        TextButton(onClick = { showVisibleApps = true }, modifier = Modifier.weight(1f)) { Text("可见应用") }
+                        if (BuildConfig.DEBUG && BuildConfig.LAN_ORIGIN.isNotEmpty()) {
+                            TextButton(onClick = { showUpdate = true }, modifier = Modifier.weight(1f)) { Text("检查更新") }
+                        }
+                    }
                     if (permissionMissing || BuildConfig.DEBUG) {
                         Surface(color = CardColor, shape = RoundedCornerShape(12.dp), modifier = Modifier.padding(top = 9.dp)) {
                             Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
@@ -265,7 +283,7 @@ private fun SigMarkScreen(
         AlertDialog(
             onDismissRequest = { showExportConfirmation = false },
             title = { Text("导出设备报告") },
-            text = { Text("报告包含构建指纹、设备型号、运营商及可用的无线参数。小区频点等数据可能反映所处区域，请检查后再分享。") },
+            text = { Text("本地 JSON 含构建指纹、设备配置摘要、时区与语言、应用安装和签名信息、运营商及可用无线参数。请检查后再分享。实时传感器读数不写入报告。") },
             confirmButton = {
                 TextButton(onClick = {
                     showExportConfirmation = false
@@ -288,6 +306,34 @@ private fun SigMarkScreen(
         dismissButton = { TextButton(onClick = { showCellExplanation = false }) { Text("暂不授权") } },
     )
     lanSnapshot?.let { frozen -> LanReportDialog(frozen) { lanSnapshot = null } }
+    if (showSensors) SensorMonitor { showSensors = false }
+    if (showVisibleApps) VisibleApps { showVisibleApps = false }
+    if (showUpdate) AppUpdate(context) { showUpdate = false }
+}
+
+@Composable
+private fun withWindowObservations(snapshot: DeviceSnapshot?): DeviceSnapshot? {
+    if (snapshot == null) return null
+    val size = LocalWindowInfo.current.containerSize
+    val density = LocalDensity.current
+    val direction = LocalLayoutDirection.current
+    fun margins(insets: WindowInsets): String =
+        "左 ${insets.getLeft(density, direction)} · 上 ${insets.getTop(density)} · " +
+            "右 ${insets.getRight(density, direction)} · 下 ${insets.getBottom(density)} px"
+    val bars = margins(WindowInsets.systemBars)
+    val cutout = margins(WindowInsets.displayCutout)
+    return remember(snapshot, size, bars, cutout) {
+        snapshot.copy(sections = snapshot.sections.map { section ->
+            if (section.key != "display" || size.width <= 0 || size.height <= 0) section else section.copy(items =
+                section.items + listOf(
+                    DeviceInfoItem("windowSize", "当前应用窗口尺寸", "${size.width} × ${size.height} px",
+                        "Compose LocalWindowInfo.containerSize", note = "由当前页面布局提供。物理分辨率见显示模式字段。"),
+                    DeviceInfoItem("systemBarInsets", "系统栏边距", bars, "WindowInsets.systemBars"),
+                    DeviceInfoItem("cutoutInsets", "刘海 / 挖孔安全边距", cutout, "WindowInsets.displayCutout",
+                        note = "0 表示窗口当前未收到该方向的边距，不代表硬件一定没有挖孔。"),
+                ))
+        })
+    }
 }
 
 @Composable
@@ -477,6 +523,7 @@ private fun InfoRow(item: DeviceInfoItem) {
                 else -> Muted
             },
                 fontSize = 12.sp, lineHeight = 17.sp, fontWeight = FontWeight.Medium,
+                maxLines = if (expanded) Int.MAX_VALUE else 4, overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(0.58f))
         }
         if (item.status != ValueStatus.AVAILABLE || expanded) {

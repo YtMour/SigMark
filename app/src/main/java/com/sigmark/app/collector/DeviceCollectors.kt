@@ -30,7 +30,7 @@ interface DeviceCollector {
     fun collect(context: Context): DeviceSection
 }
 
-private class SectionBuilder(private val key: String, private val title: String) {
+internal class SectionBuilder(private val key: String, private val title: String) {
     private val items = mutableListOf<DeviceInfoItem>()
 
     fun value(key: String, label: String, source: String, note: String? = null, block: () -> String?) {
@@ -46,10 +46,10 @@ private class SectionBuilder(private val key: String, private val title: String)
     fun build() = DeviceSection(key, title, items.toList())
 }
 
-private fun section(key: String, title: String, block: SectionBuilder.() -> Unit): DeviceSection =
+internal fun section(key: String, title: String, block: SectionBuilder.() -> Unit): DeviceSection =
     SectionBuilder(key, title).apply(block).build()
 
-private fun bytes(value: Long): String = String.format(Locale.US, "%.2f GiB", value / 1073741824.0)
+internal fun bytes(value: Long): String = String.format(Locale.US, "%.2f GiB", value / 1073741824.0)
 
 private object SystemCollector : DeviceCollector {
     override val key = "system"
@@ -76,6 +76,14 @@ private object SystemCollector : DeviceCollector {
         value("buildId", "构建 ID", "Build.ID") { Build.ID }
         value("display", "构建显示名", "Build.DISPLAY") { Build.DISPLAY }
         value("incremental", "增量构建号", "Build.VERSION.INCREMENTAL") { Build.VERSION.INCREMENTAL }
+        value("buildTime", "构建时间", "Build.TIME", "UTC；应用进程视角。") {
+            Build.TIME.takeIf { it > 0 }?.let { java.time.Instant.ofEpochMilli(it).toString() }
+        }
+        value("buildUser", "构建用户", "Build.USER") { Build.USER }
+        value("buildHost", "构建主机", "Build.HOST") { Build.HOST }
+        value("board", "主板代号", "Build.BOARD") { Build.BOARD }
+        if (Build.VERSION.SDK_INT >= 31) value("sku", "硬件 SKU", "Build.SKU") { Build.SKU }
+        value("baseOs", "基础系统版本", "Build.VERSION.BASE_OS") { Build.VERSION.BASE_OS }
         value("type", "构建类型", "Build.TYPE") { Build.TYPE }
         value("tags", "构建标签", "Build.TAGS") { Build.TAGS }
         value("manufacturer", "制造商", "Build.MANUFACTURER") { Build.MANUFACTURER }
@@ -89,12 +97,11 @@ private object SystemCollector : DeviceCollector {
             "${minutes / 1440} 天 ${minutes % 1440 / 60} 小时 ${minutes % 60} 分钟"
         }
         add(SelinuxProbe.collect())
-        val hints = listOf(SafeReader.Property.HYPEROS, SafeReader.Property.MIUI,
-            SafeReader.Property.COLOR_OS, SafeReader.Property.ONE_UI)
-        val hint = hints.asSequence().map(SafeReader::property).firstOrNull { it.value != null }
-        observation("romHint", "ROM 版本线索",
-            hint?.copy(detail = "厂商属性，仅反映当前应用读取结果。") ?: SafeReader.missing(
-                hints.joinToString(" / ") { it.key }, ReadReason.NOT_REPORTED, "常见厂商属性未返回可用值。"))
+        val hint = SafeReader.firstAvailable(*listOf(SafeReader.Property.HYPEROS, SafeReader.Property.MIUI,
+            SafeReader.Property.COLOR_OS, SafeReader.Property.COLOR_OS_ALT, SafeReader.Property.ONE_UI)
+            .map { property -> { SafeReader.property(property) } }.toTypedArray())
+        observation("romHint", "ROM 版本线索", if (hint.value != null)
+            hint.copy(detail = "厂商属性，仅反映当前应用读取结果。") else hint)
     }
 }
 
@@ -108,23 +115,32 @@ private object CpuCollector : DeviceCollector {
             "${uts.sysname} ${uts.release} ${uts.version} ${uts.machine}"
         }
         value("abis", "支持的 ABI", "Build.SUPPORTED_ABIS") { Build.SUPPORTED_ABIS.joinToString(", ") }
+        value("arch", "进程架构", "System.getProperty(os.arch)") { System.getProperty("os.arch") }
+        value("abi32", "支持的 32 位 ABI", "Build.SUPPORTED_32_BIT_ABIS") {
+            Build.SUPPORTED_32_BIT_ABIS.joinToString(", ").ifEmpty { "未声明" }
+        }
+        value("abi64", "支持的 64 位 ABI", "Build.SUPPORTED_64_BIT_ABIS") {
+            Build.SUPPORTED_64_BIT_ABIS.joinToString(", ").ifEmpty { "未声明" }
+        }
         value("hardware", "硬件代号", "Build.HARDWARE") { Build.HARDWARE }
         value("cores", "可用逻辑核心", "Runtime.availableProcessors") {
             Runtime.getRuntime().availableProcessors().toString()
         }
         value("pageSize", "内存页大小", "Os.sysconf(_SC_PAGESIZE)") {
-            "${Os.sysconf(OsConstants._SC_PAGESIZE)} B"
+            Os.sysconf(OsConstants._SC_PAGESIZE).takeIf { it > 0 }?.let { "$it B" }
         }
         val cpuFields = SafeReader.node(SafeReader.Node.CPU_INFO).map(CpuInfoParser::fields)
         observation("cpuInfo", "CPU 描述", cpuFields.map(CpuInfoParser::description))
         observation("features", "CPU 指令特性", cpuFields.map(CpuInfoParser::features))
-        val frequency = SafeReader.node(SafeReader.Node.CPU0_MAX).map {
+        fun maxFrequency(path: SafeReader.Node) = SafeReader.node(path).map {
             it.trim().toLongOrNull()?.takeIf { khz -> khz > 0 }?.let { khz ->
                 String.format(Locale.US, "%.0f MHz", khz / 1000.0)
             }
         }
-        observation("cpu0MaxFrequency", "首核最高频率",
-            if (frequency.value != null) frequency.copy(detail = "首核样本，不代表整颗处理器峰值。") else frequency)
+        val frequency = SafeReader.firstAvailable({ maxFrequency(SafeReader.Node.CPU0_MAX) },
+            { maxFrequency(SafeReader.Node.CPU_POLICY0_MAX) })
+        observation("cpu0MaxFrequency", "CPU 0 / policy0 最高频率",
+            if (frequency.value != null) frequency.copy(detail = "CPU 0 或 policy0 的样本，不代表整颗处理器峰值。") else frequency)
     }
 }
 
@@ -132,21 +148,15 @@ private object MemoryCollector : DeviceCollector {
     override val key = "memory"
     override val title = "内存与存储"
     override fun collect(context: Context) = section(key, title) {
-        val info = ActivityManager.MemoryInfo()
-        val memory = context.getSystemService(ActivityManager::class.java)
-        memory?.getMemoryInfo(info)
-        value("totalRam", "总运行内存", "ActivityManager.MemoryInfo.totalMem") {
-            if (memory == null) null else bytes(info.totalMem)
+        val memory = SafeReader.read("ActivityManager.MemoryInfo") {
+            context.getSystemService(ActivityManager::class.java)?.let { ActivityManager.MemoryInfo().also(it::getMemoryInfo) }
         }
-        value("availableRam", "可用运行内存", "ActivityManager.MemoryInfo.availMem") {
-            if (memory == null) null else bytes(info.availMem)
-        }
-        value("lowMemory", "低内存状态", "ActivityManager.MemoryInfo.lowMemory") {
-            if (memory == null) null else if (info.lowMemory) "是" else "否"
-        }
-        value("lowMemoryThreshold", "低内存阈值", "ActivityManager.MemoryInfo.threshold") {
-            if (memory == null) null else bytes(info.threshold)
-        }
+        observation("totalRam", "总运行内存", memory.map { bytes(it.totalMem) }.copy(source = "ActivityManager.MemoryInfo.totalMem"))
+        observation("availableRam", "可用运行内存", memory.map { bytes(it.availMem) }.copy(source = "ActivityManager.MemoryInfo.availMem"))
+        observation("lowMemory", "低内存状态", memory.map { if (it.lowMemory) "是" else "否" }.copy(source = "ActivityManager.MemoryInfo.lowMemory"))
+        observation("lowMemoryThreshold", "低内存阈值", memory.map { bytes(it.threshold) }.copy(source = "ActivityManager.MemoryInfo.threshold"))
+        observation("ramUseEstimate", "内存占用率（估算）", memory.map { usagePercent(it.totalMem, it.availMem) }
+            .let { it.copy(detail = it.detail ?: "(总量 − 可用量) / 总量；包含系统对可回收内存的估计。") })
         observation("swap", "Swap 总量", SafeReader.node(SafeReader.Node.MEM_INFO).map { text ->
             text.lineSequence().firstOrNull { it.startsWith("SwapTotal:") }?.substringAfter(':')?.trim()
         })
@@ -158,6 +168,20 @@ private object MemoryCollector : DeviceCollector {
         }
         value("sharedState", "共享存储状态", "Environment.getExternalStorageState") {
             Environment.getExternalStorageState()
+        }
+        value("volumeSummary", "可见存储卷", "StorageManager.storageVolumes", "仅显示卷属性，不含 UUID、路径或标签。") {
+            context.getSystemService(android.os.storage.StorageManager::class.java)?.storageVolumes?.let { volumes ->
+                if (volumes.isEmpty()) "无可见卷" else volumes.joinToString("\n") { volume ->
+                    "${if (volume.isPrimary) "主卷" else "副卷"} · ${volume.state} · " +
+                        "${if (volume.isEmulated) "模拟存储" else "非模拟"} · ${if (volume.isRemovable) "可移除" else "不可移除"}"
+                }
+            }
+        }
+        value("systemSpace", "系统路径空间", "StatFs(rootDirectory)", "仅表示该路径所见文件系统。") {
+            StatFs(Environment.getRootDirectory().path).let { "${bytes(it.availableBytes)} 可用 / ${bytes(it.totalBytes)} 总量" }
+        }
+        value("appCacheSpace", "应用缓存路径空间", "StatFs(Context.cacheDir)", "是所在文件系统空间，不是 App 缓存配额；可能与数据区相同。") {
+            StatFs(context.cacheDir.path).let { "${bytes(it.availableBytes)} 可用 / ${bytes(it.totalBytes)} 总量" }
         }
     }
 }
@@ -187,6 +211,15 @@ private object DisplayCollector : DeviceCollector {
             display?.hdrCapabilities?.supportedHdrTypes?.map {
                 when (it) { 1 -> "Dolby Vision"; 2 -> "HDR10"; 3 -> "HLG"; 4 -> "HDR10+"; else -> "类型 $it" }
             }?.let { if (it.isEmpty()) "未声明支持" else it.distinct().joinToString(" / ") }
+        }
+        value("wideGamut", "广色域", "Display.isWideColorGamut") { display?.isWideColorGamut?.let { yesNo(it) } }
+        value("visibleDisplays", "可见显示器", "DisplayManager.getDisplays", "仅应用可见的显示，不等于物理屏幕数量。") {
+            context.getSystemService(DisplayManager::class.java)?.displays?.let { displays ->
+                if (displays.isEmpty()) "无可见显示" else displays.joinToString("\n") {
+                    val mode = it.mode
+                    "${if (it.displayId == 0) "默认显示" else "附加显示"} · ${mode.physicalWidth}×${mode.physicalHeight} · ${mode.refreshRate} Hz"
+                }
+            }
         }
         value("sizeEstimate", "屏幕尺寸（估算）", "Display.mode / DisplayMetrics.xdpi,ydpi", "由系统 DPI 标定推算，不是实测尺寸。") {
             val mode = display?.mode ?: return@value null
@@ -241,9 +274,25 @@ private object BatteryCollector : DeviceCollector {
                 else -> null
             }
         }
+        val manager = context.getSystemService(BatteryManager::class.java)
+        value("capacityPercent", "电量属性", "BatteryManager.BATTERY_PROPERTY_CAPACITY") {
+            manager?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)?.takeIf { it in 0..100 }?.let { "$it%" }
+        }
+        value("chargeCounter", "剩余电荷", "BatteryManager.BATTERY_PROPERTY_CHARGE_COUNTER",
+            "µAh 换算为 mAh；不是设计容量。") {
+            manager?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CHARGE_COUNTER)?.takeIf { it >= 0 }
+                ?.let { String.format(Locale.ROOT, "%.1f mAh", it / 1000.0) }
+        }
+        value("energyCounter", "剩余能量", "BatteryManager.BATTERY_PROPERTY_ENERGY_COUNTER", "nWh 换算为 Wh。") {
+            manager?.getLongProperty(BatteryManager.BATTERY_PROPERTY_ENERGY_COUNTER)?.takeIf { it >= 0 }
+                ?.let { String.format(Locale.ROOT, "%.2f Wh", it / 1e9) }
+        }
+        value("currentAverage", "平均充放电电流", "BatteryManager.BATTERY_PROPERTY_CURRENT_AVERAGE", "保留正负号，系统未回报则留空。") {
+            manager?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_AVERAGE)?.takeIf { it in -30_000_000..30_000_000 }
+                ?.let { String.format(Locale.ROOT, "%.1f mA", it / 1000.0) }
+        }
         value("current", "充放电电流", "BatteryManager.BATTERY_PROPERTY_CURRENT_NOW",
             "Android API 以 µA 返回，显示为 mA； |电流| 超过 30 A 的异常样本不展示，不改写正负号。") {
-            val manager = context.getSystemService(BatteryManager::class.java)
             manager?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_NOW)
                 ?.takeIf { it in -30_000_000..30_000_000 }?.let {
                     String.format(Locale.US, "%.1f mA", it / 1000.0)
@@ -268,8 +317,10 @@ private object SensorsCollector : DeviceCollector {
         val sensors = context.getSystemService(SensorManager::class.java)?.getSensorList(Sensor.TYPE_ALL)
         value("count", "传感器数量", "SensorManager.getSensorList") { sensors?.size?.toString() }
         sensors?.forEachIndexed { index, sensor ->
-            value("sensor_$index", sensor.name, "SensorManager", "类型 ${sensor.type} · 功耗 ${sensor.power} mA") {
-                sensor.vendor
+            value("sensor_$index", sensor.name, "SensorManager.getSensorList(TYPE_ALL)",
+                "最小延迟为采样能力；0 µs 可能表示按变化触发。量程和分辨率单位依传感器类型。") {
+                "${sensor.vendor} · ${sensor.stringType} (${sensor.type}) · 版本 ${sensor.version}\n" +
+                    "量程 ${sensor.maximumRange} · 分辨率 ${sensor.resolution} · 功耗 ${sensor.power} mA · 最小延迟 ${sensor.minDelay} µs"
             }
         }
     }
@@ -279,6 +330,7 @@ class DeviceRepository(private val context: Context) {
     private val collectors: List<DeviceCollector> = listOf(
         SystemCollector, CpuCollector, MemoryCollector, DisplayCollector,
         BatteryCollector, SensorsCollector, NetworkCollector, CellularCollector,
+        RuntimeCollector, MediaCollector, EnvironmentCollector, AppCollector,
     )
 
     suspend fun collect(refreshRadio: Boolean = false): DeviceSnapshot = DeviceSnapshot(System.currentTimeMillis(), collectors.map { collector ->

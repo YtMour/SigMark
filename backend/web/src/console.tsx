@@ -8,6 +8,7 @@ export class RequestError extends Error {
       version_not_approved: '该版本已从可构建列表移除。',
       artifact_checksum_mismatch: '文件校验失败，请重新构建。',
       invalid_settings: '请输入有效的批次名称。',
+      report_selection_changed: '所选报告状态已变化。请关闭此窗口，刷新列表后重新选择。',
     } as Record<string, string>)[code] ?? '请求失败 · HTTP ' + status);
   }
 }

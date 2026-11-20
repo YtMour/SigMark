@@ -112,10 +112,18 @@ internal object NetworkCollector : DeviceCollector {
                     "privateDnsActive", "专用 DNS 状态", "LinkProperties.isPrivateDnsActive",
                     "当前默认网络的系统状态，不记录 DNS 服务器地址或主机名。"
                 ) { if (properties.isPrivateDnsActive) "已启用" else "未启用" }
-                if (Build.VERSION.SDK_INT >= 29) read("linkMtu", "链路 MTU", "LinkProperties.mtu",
-                    "单位为字节。系统未报告显式值时留空，不推定为 1500。") {
-                    properties.mtu.takeIf { it > 0 }?.let { "$it 字节" }
-                }
+                val mtu = SafeReader.firstAvailable(
+                    { SafeReader.read("LinkProperties.mtu") {
+                        if (Build.VERSION.SDK_INT >= 29) properties.mtu.takeIf { it > 0 } else null
+                    } },
+                    { SafeReader.read("LinkProperties.interfaceName → NetworkInterface.mtu") {
+                        properties.interfaceName?.let { java.net.NetworkInterface.getByName(it)?.mtu }
+                            ?.takeIf { it > 0 }
+                    } },
+                ).map { "$it 字节" }
+                items += mtu.copy(detail = listOfNotNull(mtu.detail,
+                    "优先读取 Android 公布的 MTU，随后尝试当前网络接口的 MTU。").joinToString(" "))
+                    .item("linkMtu", "链路 MTU")
             }
         }
         return DeviceSection(key, title, fields.items)
@@ -323,18 +331,27 @@ internal object CellularCollector : DeviceCollector {
                 cell is CellInfoLte -> with(fields) {
                     val id = cell.cellIdentity
                     val signal = cell.cellSignalStrength
-                    if (Build.VERSION.SDK_INT >= 30) {
-                        read("${prefix}Bands", "$tech 频段", "$source.CellIdentityLte.bands", note) { bands(id.bands, "B") }
-                        RadioMath.lteBandRanges(id.bands.toList())?.let { range ->
-                            read("${prefix}BandRange", "$tech 频段下行范围", "CellIdentityLte.bands → 3GPP TS 36.101",
-                                "频段标准范围，不是当前连接的中心频率。") { range }
-                        }
+                    val reportedBands = if (Build.VERSION.SDK_INT >= 30)
+                        runCatching { id.bands.filter { it > 0 && it != Int.MAX_VALUE }.distinct() }.getOrDefault(emptyList())
+                    else emptyList()
+                    val knownBands = reportedBands.ifEmpty { listOfNotNull(RadioMath.lteBandForEarfcn(id.earfcn)) }
+                    val bandSource = if (reportedBands.isNotEmpty()) "$source.CellIdentityLte.bands" else "EARFCN → 3GPP TS 36.101"
+                    read("${prefix}Bands", "$tech 频段", bandSource,
+                        if (reportedBands.isNotEmpty()) note else "系统频段缺失时，由公开信道号换算已知下行频段。") {
+                        knownBands.takeIf { it.isNotEmpty() }?.joinToString(" / ") { "B$it" }
+                    }
+                    RadioMath.lteBandRanges(knownBands)?.let { range ->
+                        read("${prefix}BandRange", "$tech 频段下行范围", "$bandSource / 频段标准范围",
+                            "此范围表示频段上下界。") { range }
                     }
                     read("${prefix}Channel", "$tech 信道号 EARFCN", "$source.CellIdentityLte.earfcn", note) { id.earfcn.validChannel()?.toString() }
                     read("${prefix}Frequency", "$tech 下行参考频率", "EARFCN → 3GPP TS 36.101",
                         if (id.earfcn.validChannel() == null) "缺少系统上报的 EARFCN；频段范围不等于中心频率。"
                         else "仅转换内置常见频段。") { RadioMath.lteDownlinkKhz(id.earfcn)?.let(RadioMath::mhz) }
-                    if (Build.VERSION.SDK_INT >= 28) read("${prefix}Bandwidth", "$tech 信道带宽", "$source.CellIdentityLte.bandwidth", note) { id.bandwidth.validChannel()?.takeIf { it > 0 }?.let { "$it kHz" } }
+                    if (Build.VERSION.SDK_INT >= 28) read("${prefix}Bandwidth", "$tech 信道带宽", "$source.CellIdentityLte.bandwidth",
+                        "$note 带宽取自调制解调器上报。缺值时可尝试在蜂窝连接正常时手动刷新。") {
+                        id.bandwidth.validChannel()?.takeIf { it > 0 }?.let { "$it kHz" }
+                    }
                     read("${prefix}Signal", "$tech 无线信号", "$source.CellSignalStrengthLte", note) { lteSignal(signal) }
                 }
                 Build.VERSION.SDK_INT >= 29 && cell is CellInfoNr -> with(fields) {

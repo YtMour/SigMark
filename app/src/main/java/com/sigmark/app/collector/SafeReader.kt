@@ -45,14 +45,39 @@ internal object SafeReader {
         CPU_INFO("/proc/cpuinfo", 96 * 1024),
         MEM_INFO("/proc/meminfo", 16 * 1024),
         CPU0_MAX("/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq", 64),
+        CPU_POLICY0_MAX("/sys/devices/system/cpu/cpufreq/policy0/cpuinfo_max_freq", 64),
         SELINUX_ENFORCE("/sys/fs/selinux/enforce", 16),
         SELINUX_POLICY("/sys/fs/selinux/policy"),
+        SELF_CONTEXT("/proc/self/attr/current", 256),
     }
 
     enum class Property(val key: String) {
         SELINUX_BOOT("ro.boot.selinux"), SELINUX_BUILD("ro.build.selinux"),
         HYPEROS("ro.mi.os.version.name"), MIUI("ro.miui.ui.version.name"),
         COLOR_OS("ro.build.version.opporom"), ONE_UI("ro.build.version.oneui"),
+        COLOR_OS_ALT("ro.oplus.version.opporom"), VERIFIED_BOOT("ro.boot.verifiedbootstate"),
+        VBMETA_STATE("ro.boot.vbmeta.device_state"), FLASH_LOCKED("ro.boot.flash.locked"),
+        DEBUGGABLE("ro.debuggable"),
+    }
+
+    // Lazy suppliers let a successful candidate skip the remaining reads.
+    fun <T> firstAvailable(vararg candidates: () -> ReadResult<T>): ReadResult<T> {
+        require(candidates.isNotEmpty())
+        val failures = mutableListOf<ReadResult<T>>()
+        for (candidate in candidates) {
+            val result = candidate()
+            if (result.value != null && result.status == ValueStatus.AVAILABLE) return result
+            failures += result
+        }
+        val primary = failures.firstOrNull { it.status == ValueStatus.RESTRICTED }
+            ?: failures.firstOrNull { it.status == ValueStatus.ERROR }
+            ?: failures.firstOrNull { it.errno != null }
+            ?: failures.first()
+        if (failures.size == 1) return primary
+        val others = failures.filter { it !== primary }.joinToString("；") {
+            "${it.source}: ${it.reason?.name ?: it.status.name}${it.errno?.let { code -> " errno=$code" }.orEmpty()}"
+        }
+        return primary.copy(detail = listOfNotNull(primary.detail, "其他候选：$others").joinToString(" "))
     }
 
     fun <T> read(source: String, detail: String? = null, block: () -> T?): ReadResult<T> = try {
@@ -138,6 +163,20 @@ internal object SafeReader {
                     out.toString(Charsets.UTF_8.name())
                 }
             } finally { Os.close(fd) }
+        }
+    }
+
+    fun suFileHint(): ReadResult<String> = firstAvailable(
+        { statSu("/system/bin/su") }, { statSu("/system/xbin/su") }, { statSu("/sbin/su") },
+    ).let { reading ->
+        reading.copy(detail = listOfNotNull(reading.detail,
+            "只检查固定路径的元数据。可见条目和路径缺失都只作环境线索。").joinToString(" "))
+    }
+
+    private fun statSu(path: String): ReadResult<String> = bounded(path, fileTimeoutMs) {
+        read(path) {
+            Os.stat(path)
+            "应用可见此路径"
         }
     }
 

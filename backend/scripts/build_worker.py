@@ -83,7 +83,7 @@ def android_tools():
 def register_artifact(folder, job, apk, origin):
     aapt, signer = android_tools()
     result = subprocess.check_output([str(aapt), "dump", "badging", str(apk)], text=True, encoding="utf-8", errors="replace", timeout=20)
-    version = re.search(r"(?m)^package: name='com\.sigmark\.app' .+?versionName='([0-9.]+)'", result)
+    version = re.search(r"(?m)^package: name='com\.sigmark\.app' versionCode='([0-9]+)' versionName='([0-9.]+)'", result)
     if not version or "application-debuggable" not in result:
         raise ValueError("Expected a SigMark Android debug APK.")
     subprocess.run([str(signer), "verify", str(apk)], check=True, timeout=30, stdout=subprocess.DEVNULL)
@@ -97,7 +97,7 @@ def register_artifact(folder, job, apk, origin):
         src.seek(0)
         with target.open("xb") as dst:
             shutil.copyfileobj(src, dst)
-    job.update(state="succeeded", version=version.group(1), sha256=sha, size=size, origin=origin)
+    job.update(state="succeeded", version=version.group(2), versionCode=int(version.group(1)), sha256=sha, size=size, origin=origin)
     atomic_json(folder / "job.json", job)
     print("Artifact ready", job["id"], job["version"], sha)
 

@@ -26,16 +26,17 @@ type buildVersion struct {
 	Commit string `json:"commit"`
 }
 type buildJob struct {
-	ID        string    `json:"id"`
-	Name      string    `json:"name"`
-	Commit    string    `json:"commit"`
-	State     string    `json:"state"`
-	CreatedAt time.Time `json:"createdAt"`
-	Message   string    `json:"message,omitempty"`
-	Version   string    `json:"version,omitempty"`
-	Origin    string    `json:"origin,omitempty"`
-	SHA256    string    `json:"sha256,omitempty"`
-	Size      int64     `json:"size,omitempty"`
+	ID          string    `json:"id"`
+	Name        string    `json:"name"`
+	Commit      string    `json:"commit"`
+	State       string    `json:"state"`
+	CreatedAt   time.Time `json:"createdAt"`
+	Message     string    `json:"message,omitempty"`
+	Version     string    `json:"version,omitempty"`
+	VersionCode int64     `json:"versionCode,omitempty"`
+	Origin      string    `json:"origin,omitempty"`
+	SHA256      string    `json:"sha256,omitempty"`
+	Size        int64     `json:"size,omitempty"`
 }
 
 var buildID = regexp.MustCompile(`^[a-f0-9]{32}$`)
@@ -266,7 +267,7 @@ func (s server) downloadInfo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	f.Close()
-	send(w, 200, map[string]any{"version": job.Version, "size": job.Size, "sha256": job.SHA256, "origin": job.Origin})
+	send(w, 200, map[string]any{"version": job.Version, "versionCode": job.VersionCode, "size": job.Size, "sha256": job.SHA256, "origin": job.Origin})
 }
 func (s server) downloadAPK(w http.ResponseWriter, r *http.Request) {
 	f, job, err := s.currentAPK()

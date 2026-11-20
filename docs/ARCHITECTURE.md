@@ -14,7 +14,8 @@ Debug 内网试验分支：冻结当前本地快照 → `lan/LanReport.kt` 按�
 - `collector/NetworkCollectors.kt`：默认网络、Wi-Fi 链路和移动网络分开展示；`RadioMath.kt` 负责可单测的频率/信道换算。手动刷新且已授权时尝试一次公开小区更新，最多等待 2.5 秒再回退到缓存。
 - `model/DeviceInfo.kt`：`DeviceInfoItem` 包含稳定 key、标签、值、来源、状态、说明。JSON 使用 `schemaVersion`，消费者应按 key 而非中文 label 解析。
 - `MainViewModel.kt`：采集在 `Dispatchers.IO` 上执行，`StateFlow` 向 UI 暴露快照、刷新态和整体错误。
-- `MainActivity.kt`：页面仅渲染快照；导出前显示敏感性提醒，写入用户选定的 URI。
+- `MainActivity.kt` 渲染快照，从 Compose 窗口状态补充尺寸及边距，在导出预览中提示内容，并写入用户选定的 URI。
+- `collector/FrameworkCollectors.kt` 提供运行时、媒体、环境和应用字段。`SensorMonitor.kt` 随面板和前台生命周期管理订阅。`VisibleApps.kt` 按需查询当前可见且有桌面入口的应用和所选应用的权限。
 
 ## UI 测试动线
 
@@ -45,7 +46,7 @@ Debug 内网试验分支：冻结当前本地快照 → `lan/LanReport.kt` 按�
 - 公开 API 优先：Build、ActivityManager、StatFs、Display、BatteryManager、SensorManager、ConnectivityManager。CPU 文本、首核频率、Swap、SELinux 与厂商属性是可选补充，不阻断其他参数。
 - EACCES/EPERM 标记 `RESTRICTED`；ENOENT/ENODEV 映射 `UNAVAILABLE / NODE_MISSING`。`UNAVAILABLE` 是兼容旧版 JSON 的“暂无数据/不支持”状态，不另造 `UNSUPPORTED` 枚举。属性无返回值为 `NOT_REPORTED`；真正的失败或超时标记 `ERROR`。不根据缺失或受限推断风险。
 - ROM 版本线索依次尝试 HyperOS、MIUI、ColorOS、One UI 的常见公开可读属性。HDR 是显示器声明的能力；尺寸来自系统 DPI 推算。电流按 BatteryManager 的 µA 转 mA，保留正负号，排除无效或明显异常的样本。
-- Android ID 等额外设备标识、持续传感器监听、风险指纹方案尚未接入；台账用途不依赖持久设备标识。不以这台设备的成功率代表不同厂商和版本的兼容性。
+- 设备配置摘要只使用版本化的 Build 和 ABI 输入。环境线索记录各自状态和来源。实现和兼容范围见 [采集字段说明](FRAMEWORK-DIAGNOSTICS.md)。
 
 ## 扩展约定
 

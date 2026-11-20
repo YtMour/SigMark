@@ -1,0 +1,116 @@
+package com.sigmark.app.lan
+
+import com.sigmark.app.model.DeviceSnapshot
+import com.sigmark.app.model.ValueStatus
+import org.json.JSONArray
+import org.json.JSONObject
+import java.net.HttpURLConnection
+import java.net.Proxy
+import java.net.URI
+import java.util.UUID
+
+internal val reportFields = linkedMapOf(
+    "system.selinux" to "SELinux 模式", "cpu.kernelFull" to "内核编译信息",
+    "network.wifiFrequency" to "Wi-Fi 频率", "network.internetValidation" to "互联网验证",
+    "cellular.dataRat" to "蜂窝制式", "cellular.cellDiagnostics" to "小区无线参数",
+)
+
+internal data class LanMetric(val key: String, val status: String, val reason: String?)
+
+internal data class LanReport(
+    val model: String, val androidApi: Int, val network: String, val wifiBand: String, val radio: String,
+    val capturedAt: Long, val appVersion: String, val metrics: List<LanMetric>, val feedback: String,
+    val requestId: String = UUID.randomUUID().toString(),
+) {
+    fun json(): ByteArray = JSONObject().apply {
+        put("schemaVersion", 1); put("requestId", requestId); put("capturedAtEpochMs", capturedAt)
+        put("model", model); put("androidApi", androidApi); put("appVersion", appVersion)
+        put("network", network); put("wifiBand", wifiBand); put("radio", radio)
+        if (feedback.isNotEmpty()) put("feedback", feedback)
+        put("metrics", JSONArray().apply {
+            metrics.forEach { add -> put(JSONObject().apply {
+                put("key", add.key); put("status", add.status)
+                if (add.reason != null) put("reason", add.reason)
+            }) }
+        })
+    }.toString().toByteArray(Charsets.UTF_8)
+}
+
+internal fun lanReport(snapshot: DeviceSnapshot, appVersion: String, feedback: String): LanReport {
+    val fields = snapshot.sections.flatMap { section -> section.items.map { "${section.key}.${it.key}" to it } }.toMap()
+    fun get(key: String) = fields[key]?.takeIf { it.status == ValueStatus.AVAILABLE }?.value.orEmpty()
+    val model = get("system.model").trim().takeIf { it.matches(Regex("[\\p{L}\\p{N} ._+()\\-]{1,40}")) } ?: "unknown"
+    val transports = get("network.transport").split(" + ")
+    val network = when {
+        "VPN" in transports -> "vpn"
+        "Wi-Fi" in transports -> "wifi"
+        "蜂窝网络" in transports -> "cellular"
+        "以太网" in transports -> "ethernet"
+        "无默认网络" in transports -> "none"
+        transports.all { it.isEmpty() } -> "unknown"
+        else -> "other"
+    }
+    val band = get("network.wifiBandChannel").substringBefore(" GHz").takeIf { it in setOf("2.4", "4.9", "5", "6", "60") } ?: "unknown"
+    val radio = when (get("cellular.dataRat").substringBefore(' ')) {
+        "LTE" -> "lte"; "NR" -> "nr"; "IWLAN" -> "iwlan"; "" -> "unknown"; else -> "other"
+    }
+    val metrics = reportFields.keys.mapNotNull { key -> fields[key]?.let { LanMetric(key,it.status.name,it.reason?.name) } }
+    return LanReport(model, get("system.api").toIntOrNull()?.takeIf { it in 1..999 } ?: 0,
+        network, band, radio, snapshot.collectedAt, appVersion, metrics, feedback)
+}
+
+// Numeric IPv4 only: avoids sending an invite to a hostname that later resolves outside the lab.
+internal fun lanEndpoint(raw: String): URI? {
+    val input = raw.trim()
+    if (input.length > 64) return null
+    val uri = try { URI(input) } catch (_: Exception) { return null }
+    if (uri.scheme != "http" || uri.userInfo != null || uri.rawQuery != null || uri.rawFragment != null ||
+        uri.port !in 1..65535 || uri.rawPath !in setOf("", "/")) return null
+    val host = uri.host ?: return null
+    val octets = host.split('.').map { part -> part.toIntOrNull()?.takeIf { it in 0..255 && it.toString() == part } ?: return null }
+    if (octets.size != 4) return null
+    val local = host == "127.0.0.1" || octets[0] == 10 ||
+        (octets[0] == 172 && octets[1] in 16..31) || (octets[0] == 192 && octets[1] == 168)
+    if (!local) return null
+    return URI("http", null, host, uri.port, "/api/v1/reports", null, null)
+}
+
+internal fun validFeedback(text: String): Boolean = text.codePointCount(0,text.length) <= 300 &&
+    text.none { Character.isISOControl(it) }
+
+internal fun sendLanReport(endpoint: URI, report: LanReport): String {
+    check(lanEndpoint("http://${endpoint.host}:${endpoint.port}") == endpoint)
+    val http = endpoint.toURL().openConnection(Proxy.NO_PROXY) as HttpURLConnection
+    return try {
+        http.connectTimeout = 6_000; http.readTimeout = 8_000
+        http.requestMethod = "POST"
+        http.instanceFollowRedirects = false
+        http.doOutput = true
+        http.setRequestProperty("Content-Type", "application/json")
+        http.setRequestProperty("X-SigMark-Client", "android-lan")
+        val payload = report.json()
+        http.setFixedLengthStreamingMode(payload.size)
+        http.outputStream.use { it.write(payload) }
+        when (http.responseCode) {
+            201 -> http.inputStream.use { input ->
+                val bytes = ByteArray(1024)
+                var count = 0
+                while (count < bytes.size) {
+                    val n = input.read(bytes, count, bytes.size - count)
+                    if (n < 0) break
+                    count += n
+                }
+                val id = JSONObject(String(bytes, 0, count, Charsets.UTF_8)).optString("reportId")
+                require(runCatching { UUID.fromString(id).toString() == id }.getOrDefault(false))
+                id
+            }
+            403 -> throw LanFailure("后台未接受当前客户端，请确认手机和管理台版本匹配。")
+            400 -> throw LanFailure("报告未通过校验。请检查设备时间，刷新采集后重试。")
+            409 -> throw LanFailure("提交编号冲突，请关闭预览后重新打开。")
+            429 -> throw LanFailure("提交过快，请稍候再试。")
+            else -> throw LanFailure("服务端暂未接收报告（HTTP ${http.responseCode}）。")
+        }
+    } finally { http.disconnect() }
+}
+
+internal class LanFailure(message: String) : Exception(message)

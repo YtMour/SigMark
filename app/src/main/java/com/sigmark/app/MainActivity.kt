@@ -1,6 +1,10 @@
 package com.sigmark.app
 
+import android.Manifest
+import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
+import android.provider.Settings
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.widget.Toast
@@ -67,7 +71,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.sigmark.app.model.DeviceInfoItem
 import com.sigmark.app.model.DeviceSection
 import com.sigmark.app.model.DeviceSnapshot
+import com.sigmark.app.model.ReadReason
 import com.sigmark.app.model.ValueStatus
+import com.sigmark.app.lan.LanReportDialog
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -81,6 +87,12 @@ private val Stroke = Color(0xFF294149)
 
 class MainActivity : ComponentActivity() {
     private val viewModel: MainViewModel by viewModels()
+    private val cellPermission = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+        viewModel.refresh()
+    }
+    private val diagnosticSettings = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+        viewModel.refresh()
+    }
     private var pendingExport: DeviceSnapshot? = null
     private val createDocument = registerForActivityResult(
         ActivityResultContracts.CreateDocument("application/json")
@@ -113,7 +125,13 @@ class MainActivity : ComponentActivity() {
                 surface = CardColor, onSurface = Color.White,
             )) {
                 val state by viewModel.state.collectAsStateWithLifecycle()
-                SigMarkScreen(state, onRefresh = viewModel::refresh, onExport = { snapshot ->
+                SigMarkScreen(state, onRefresh = { viewModel.refresh(refreshRadio = true) }, onCellPermission = {
+                    cellPermission.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
+                }, onAppSettings = {
+                    diagnosticSettings.launch(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", packageName, null)))
+                }, onLocationSettings = {
+                    diagnosticSettings.launch(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS))
+                }, onExport = { snapshot ->
                     pendingExport = snapshot
                     createDocument.launch("SigMark-${SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date(snapshot.collectedAt))}.json")
                 })
@@ -126,12 +144,17 @@ class MainActivity : ComponentActivity() {
 private fun SigMarkScreen(
     state: MainUiState,
     onRefresh: () -> Unit,
+    onCellPermission: () -> Unit,
+    onAppSettings: () -> Unit,
+    onLocationSettings: () -> Unit,
     onExport: (DeviceSnapshot) -> Unit,
 ) {
     var query by rememberSaveable { mutableStateOf("") }
     var selected by rememberSaveable { mutableStateOf("all") }
     var issuesOnly by rememberSaveable { mutableStateOf(false) }
     var showExportConfirmation by rememberSaveable { mutableStateOf(false) }
+    var showCellExplanation by rememberSaveable { mutableStateOf(false) }
+    var lanSnapshot by remember { mutableStateOf<DeviceSnapshot?>(null) }
     val snapshot = state.snapshot
     val issueCount = snapshot?.sections?.sumOf { section ->
         section.items.count { it.status != ValueStatus.AVAILABLE }
@@ -150,6 +173,7 @@ private fun SigMarkScreen(
             }.orEmpty()
     }
     val listState = rememberLazyListState()
+    val permissionMissing = snapshot?.sections?.any { it.key == "cellular" && it.items.any { row -> row.key == "cellDiagnostics" && row.reason == ReadReason.PERMISSION_REQUIRED } } == true
 
     Scaffold(containerColor = Ink, topBar = { AppHeader(snapshot, state.refreshing, onRefresh, onExportRequest = { showExportConfirmation = true }) }) { padding ->
         LazyColumn(
@@ -161,6 +185,15 @@ private fun SigMarkScreen(
             item {
                 Column(Modifier.padding(horizontal = 16.dp)) {
                     OverviewCard(snapshot)
+                    if (permissionMissing || BuildConfig.DEBUG) {
+                        Surface(color = CardColor, shape = RoundedCornerShape(12.dp), modifier = Modifier.padding(top = 9.dp)) {
+                            Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
+                                if (permissionMissing) TextButton(onClick = { showCellExplanation = true }) { Text("授权查看小区无线参数") }
+                                if (BuildConfig.DEBUG) Button(enabled = snapshot != null, onClick = { lanSnapshot = snapshot },
+                                    modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)) { Text("上传报告") }
+                            }
+                        }
+                    }
                     Spacer(Modifier.height(12.dp))
                     SearchBox(query, onChange = { query = it })
                     Spacer(Modifier.height(10.dp))
@@ -186,11 +219,16 @@ private fun SigMarkScreen(
                     horizontalArrangement = Arrangement.spacedBy(7.dp),
                 ) {
                     item { CategoryChip("all", "全部", selected, onSelect = { selected = it }) }
-                    snapshot?.sections?.forEach { section ->
+                    snapshot?.sections?.sortedBy {
+                        when (it.key) { "network" -> 0; "cellular" -> 1; else -> 2 }
+                    }?.forEach { section ->
                         item { CategoryChip(section.key, section.title, selected,
                             onSelect = { selected = it }) }
                     }
                 }
+            }
+            state.error?.let { error ->
+                item { Text(error, color = Color(0xFFF4C589), modifier = Modifier.padding(horizontal = 16.dp)) }
             }
             if (snapshot == null && state.refreshing) {
                 item {
@@ -211,7 +249,9 @@ private fun SigMarkScreen(
                 }
             } else {
                 items(sections, key = { it.key }) { section ->
-                    SectionCard(section, Modifier.padding(horizontal = 16.dp))
+                    SectionCard(section, Modifier.padding(horizontal = 16.dp),
+                        showAll = query.isNotBlank() || selected != "all" || issuesOnly,
+                        onCellPermission = { showCellExplanation = true }, onLocationSettings = onLocationSettings)
                 }
             }
             item {
@@ -225,7 +265,7 @@ private fun SigMarkScreen(
         AlertDialog(
             onDismissRequest = { showExportConfirmation = false },
             title = { Text("导出设备报告") },
-            text = { Text("报告包含构建指纹、设备型号等信息。保存后请检查内容，再决定是否分享。") },
+            text = { Text("报告包含构建指纹、设备型号、运营商及可用的无线参数。小区频点等数据可能反映所处区域，请检查后再分享。") },
             confirmButton = {
                 TextButton(onClick = {
                     showExportConfirmation = false
@@ -237,6 +277,17 @@ private fun SigMarkScreen(
             },
         )
     }
+    if (showCellExplanation) AlertDialog(
+        onDismissRequest = { showCellExplanation = false },
+        title = { Text("查看小区无线参数") },
+        text = { Column {
+            Text("Android 将小区频段、信道号和信号视为位置相关信息，因此需要精确位置权限。印迹只读取系统的无线缓存，不读坐标、小区 ID 或邻区列表；授权本身不会上传。选择「暂不授权」仍可查看运营商及 Wi-Fi。")
+            TextButton(onClick = { showCellExplanation = false; onAppSettings() }) { Text("打开应用权限设置") }
+        } },
+        confirmButton = { TextButton(onClick = { showCellExplanation = false; onCellPermission() }) { Text("请求授权") } },
+        dismissButton = { TextButton(onClick = { showCellExplanation = false }) { Text("暂不授权") } },
+    )
+    lanSnapshot?.let { frozen -> LanReportDialog(frozen) { lanSnapshot = null } }
 }
 
 @Composable
@@ -347,9 +398,10 @@ private fun CategoryChip(key: String, title: String, selected: String, onSelect:
 }
 
 @Composable
-private fun SectionCard(section: DeviceSection, modifier: Modifier = Modifier) {
+private fun SectionCard(section: DeviceSection, modifier: Modifier = Modifier, showAll: Boolean,
+    onCellPermission: () -> Unit, onLocationSettings: () -> Unit) {
     var expanded by rememberSaveable(section.key) { mutableStateOf(false) }
-    val visibleItems = if (expanded || section.items.size <= 5) section.items else
+    val visibleItems = if (showAll || expanded || section.items.size <= 5) section.items else
         (section.items.take(5) + section.items.filter { it.status != ValueStatus.AVAILABLE })
             .distinctBy { it.key }
     Card(modifier = modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp),
@@ -368,8 +420,17 @@ private fun SectionCard(section: DeviceSection, modifier: Modifier = Modifier) {
                 if (index > 0) HorizontalDivider(color = Stroke,
                     modifier = Modifier.padding(horizontal = 14.dp))
                 InfoRow(item)
+                if (section.key == "cellular" && item.key == "cellDiagnostics") {
+                    when (item.reason) {
+                        ReadReason.PERMISSION_REQUIRED -> TextButton(onClick = onCellPermission,
+                            modifier = Modifier.padding(horizontal = 5.dp)) { Text("授权查看小区参数") }
+                        ReadReason.LOCATION_DISABLED -> TextButton(onClick = onLocationSettings,
+                            modifier = Modifier.padding(horizontal = 5.dp)) { Text("打开系统位置设置") }
+                        else -> Unit
+                    }
+                }
             }
-            if (section.items.size > visibleItems.size || expanded) {
+            if (!showAll && (section.items.size > visibleItems.size || expanded)) {
                 HorizontalDivider(color = Stroke, modifier = Modifier.padding(horizontal = 14.dp))
                 TextButton(onClick = { expanded = !expanded },
                     modifier = Modifier.fillMaxWidth()) {

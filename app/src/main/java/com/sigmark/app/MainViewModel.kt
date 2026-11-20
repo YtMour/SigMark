@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.sigmark.app.collector.DeviceRepository
 import com.sigmark.app.model.DeviceSnapshot
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
@@ -24,13 +25,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     init { refresh() }
 
-    fun refresh() {
+    fun refresh(refreshRadio: Boolean = false) {
         if (mutableState.value.refreshing) return
         viewModelScope.launch {
             mutableState.value = mutableState.value.copy(refreshing = true, error = null)
             try {
-                val snapshot = withContext(Dispatchers.IO) { repository.collect() }
+                val snapshot = withContext(Dispatchers.IO) { repository.collect(refreshRadio) }
                 mutableState.value = MainUiState(snapshot = snapshot)
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 mutableState.value = mutableState.value.copy(refreshing = false,
                     error = "采集失败：${e.javaClass.simpleName}")

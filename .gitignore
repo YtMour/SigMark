@@ -5,6 +5,11 @@ local.properties
 .idea/
 *.iml
 .DS_Store
+.env
+.env.*
+!.env.example
+node_modules/
+backend/web/dist/
 安卓采集.md
 技术栈方案.md
 指纹采集.md

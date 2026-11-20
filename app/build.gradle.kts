@@ -14,13 +14,21 @@ android {
         applicationId = "com.sigmark.app"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 4
+        versionName = "0.4.0"
     }
 
     buildTypes {
+        debug {
+            val origin = providers.gradleProperty("SIGMARK_LAN_URL").orElse("").get()
+            require(origin.isEmpty() || Regex("""http://[0-9.]+:[0-9]{1,5}""").matches(origin)) {
+                "SIGMARK_LAN_URL must be an HTTP numeric IPv4 origin with a port"
+            }
+            buildConfigField("String", "LAN_ORIGIN", "\"$origin\"")
+        }
         release {
             isMinifyEnabled = false
+            buildConfigField("String", "LAN_ORIGIN", "\"\"")
         }
     }
 
@@ -28,7 +36,10 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-    buildFeatures { compose = true }
+    buildFeatures {
+        compose = true
+        buildConfig = true
+    }
 }
 
 kotlin { compilerOptions { jvmTarget.set(JvmTarget.JVM_17) } }

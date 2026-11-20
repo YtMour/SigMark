@@ -7,8 +7,6 @@ import android.content.IntentFilter
 import android.hardware.Sensor
 import android.hardware.SensorManager
 import android.hardware.display.DisplayManager
-import android.net.ConnectivityManager
-import android.net.NetworkCapabilities
 import android.os.BatteryManager
 import android.os.Build
 import android.os.Environment
@@ -20,6 +18,7 @@ import android.system.ErrnoException
 import com.sigmark.app.model.DeviceInfoItem
 import com.sigmark.app.model.DeviceSection
 import com.sigmark.app.model.DeviceSnapshot
+import com.sigmark.app.model.ReadReason
 import com.sigmark.app.model.ValueStatus
 import com.sigmark.app.model.normalizeValue
 import java.io.File
@@ -42,12 +41,13 @@ private class SectionBuilder(private val key: String, private val title: String)
                 if (result == null) ValueStatus.UNAVAILABLE else ValueStatus.AVAILABLE, note)
         } catch (e: SecurityException) {
             DeviceInfoItem(key, label, null, source, ValueStatus.RESTRICTED,
-                "系统拒绝应用读取；${note ?: source}")
+                "系统拒绝应用读取；${note ?: source}", ReadReason.ACCESS_DENIED)
         } catch (e: ErrnoException) {
             val restricted = e.errno == OsConstants.EACCES || e.errno == OsConstants.EPERM
             DeviceInfoItem(key, label, null, source,
                 if (restricted) ValueStatus.RESTRICTED else ValueStatus.ERROR,
-                "errno=${e.errno}；${note ?: "读取失败"}")
+                "errno=${e.errno}；${note ?: "读取失败"}",
+                if (restricted) ReadReason.ACCESS_DENIED else ReadReason.READ_FAILED)
         } catch (e: IOException) {
             val restricted = e.message?.contains("Permission denied", ignoreCase = true) == true ||
                 e.message?.contains("EACCES", ignoreCase = true) == true
@@ -112,7 +112,7 @@ private object SystemCollector : DeviceCollector {
             "${minutes / 1440} 天 ${minutes % 1440 / 60} 小时 ${minutes % 60} 分钟"
         }
         value("selinux", "SELinux 模式", "Os.open(/sys/fs/selinux/enforce)",
-            "内核访问控制限制；不据此推断模式") { readSelinuxMode() }
+            "Android 普通应用没有此节点的读取权限时，位置授权和 Native 调用均不改变访问结果；不据此推断模式。") { readSelinuxMode() }
     }
 }
 
@@ -276,32 +276,19 @@ private object SensorsCollector : DeviceCollector {
     }
 }
 
-private object NetworkCollector : DeviceCollector {
-    override val key = "network"
-    override val title = "网络状态"
-    override fun collect(context: Context) = section(key, title) {
-        value("transport", "当前网络", "ConnectivityManager.NetworkCapabilities") {
-            val manager = context.getSystemService(ConnectivityManager::class.java) ?: return@value null
-            val caps = manager.getNetworkCapabilities(manager.activeNetwork) ?: return@value "无网络"
-            buildList {
-                if (caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) add("Wi-Fi")
-                if (caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)) add("蜂窝网络")
-                if (caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)) add("以太网")
-                if (caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) add("VPN")
-            }.ifEmpty { listOf("其他网络") }.joinToString(" + ")
-        }
-    }
-}
-
 class DeviceRepository(private val context: Context) {
     private val collectors: List<DeviceCollector> = listOf(
         SystemCollector, CpuCollector, MemoryCollector, DisplayCollector,
-        BatteryCollector, SensorsCollector, NetworkCollector,
+        BatteryCollector, SensorsCollector, NetworkCollector, CellularCollector,
     )
 
-    fun collect(): DeviceSnapshot = DeviceSnapshot(System.currentTimeMillis(), collectors.map { collector ->
+    suspend fun collect(refreshRadio: Boolean = false): DeviceSnapshot = DeviceSnapshot(System.currentTimeMillis(), collectors.map { collector ->
         try {
-            collector.collect(context)
+            if (collector === CellularCollector && refreshRadio)
+                CellularCollector.collect(context, CellularCollector.requestUpdate(context))
+            else collector.collect(context)
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: Exception) {
             DeviceSection(collector.key, collector.title, listOf(DeviceInfoItem(
                 "collectorError", "采集器状态", null, collector.javaClass.simpleName,

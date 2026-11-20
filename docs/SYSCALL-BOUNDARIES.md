@@ -8,6 +8,8 @@ SigMark 可以使用 `android.system.Os` 或 NDK/libc 读取某些底层信息�
 
 可用的底层补充信息包括 `uname` 的内核 release/编译版本、`sysconf` 的页大小，以及当前应用可读的 `/proc/cpuinfo`、部分 CPU 频率节点。它们是应用进程观察值，不一定与 ADB shell 或物理硬件规格相同。
 
+0.4.0 在已有精确位置授权的真机上再测，应用仍返回 `EACCES`；Android 位置授权与该节点权限无关。若项目确实需要普通安装版范围之外的现场状态，可由自有 ROM 提供经过系统策略授权的只读诊断接口，或在测试记录独立标注系统侧观测；这不是普通 APK 的可采集值。不得通过关闭 SELinux 达成采集。
+
 ## 后续技术选项
 
 - **普通安装版**：继续优先使用公开 Android API、`android.system.Os` 与可读节点；权限错误记录 `errno` 和来源。

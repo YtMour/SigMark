@@ -6,8 +6,11 @@ SigMark 当前采用单模块 Kotlin / Compose 结构，目标是让每一项信
 
 `DeviceCollector` → `DeviceRepository` → `MainViewModel (StateFlow)` → Compose 页面 → 系统文档选择器导出 JSON。
 
+Debug 内网试验分支：冻结当前本地快照 → `lan/LanReport.kt` 按白名单投影 → 用户确认上传 → 内置局域网地址的 Go API → PostgreSQL。管理台同源，通过独立 Bearer 令牌读取；App 不携带管理员令牌。与完整 JSON 导出独立；详细契约和运行说明见 [内网试验手册](LAN-PILOT.md)。
+
 - `collector/DeviceCollectors.kt`：各分类独立采集；字段级捕获异常，分类级兜底，避免单项失败导致整页空白。当前只在进入页面和手动刷新时采集，不做后台定时轮询。
 - `collector/CpuInfoParser.kt`：将厂商格式差异较大的 `/proc/cpuinfo` 文本解析为可显示字段，不推断 SoC 商品名。
+- `collector/NetworkCollectors.kt`：默认网络、Wi-Fi 链路和移动网络分开展示；`RadioMath.kt` 负责可单测的频率/信道换算。手动刷新且已授权时尝试一次公开小区更新，最多等待 2.5 秒再回退到缓存。
 - `model/DeviceInfo.kt`：`DeviceInfoItem` 包含稳定 key、标签、值、来源、状态、说明。JSON 使用 `schemaVersion`，消费者应按 key 而非中文 label 解析。
 - `MainViewModel.kt`：采集在 `Dispatchers.IO` 上执行，`StateFlow` 向 UI 暴露快照、刷新态和整体错误。
 - `MainActivity.kt`：页面仅渲染快照；导出前显示敏感性提醒，写入用户选定的 URI。
@@ -26,6 +29,8 @@ SigMark 当前采用单模块 Kotlin / Compose 结构，目标是让每一项信
 | `ERROR` | 其他读数异常 | `null` |
 
 受限状态不等同于设备关闭某项能力。例如 `/sys/fs/selinux/enforce` 被拒绝，只能表示当前应用读取受限，不能据此推断 SELinux 模式。
+
+JSON `schemaVersion: 1` 的字段结构兼容旧报告。消费者允许新增分类/字段，并应忽略未知属性；字段的可选 `reason` 可返回 `PERMISSION_REQUIRED`、`LOCATION_DISABLED`、`ACCESS_DENIED`、`NOT_REPORTED`、`READ_FAILED`；不存在时仅按 `status` 判断，不从中文说明推断原因码。
 
 ## 扩展约定
 

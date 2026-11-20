@@ -4,6 +4,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 enum class ValueStatus { AVAILABLE, UNAVAILABLE, RESTRICTED, ERROR }
+enum class ReadReason { PERMISSION_REQUIRED, LOCATION_DISABLED, ACCESS_DENIED, NOT_REPORTED, READ_FAILED }
 
 data class DeviceInfoItem(
     val key: String,
@@ -12,6 +13,7 @@ data class DeviceInfoItem(
     val source: String,
     val status: ValueStatus = ValueStatus.AVAILABLE,
     val note: String? = null,
+    val reason: ReadReason? = null,
 )
 
 data class DeviceSection(val key: String, val title: String, val items: List<DeviceInfoItem>)
@@ -35,6 +37,7 @@ data class DeviceSnapshot(val collectedAt: Long, val sections: List<DeviceSectio
                                 put("source", item.source)
                                 put("status", item.status.name)
                                 put("note", item.note ?: JSONObject.NULL)
+                                if (item.reason != null) put("reason", item.reason.name)
                             })
                         }
                     })

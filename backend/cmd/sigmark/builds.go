@@ -11,6 +11,7 @@ import (
 	"os"
 	"regexp"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -22,25 +23,43 @@ type buildCenter struct {
 	mu            sync.Mutex
 }
 type buildVersion struct {
-	Name   string `json:"name"`
-	Commit string `json:"commit"`
+	Name           string `json:"name"`
+	Commit         string `json:"commit"`
+	Profiles       bool   `json:"profiles,omitempty"`
+	Version        string `json:"version,omitempty"`
+	SnapshotSHA256 string `json:"snapshotSha256,omitempty"`
 }
+type buildProfile struct {
+	Label       string `json:"label,omitempty"`
+	Version     string `json:"version,omitempty"`
+	VersionCode int64  `json:"versionCode,omitempty"`
+	Checks      bool   `json:"checks,omitempty"`
+}
+
+func (p buildProfile) valid() bool {
+	return textValid(p.Label, 60) && strings.TrimSpace(p.Label) == p.Label &&
+		((p.Version == "" && p.VersionCode == 0) || (versionPattern.MatchString(p.Version) && p.VersionCode > 0 && p.VersionCode <= 2_100_000_000))
+}
+
 type buildJob struct {
-	ID          string    `json:"id"`
-	Name        string    `json:"name"`
-	Commit      string    `json:"commit"`
-	State       string    `json:"state"`
-	CreatedAt   time.Time `json:"createdAt"`
-	Message     string    `json:"message,omitempty"`
-	Version     string    `json:"version,omitempty"`
-	VersionCode int64     `json:"versionCode,omitempty"`
-	Origin      string    `json:"origin,omitempty"`
-	SHA256      string    `json:"sha256,omitempty"`
-	Size        int64     `json:"size,omitempty"`
+	ID           string        `json:"id"`
+	Name         string        `json:"name"`
+	Commit       string        `json:"commit"`
+	State        string        `json:"state"`
+	CreatedAt    time.Time     `json:"createdAt"`
+	Message      string        `json:"message,omitempty"`
+	Version      string        `json:"version,omitempty"`
+	VersionCode  int64         `json:"versionCode,omitempty"`
+	Origin       string        `json:"origin,omitempty"`
+	SHA256       string        `json:"sha256,omitempty"`
+	Size         int64         `json:"size,omitempty"`
+	Profile      *buildProfile `json:"profile,omitempty"`
+	SignerSHA256 string        `json:"signerSha256,omitempty"`
 }
 
 var buildID = regexp.MustCompile(`^[a-f0-9]{32}$`)
 var commitID = regexp.MustCompile(`^[a-f0-9]{40}$`)
+var sha256Pattern = regexp.MustCompile(`^[a-f0-9]{64}$`)
 
 const maxAPK int64 = 128 << 20
 
@@ -95,6 +114,9 @@ func (c *buildCenter) versions() []buildVersion {
 	}
 	seen := map[string]bool{}
 	for _, v := range records {
+		if v.SnapshotSHA256 != "" && (!sha256Pattern.MatchString(v.SnapshotSHA256) || !strings.HasPrefix(v.SnapshotSHA256, v.Commit)) {
+			continue
+		}
 		if commitID.MatchString(v.Commit) && v.Name != "" && textValid(v.Name, 80) && !seen[v.Commit] {
 			out = append(out, v)
 			seen[v.Commit] = true
@@ -154,9 +176,10 @@ func (s server) buildIndex(w http.ResponseWriter, r *http.Request) {
 }
 func (s server) requestBuild(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Commit string `json:"commit"`
+		Commit  string        `json:"commit"`
+		Profile *buildProfile `json:"profile"`
 	}
-	if decodeStrict(http.MaxBytesReader(w, r.Body, 512), &req) != nil || !commitID.MatchString(req.Commit) {
+	if decodeStrict(http.MaxBytesReader(w, r.Body, 1024), &req) != nil || !commitID.MatchString(req.Commit) {
 		fail(w, 400, "invalid_version")
 		return
 	}
@@ -169,6 +192,10 @@ func (s server) requestBuild(w http.ResponseWriter, r *http.Request) {
 	}
 	if chosen.Commit == "" {
 		fail(w, 403, "version_not_approved")
+		return
+	}
+	if req.Profile != nil && (!req.Profile.valid() || (req.Profile.Version != "" && !chosen.Profiles)) {
+		fail(w, 400, "invalid_build_profile")
 		return
 	}
 	root, err := s.builds.open()
@@ -195,7 +222,7 @@ func (s server) requestBuild(w http.ResponseWriter, r *http.Request) {
 		fail(w, 503, "build_store_unavailable")
 		return
 	}
-	job := buildJob{ID: hex.EncodeToString(rid[:]), Commit: chosen.Commit, Name: chosen.Name, State: "queued", CreatedAt: time.Now().UTC()}
+	job := buildJob{ID: hex.EncodeToString(rid[:]), Commit: chosen.Commit, Name: chosen.Name, State: "queued", CreatedAt: time.Now().UTC(), Profile: req.Profile}
 	dir := "jobs/" + job.ID
 	if root.MkdirAll(dir, 0755) != nil || writeJSON(root, dir+"/job.json", job) != nil {
 		fail(w, 503, "build_store_unavailable")
@@ -230,6 +257,8 @@ func (s server) publishBuild(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer root.Close()
+	s.builds.mu.Lock()
+	defer s.builds.mu.Unlock()
 	id := chi.URLParam(r, "id")
 	f, job, err := openAPK(root, id)
 	if err != nil {
@@ -237,6 +266,18 @@ func (s server) publishBuild(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer f.Close()
+	if currentID, e := readJSON[string](root, "current.json"); e == nil && currentID != id {
+		if old, e := readJSON[buildJob](root, "jobs/"+currentID+"/job.json"); e == nil {
+			if old.VersionCode > 0 && job.VersionCode <= old.VersionCode {
+				fail(w, 409, "publish_version_not_newer")
+				return
+			}
+			if old.SignerSHA256 != "" && old.SignerSHA256 != job.SignerSHA256 {
+				fail(w, 409, "publish_signer_changed")
+				return
+			}
+		}
+	}
 	sum := sha256.New()
 	if _, e := io.Copy(sum, io.LimitReader(f, maxAPK+1)); e != nil || hex.EncodeToString(sum.Sum(nil)) != job.SHA256 {
 		fail(w, 409, "artifact_checksum_mismatch")
@@ -267,7 +308,7 @@ func (s server) downloadInfo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	f.Close()
-	send(w, 200, map[string]any{"version": job.Version, "versionCode": job.VersionCode, "size": job.Size, "sha256": job.SHA256, "origin": job.Origin})
+	send(w, 200, map[string]any{"version": job.Version, "versionCode": job.VersionCode, "size": job.Size, "sha256": job.SHA256, "origin": job.Origin, "signerSha256": job.SignerSHA256})
 }
 func (s server) downloadAPK(w http.ResponseWriter, r *http.Request) {
 	f, job, err := s.currentAPK()
@@ -276,6 +317,30 @@ func (s server) downloadAPK(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer f.Close()
+	if expected := r.URL.Query().Get("sha256"); expected != "" && expected != job.SHA256 {
+		fail(w, 409, "release_changed")
+		return
+	}
+	serveAPK(w, r, f, job)
+}
+
+func (s server) downloadBuild(w http.ResponseWriter, r *http.Request) {
+	root, err := s.builds.open()
+	if err != nil {
+		fail(w, 404, "artifact_not_found")
+		return
+	}
+	defer root.Close()
+	f, job, err := openAPK(root, chi.URLParam(r, "id"))
+	if err != nil {
+		fail(w, 404, "artifact_not_found")
+		return
+	}
+	defer f.Close()
+	serveAPK(w, r, f, job)
+}
+
+func serveAPK(w http.ResponseWriter, r *http.Request, f *os.File, job buildJob) {
 	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(3 * time.Minute))
 	w.Header().Set("Content-Type", "application/vnd.android.package-archive")
 	w.Header().Set("Content-Disposition", `attachment; filename="SigMark-LAN.apk"`)

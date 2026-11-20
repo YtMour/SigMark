@@ -38,6 +38,7 @@ private suspend fun <T> get(origin: URI, path: String, read: suspend (java.io.In
         connection.instanceFollowRedirects = false
         connection.connectTimeout = 6000
         connection.readTimeout = 10000
+        if (connection.responseCode == 409) throw LanFailure("下载期间发布版本已切换。请关闭窗口，再检查更新。")
         if (connection.responseCode != 200) throw LanFailure("发布服务返回 HTTP ${connection.responseCode}。")
         return connection.inputStream.use { read(it) }
     } finally {
@@ -65,29 +66,46 @@ private fun java.io.InputStream.readNBytesCompat(max: Int): ByteArray {
     return bytes.copyOf(offset)
 }
 
-@Suppress("DEPRECATION")
-private fun verifyArchive(context: Context, file: File, release: UpdateRelease) {
-    val pm = context.packageManager
-    val flags = if (Build.VERSION.SDK_INT >= 28) PackageManager.GET_SIGNING_CERTIFICATES else PackageManager.GET_SIGNATURES
-    val installed = pm.getPackageInfo(context.packageName, flags)
-    val candidate = pm.getPackageArchiveInfo(file.path, flags) ?: throw LanFailure("APK 解析失败。")
-    fun code(info: PackageInfo) = if (Build.VERSION.SDK_INT >= 28) info.longVersionCode else info.versionCode.toLong()
-    fun signers(info: PackageInfo) = (if (Build.VERSION.SDK_INT >= 28) info.signingInfo?.apkContentsSigners
-        else info.signatures)?.toSet().orEmpty()
-    if (candidate.packageName != installed.packageName || code(candidate) != release.code ||
-        candidate.versionName != release.name || code(candidate) <= code(installed) ||
-        signers(installed).isEmpty() || signers(candidate) != signers(installed)) {
-        throw LanFailure("APK 包名、版本或签名与当前安装不匹配。")
-    }
+internal enum class UpdateSigners { MATCH, MISMATCH, SYSTEM_CHECK }
+
+internal fun compareUpdateSigners(installed: Set<String>, archive: Set<String>): UpdateSigners = when {
+    installed.isEmpty() || archive.isEmpty() -> UpdateSigners.SYSTEM_CHECK
+    installed == archive -> UpdateSigners.MATCH
+    else -> UpdateSigners.MISMATCH
 }
 
-private suspend fun download(context: Context, origin: URI, release: UpdateRelease, progress: (Int) -> Unit): File {
+private data class DownloadedUpdate(val file: File, val signerCheck: UpdateSigners)
+
+@Suppress("DEPRECATION")
+private fun verifyArchive(context: Context, file: File, release: UpdateRelease): UpdateSigners {
+    val pm = context.packageManager
+    val installed = pm.getPackageInfo(context.packageName, 0)
+    val candidate = pm.getPackageArchiveInfo(file.path, 0) ?: throw LanFailure("Android 未能解析下载的 APK。")
+    fun code(info: PackageInfo) = if (Build.VERSION.SDK_INT >= 28) info.longVersionCode else info.versionCode.toLong()
+    if (candidate.packageName != installed.packageName) throw LanFailure("APK 包名与当前安装不同。请从印迹下载页获取对应的安装包。")
+    if (code(candidate) != release.code || candidate.versionName != release.name) throw LanFailure("APK 内的版本与发布记录不一致，请联系管理员重新发布。")
+    if (code(candidate) <= code(installed)) throw LanFailure("APK 版本号未高于当前安装版本。")
+    fun signers(read: (Int) -> PackageInfo?): Set<String> {
+        val modern = if (Build.VERSION.SDK_INT >= 28) runCatching {
+            read(PackageManager.GET_SIGNING_CERTIFICATES)?.signingInfo?.apkContentsSigners?.map { it.toCharsString() }?.toSet()
+        }.getOrNull().orEmpty() else emptySet()
+        if (modern.isNotEmpty()) return modern
+        return runCatching { read(PackageManager.GET_SIGNATURES)?.signatures?.map { it.toCharsString() }?.toSet() }
+            .getOrNull().orEmpty()
+    }
+    val verdict = compareUpdateSigners(signers { pm.getPackageInfo(context.packageName, it) },
+        signers { pm.getPackageArchiveInfo(file.path, it) })
+    if (verdict == UpdateSigners.MISMATCH) throw LanFailure("APK 签名与当前安装不同。请管理员使用原签名发布；换签前先导出本地报告。")
+    return verdict
+}
+
+private suspend fun download(context: Context, origin: URI, release: UpdateRelease, progress: (Int) -> Unit): DownloadedUpdate {
     val directory = File(context.cacheDir, "updates").apply { mkdirs() }
     val pending = File.createTempFile("update-", ".apk", directory)
     var complete = false
     try {
         val digest = MessageDigest.getInstance("SHA-256")
-        get(origin, "/downloads/sigmark.apk") { input ->
+        get(origin, "/downloads/sigmark.apk?sha256=${release.sha256}") { input ->
             pending.outputStream().use { output ->
                 val buffer = ByteArray(64 * 1024)
                 var bytes = 0L
@@ -110,9 +128,9 @@ private suspend fun download(context: Context, origin: URI, release: UpdateRelea
                 if (bytes != release.size || hash != release.sha256) throw LanFailure("APK 校验失败，请重新检查发布版本。")
             }
         }
-        verifyArchive(context, pending, release)
+        val signerCheck = verifyArchive(context, pending, release)
         complete = true
-        return pending
+        return DownloadedUpdate(pending, signerCheck)
     } finally {
         if (!complete) pending.delete()
     }
@@ -122,7 +140,7 @@ private suspend fun download(context: Context, origin: URI, release: UpdateRelea
 internal fun AppUpdate(context: Context, onClose: () -> Unit) {
     val origin = remember { lanEndpoint(BuildConfig.LAN_ORIGIN) }
     var release by remember { mutableStateOf<UpdateRelease?>(null) }
-    var apk by remember { mutableStateOf<File?>(null) }
+    var apk by remember { mutableStateOf<DownloadedUpdate?>(null) }
     var message by remember { mutableStateOf("正在查询发布版本…") }
     var busy by remember { mutableStateOf(true) }
     val scope = rememberCoroutineScope()
@@ -169,7 +187,7 @@ internal fun AppUpdate(context: Context, onClose: () -> Unit) {
             if (next != null && !busy && origin != null) TextButton(onClick = {
                 val ready = apk
                 if (ready != null) {
-                    openInstaller(ready)
+                    openInstaller(ready.file)
                 } else {
                     busy = true
                     scope.launch {
@@ -181,7 +199,8 @@ internal fun AppUpdate(context: Context, onClose: () -> Unit) {
                                 }?.forEach { it.delete() }
                                 download(context, origin, next) { percent -> message = "正在下载更新 $percent%" }
                             }
-                            message = "签名与校验值已通过。"
+                            message = if (apk?.signerCheck == UpdateSigners.MATCH) "已核对 APK 校验值和签名。"
+                            else "已核对 APK 内容和版本。当前 ROM 未提供 APK 证书给应用，签名交由 Android 安装器核验。"
                         } catch (error: CancellationException) {
                             throw error
                         } catch (error: Exception) {

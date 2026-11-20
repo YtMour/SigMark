@@ -19,12 +19,23 @@ import android.os.Build
 import android.os.Debug
 import android.provider.Settings
 import com.sigmark.app.model.normalizeValue
+import com.sigmark.app.model.ReadReason
 import java.security.MessageDigest
 import java.time.Instant
 import java.time.ZoneId
 import java.util.Locale
 
 internal fun yesNo(value: Boolean) = if (value) "是" else "否"
+
+internal fun buildVariantSummary(type: String?, tags: String?): String? {
+    val variant = normalizeValue(type)?.lowercase(Locale.ROOT) ?: return null
+    val label = when (variant) {
+        "userdebug", "eng" -> "标准调试构建类型"
+        "user" -> "标准量产构建类型"
+        else -> "自定义构建类型"
+    }
+    return listOfNotNull(variant, normalizeValue(tags)).joinToString(" / ") + "（$label）"
+}
 
 internal fun usagePercent(total: Long, available: Long): String? =
     if (total > 0 && available in 0..total) String.format(Locale.ROOT, "%.1f%%", (total - available) * 100.0 / total)
@@ -175,17 +186,19 @@ internal object EnvironmentCollector : DeviceCollector {
             }
             matches.joinToString(" · ") { (key, field) -> "$key=$field" }.ifEmpty { "未见常见标记" }
         }
-        observation("systemDebuggable", "系统构建可调试线索", SafeReader.property(SafeReader.Property.DEBUGGABLE)
-            .map { flag -> when (flag) { "1" -> "可调试"; "0" -> "未标记可调试"; else -> null } })
+        value("systemDebuggable", "系统调试构建线索", "Build.TYPE / Build.TAGS",
+            "应用视角的公开构建信息，仅用于识别构建类型；不代表 ro.debuggable、USB 调试或当前 APK 的调试状态。") {
+            buildVariantSummary(Build.TYPE, Build.TAGS)
+        }
         val bootHint = "启动属性可作为刷机或调试线索。属性缺失和系统改写均可能发生。"
         listOf(
             Triple("verifiedBoot", "Verified Boot 颜色线索", SafeReader.Property.VERIFIED_BOOT),
             Triple("vbmetaState", "VBMeta 设备状态线索", SafeReader.Property.VBMETA_STATE),
             Triple("flashLock", "Bootloader 锁定线索", SafeReader.Property.FLASH_LOCKED),
         ).forEach { (key, label, property) ->
-            observation(key, label, SafeReader.property(property).let {
-                it.copy(detail = listOfNotNull(it.detail, bootHint).joinToString(" "))
-            })
+            observation(key, label, SafeReader.property(property)
+                .explainMissing(ReadReason.OPTIONAL_UNSET, "该启动属性未向当前应用提供。")
+                .let { it.copy(detail = listOfNotNull(it.detail, bootHint).joinToString(" ")) })
         }
         observation("suFileHint", "可见的 su 路径", SafeReader.suFileHint())
         value("adbSetting", "USB 调试公开设置值", "Settings.Global.ADB_ENABLED", "Android 可能向普通应用固定返回关闭。") {

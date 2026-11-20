@@ -34,10 +34,15 @@ Debug 内网试验分支：冻结当前本地快照 → `lan/LanReport.kt` 按�
 
 本地 JSON `schemaVersion: 1` 向后兼容，增加可选数值 `errno`，`reason` 新增 `NODE_MISSING`、`INVALID_VALUE`。不存在时仅按 `status` 判断；不要从中文说明推断原因码。本地快照与 LAN API 独立版本化。
 
-### LAN v2 · 开发与自动化入口
+### LAN v4 · 开发与自动化入口
 
 - Android 上传投影：`lan/LanDetails.kt`；服务端独立白名单和类型校验：`backend/cmd/sigmark/protocol.go`。新增上传字段时同步更新两端、用户预览、隐私文档和测试。
 - 稳定字段标识为 `group + key`；标签仅供显示。记录有 `value`、`status`、`source`，可带 `reason`、`errno`、`note`。非可用值固定为 JSON null。`/api/admin/reports/{id}` 返回原始结构化报告，不通过抓网页获取。
+- v3 在报告正文新增 `coverage`。每个 `group` 有 `available`、`restricted`、`unavailable`、`errors` 四项快照计数。每组各状态的计数覆盖对应归档行。自动化分析应使用 `parameters` 读明细，使用 `coverage` 对照快照口径。历史 v1/v2 缺少此元数据。
+- v4 新增 `collectorVersion`（采集实现版本）和 `fieldSetVersion`（归档字段语义版本）。状态保留已有四类；`OPTIONAL_UNSET`、`INTERFACE_UNSUPPORTED`、`MODEM_NOT_REPORTED`、`NO_REGISTERED_LTE` 在 `UNAVAILABLE` 下细分原因。历史报告缺行只在对比视图标作「报告未记录」，不改写为采集状态或设备不支持。
+- 0.12 的 v4 使用字段集 3，新增可选 `cellular.carrierBandwidths`。v4 字段集 2 仍可接收。电池能量粗估留在本地，不进入上传白名单。
+- 0.13 的字段集 4 新增 `cellular.simState`、`network.visibleTransports` 和 `network.wifiRouteRole`。字段集 2/3 继续兼容。默认路由仍是原来的 `network.transport`；其他网络信号分别对照。
+- 前端归档查看在 `main.tsx`，批量资产管理在 `assets.tsx`，共享报告类型、标签和导出在 `reports.ts`。资产页用 `/api/admin/report-count` 获取过滤后的两种资产数量，不扫描参数状态摘要。
 - 列表/详情分离，游标由接收时间和 UUID 组成；分析脚本保持相同 `q` 和 `batch`、使用 `nextCursor` 翻页并按 `id` 去重。PostgreSQL 默认不自动清理。旧报告没有的值不反推，不应把旧版缺字段当作设备异常。界面比较逻辑见 `backend/web/src/compare.ts`。
 - `backend/web/src/main.tsx` 根据 URL 片段选择工作区页面。会话和接收设置在 `backend/cmd/sigmark/admin.go`。构建中心由 Go API 写入文件队列，主机上的 `backend/scripts/build_worker.py` 从已登记的 Git SHA 构建并验证 APK。公开下载只读取当前发布记录，构建完成后由管理端独立发布。
 

@@ -25,3 +25,5 @@ SigMark 可以使用 `android.system.Os` 或 NDK/libc 读取某些底层信息�
 在仓库根目录执行 `python tools/rom_observation.py` 可输出一个标记 `observer=ADB_SHELL` 的本地 JSON。多台设备时使用 `--serial` 指定目标。记录包含 SELinux 模式、Android API、构建类型和 Verified Boot 属性，每项含来源及状态。工具只调用已连接设备上的固定只读查询。记录供测试人员在主机上同 App 导出的 JSON 对照。
 
 自有 ROM 的下一阶段可以提供签名保护的只读 Android 服务。服务端用固定字段协议回报审核过的系统能力，限定调用方证书，保留系统服务来源和采样时间。该组件需要在目标 ROM 中实现并验证策略与升级，适用于具备系统集成条件的设备。
+
+Android 运行时授权适用于定位等声明权限。系统文件访问还由应用进程身份和 SELinux 策略决定。MI 8 的归档中，`enforce` 和 `policy` 均返回 EACCES / 13。这两个节点没有用户授权弹窗。测试人员可从已连接设备另存系统侧读数，保留对应观察视角。

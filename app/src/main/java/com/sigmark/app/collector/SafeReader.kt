@@ -33,6 +33,9 @@ internal data class ReadResult<T>(
 internal fun ReadResult<String>.item(key: String, label: String) =
     DeviceInfoItem(key, label, value, source, status, detail, reason, errno)
 
+internal fun <T> ReadResult<T>.explainMissing(reason: ReadReason, note: String): ReadResult<T> =
+    if (this.reason == ReadReason.NOT_REPORTED) copy(reason = reason, detail = note) else this
+
 internal object SafeReader {
     private const val fileTimeoutMs = 400L
     private const val propertyTimeoutMs = 350L
@@ -57,7 +60,6 @@ internal object SafeReader {
         COLOR_OS("ro.build.version.opporom"), ONE_UI("ro.build.version.oneui"),
         COLOR_OS_ALT("ro.oplus.version.opporom"), VERIFIED_BOOT("ro.boot.verifiedbootstate"),
         VBMETA_STATE("ro.boot.vbmeta.device_state"), FLASH_LOCKED("ro.boot.flash.locked"),
-        DEBUGGABLE("ro.debuggable"),
     }
 
     // Lazy suppliers let a successful candidate skip the remaining reads.

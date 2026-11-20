@@ -20,6 +20,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.sigmark.app.BuildConfig
 import com.sigmark.app.model.DeviceSnapshot
+import com.sigmark.app.model.ReadReason
+import com.sigmark.app.model.unavailableLabel
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -50,10 +52,21 @@ internal fun LanReportDialog(snapshot: DeviceSnapshot, onClose: () -> Unit) {
                         Text("应用观察型号：${data.model} · API ${data.androidApi} · App ${data.appVersion}")
                         Text("默认网络：${data.network}；Wi-Fi 频段：${data.wifiBand}；蜂窝制式：${data.radio}")
                         Text("采样时间：${java.text.DateFormat.getDateTimeInstance().format(java.util.Date(data.capturedAt))}")
-                        Text("后台长期保存预览中的 ${data.parameters.size} 项白名单参数。设备配置摘要、应用安装及权限信息、实时传感器和精确小区频点仅供本地使用。")
+                        val total = data.coverage.sumOf { it.total }
+                        val issues = data.coverage.sumOf { it.restricted + it.unavailable + it.errors }
+                        Text("手机快照 $total 项 · 归档明细 ${data.parameters.size} 项 · 仅本机 ${total - data.parameters.size} 项")
+                        Text("手机快照待确认 $issues 项。后台长期保存下列明细及每个分类的状态计数。")
+                        Text("设备配置摘要、构建指纹、应用安装及权限信息、运营商和精确小区频点仅供本机使用。")
                         TextButton(onClick = { details = !details }) { Text(if (details) "收起参数" else "查看上传参数") }
                         if (details) data.parameters.forEach { field ->
-                            Text("${field.label}：${field.value ?: field.status}\n来源：${field.source}${field.note?.let { "\n$it" }.orEmpty()}")
+                            val status = when (field.status) {
+                                "RESTRICTED" -> "受限"
+                                "UNAVAILABLE" -> unavailableLabel(field.reason?.let { ReadReason.valueOf(it) })
+                                "ERROR" -> "读取异常"
+                                else -> "可用"
+                            }
+                            Text("${field.label} · $status${field.value?.let { " · $it" }.orEmpty()}\n来源：${field.source}" +
+                                "${field.errno?.let { " · errno=$it" }.orEmpty()}${field.note?.let { "\n$it" }.orEmpty()}")
                         }
                         OutlinedTextField(feedback, { if (validFeedback(it)) feedback = it }, Modifier.fillMaxWidth(),
                             label = { Text("反馈（可选，勿填写个人信息）") }, singleLine = true, enabled = pending == null)

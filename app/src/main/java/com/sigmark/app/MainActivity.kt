@@ -78,6 +78,7 @@ import com.sigmark.app.model.DeviceInfoItem
 import com.sigmark.app.model.DeviceSection
 import com.sigmark.app.model.DeviceSnapshot
 import com.sigmark.app.model.ReadReason
+import com.sigmark.app.model.unavailableLabel
 import com.sigmark.app.model.ValueStatus
 import com.sigmark.app.lan.LanReportDialog
 import com.sigmark.app.lan.AppUpdate
@@ -509,11 +510,7 @@ private fun InfoRow(item: DeviceInfoItem) {
             Spacer(Modifier.width(10.dp))
             val value = when (item.status) {
                 ValueStatus.AVAILABLE -> item.value.orEmpty()
-                ValueStatus.UNAVAILABLE -> when (item.reason) {
-                    ReadReason.NODE_MISSING -> "节点未暴露"
-                    ReadReason.INVALID_VALUE -> "状态未确认"
-                    else -> "暂无数据"
-                }
+                ValueStatus.UNAVAILABLE -> unavailableLabel(item.reason)
                 ValueStatus.RESTRICTED -> if (item.key == "selinux") "受限 · 模式未确认" else "访问受限"
                 ValueStatus.ERROR -> "读取异常"
             }

@@ -9,20 +9,40 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class LanReportTest {
-    @Test fun excludesNewLocalDiagnosticsFromLanProjection() {
+    @Test fun keepsPrivateDiagnosticsOffTheWire() {
         val keys = mapOf(
             "app" to listOf("permissions", "installedAt", "certSha256", "visibleLauncherApps"),
-            "environment" to listOf("configurationDigest", "selinuxDomain", "suFileHint"),
-            "system" to listOf("board", "buildHost", "buildUser", "sku"),
+            "environment" to listOf("configurationDigest", "suFileHint", "strongBiometrics"),
+            "system" to listOf("fingerprint", "buildHost", "buildUser"),
             "runtime" to listOf("locale", "timeZone", "featureList"),
-            "display" to listOf("windowSize", "cutoutInsets"),
-            "media" to listOf("cameraCount", "camera_0"),
+            "media" to listOf("camera_0"),
             "sensors" to listOf("sensor_0"),
         )
         val snapshot = DeviceSnapshot(0, keys.map { (group, fields) ->
             DeviceSection(group, group, fields.map { DeviceInfoItem(it, it, "local", "test") })
         })
         assertTrue(lanParameters(snapshot).isEmpty())
+    }
+
+    @Test fun archivesMissingDiagnosticsAndCountsUnsharedFields() {
+        val snapshot = DeviceSnapshot(1800000000000, listOf(
+            DeviceSection("battery", "电池", listOf(
+                DeviceInfoItem("energyCounter", "剩余能量", null, "BatteryManager",
+                    ValueStatus.UNAVAILABLE, reason = ReadReason.NOT_REPORTED),
+            )),
+            DeviceSection("environment", "环境", listOf(
+                DeviceInfoItem("selinuxDomain", "进程域", null, "/proc/self/attr/current",
+                    ValueStatus.RESTRICTED, reason = ReadReason.ACCESS_DENIED, errno = 13),
+                DeviceInfoItem("configurationDigest", "配置摘要", "local", "Build"),
+            )),
+        ))
+        val rows = lanParameters(snapshot)
+        assertEquals(listOf("energyCounter", "selinuxDomain"), rows.map { it.key })
+        assertEquals(listOf("UNAVAILABLE", "RESTRICTED"), rows.map { it.status })
+        assertTrue(rows.all { it.value == null })
+        assertEquals(13, rows.last().errno)
+        assertEquals(listOf(LanCoverage("battery", 0, 0, 1, 0), LanCoverage("environment", 1, 1, 0, 0)),
+            lanCoverage(snapshot))
     }
 
     @Test fun endpointRequiresPrivateNumericHostAndPort() {
@@ -76,7 +96,8 @@ class LanReportTest {
                 "declaredCapabilities" to "NFC 已声明"),
             "battery" to mapOf("powerSaver" to "关闭", "thermalStatus" to "正常"),
             "network" to mapOf("defaultRouteFamilies" to "IPv4 / IPv6", "privateDnsActive" to "已启用",
-                "linkMtu" to "1500 字节")
+                "linkMtu" to "1500 字节", "visibleTransports" to "Wi-Fi / 蜂窝网络", "wifiRouteRole" to "默认网络"),
+            "cellular" to mapOf("simState" to "卡槽 1：就绪", "dataState" to "已连接")
         )
         val snapshot = DeviceSnapshot(1800000000000, fields.map { (group, values) ->
             DeviceSection(group, group, values.map { (key, value) ->

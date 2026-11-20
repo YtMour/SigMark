@@ -51,6 +51,27 @@ internal fun section(key: String, title: String, block: SectionBuilder.() -> Uni
 
 internal fun bytes(value: Long): String = String.format(Locale.US, "%.2f GiB", value / 1073741824.0)
 
+internal fun batteryReadingReason(value: Long, sentinel: Long, range: LongRange): ReadReason? = when {
+    value == sentinel -> ReadReason.INTERFACE_UNSUPPORTED
+    value !in range -> ReadReason.INVALID_VALUE
+    else -> null
+}
+
+internal fun estimateEnergyWh(chargeMicroAh: Int?, voltageMv: Int?): Double? {
+    if (chargeMicroAh == null || chargeMicroAh !in 1..30_000_000 || voltageMv == null || voltageMv !in 1000..15000) return null
+    return chargeMicroAh / 1e6 * (voltageMv / 1000.0)
+}
+
+private fun batteryReading(source: String, raw: ReadResult<Long>, sentinel: Long, range: LongRange,
+    unsupported: String, format: (Long) -> String): ReadResult<String> {
+    val reason = raw.value?.let { batteryReadingReason(it, sentinel, range) }
+    return when (reason) {
+        ReadReason.INTERFACE_UNSUPPORTED -> SafeReader.missing(source, reason, unsupported)
+        ReadReason.INVALID_VALUE -> SafeReader.missing(source, reason, "接口返回的数值不在有效范围内。")
+        else -> raw.map(format)
+    }
+}
+
 private object SystemCollector : DeviceCollector {
     override val key = "system"
     override val title = "系统与固件"
@@ -83,7 +104,9 @@ private object SystemCollector : DeviceCollector {
         value("buildHost", "构建主机", "Build.HOST") { Build.HOST }
         value("board", "主板代号", "Build.BOARD") { Build.BOARD }
         if (Build.VERSION.SDK_INT >= 31) value("sku", "硬件 SKU", "Build.SKU") { Build.SKU }
-        value("baseOs", "基础系统版本", "Build.VERSION.BASE_OS") { Build.VERSION.BASE_OS }
+        observation("baseOs", "基础系统版本", SafeReader.read("Build.VERSION.BASE_OS", "OEM 可选字段。") {
+            normalizeValue(Build.VERSION.BASE_OS)
+        }.explainMissing(ReadReason.OPTIONAL_UNSET, "OEM 可选字段，当前 ROM 未提供。Android 版本见上方独立字段。"))
         value("type", "构建类型", "Build.TYPE") { Build.TYPE }
         value("tags", "构建标签", "Build.TAGS") { Build.TAGS }
         value("manufacturer", "制造商", "Build.MANUFACTURER") { Build.MANUFACTURER }
@@ -91,7 +114,9 @@ private object SystemCollector : DeviceCollector {
         value("model", "型号", "Build.MODEL", "应用进程视角") { Build.MODEL }
         value("device", "设备代号", "Build.DEVICE", "应用进程视角") { Build.DEVICE }
         value("product", "产品代号", "Build.PRODUCT") { Build.PRODUCT }
-        value("bootloader", "Bootloader", "Build.BOOTLOADER") { Build.BOOTLOADER }
+        observation("bootloader", "Bootloader", SafeReader.read("Build.BOOTLOADER") {
+            normalizeValue(Build.BOOTLOADER)
+        }.explainMissing(ReadReason.OPTIONAL_UNSET, "当前 ROM 未向应用提供 Bootloader 版本。"))
         value("uptime", "开机时长", "SystemClock.elapsedRealtime") {
             val minutes = SystemClock.elapsedRealtime() / 60_000
             "${minutes / 1440} 天 ${minutes % 1440 / 60} 小时 ${minutes % 60} 分钟"
@@ -275,22 +300,37 @@ private object BatteryCollector : DeviceCollector {
             }
         }
         val manager = context.getSystemService(BatteryManager::class.java)
-        value("capacityPercent", "电量属性", "BatteryManager.BATTERY_PROPERTY_CAPACITY") {
-            manager?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)?.takeIf { it in 0..100 }?.let { "$it%" }
-        }
-        value("chargeCounter", "剩余电荷", "BatteryManager.BATTERY_PROPERTY_CHARGE_COUNTER",
-            "µAh 换算为 mAh；不是设计容量。") {
+        val capacity = SafeReader.firstAvailable(
+            { SafeReader.read("BatteryManager.BATTERY_PROPERTY_CAPACITY") {
+                manager?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)?.takeIf { it in 0..100 }?.let { "$it%" }
+            } },
+            { SafeReader.read("ACTION_BATTERY_CHANGED.level / scale", "电量属性未提供时使用系统电量广播。") {
+                val level = extra(BatteryManager.EXTRA_LEVEL)
+                val scale = extra(BatteryManager.EXTRA_SCALE)
+                if (scale != null && scale > 0 && level != null && level in 0..scale) "${level.toLong() * 100 / scale}%" else null
+            } },
+        )
+        observation("capacityPercent", "系统电量百分比", capacity)
+        val charge = SafeReader.read("BatteryManager.BATTERY_PROPERTY_CHARGE_COUNTER", "µAh 换算为 mAh；不是设计容量。") {
             manager?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CHARGE_COUNTER)?.takeIf { it >= 0 }
-                ?.let { String.format(Locale.ROOT, "%.1f mAh", it / 1000.0) }
         }
-        value("energyCounter", "剩余能量", "BatteryManager.BATTERY_PROPERTY_ENERGY_COUNTER", "nWh 换算为 Wh。") {
-            manager?.getLongProperty(BatteryManager.BATTERY_PROPERTY_ENERGY_COUNTER)?.takeIf { it >= 0 }
-                ?.let { String.format(Locale.ROOT, "%.2f Wh", it / 1e9) }
+        observation("chargeCounter", "剩余电荷", charge.map { String.format(Locale.ROOT, "%.1f mAh", it / 1000.0) })
+        val energy = "BatteryManager.BATTERY_PROPERTY_ENERGY_COUNTER"
+        observation("energyCounter", "剩余能量", batteryReading(energy,
+            SafeReader.read(energy, "nWh 换算为 Wh。") { manager?.getLongProperty(BatteryManager.BATTERY_PROPERTY_ENERGY_COUNTER) },
+            Long.MIN_VALUE, 0L..Long.MAX_VALUE, "能量接口返回不支持哨兵值。剩余电荷 mAh 是独立参数，不是能量 Wh。"
+        ) { String.format(Locale.ROOT, "%.2f Wh", it / 1e9) })
+        estimateEnergyWh(charge.value, extra(BatteryManager.EXTRA_VOLTAGE))?.let { wh ->
+            value("energyEstimate", "剩余能量粗估（本机）", "CHARGE_COUNTER × ACTION_BATTERY_CHANGED.voltage",
+                "剩余电荷乘采样电压，仅供参考；电压会变化，结果不等同于能量计，也不上传。") {
+                String.format(Locale.ROOT, "约 %.2f Wh", wh)
+            }
         }
-        value("currentAverage", "平均充放电电流", "BatteryManager.BATTERY_PROPERTY_CURRENT_AVERAGE", "保留正负号，系统未回报则留空。") {
-            manager?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_AVERAGE)?.takeIf { it in -30_000_000..30_000_000 }
-                ?.let { String.format(Locale.ROOT, "%.1f mA", it / 1000.0) }
-        }
+        val average = "BatteryManager.BATTERY_PROPERTY_CURRENT_AVERAGE"
+        observation("currentAverage", "平均充放电电流", batteryReading(average,
+            SafeReader.read(average, "µA 换算为 mA，保留正负号。") { manager?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_AVERAGE)?.toLong() },
+            Int.MIN_VALUE.toLong(), -30_000_000L..30_000_000L, "系统未提供平均电流属性；可查看独立的瞬时电流读数。"
+        ) { String.format(Locale.ROOT, "%.1f mA", it / 1000.0) })
         value("current", "充放电电流", "BatteryManager.BATTERY_PROPERTY_CURRENT_NOW",
             "Android API 以 µA 返回，显示为 mA； |电流| 超过 30 A 的异常样本不展示，不改写正负号。") {
             manager?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_NOW)

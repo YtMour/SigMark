@@ -45,10 +45,15 @@ private class NetworkFields {
     fun missing(key: String, label: String, source: String, reason: ReadReason, note: String) {
         val status = when (reason) {
             ReadReason.PERMISSION_REQUIRED, ReadReason.LOCATION_DISABLED, ReadReason.ACCESS_DENIED -> ValueStatus.RESTRICTED
-            ReadReason.NOT_REPORTED, ReadReason.NODE_MISSING, ReadReason.INVALID_VALUE -> ValueStatus.UNAVAILABLE
+            ReadReason.NOT_REPORTED, ReadReason.NODE_MISSING, ReadReason.INVALID_VALUE, ReadReason.OPTIONAL_UNSET,
+            ReadReason.INTERFACE_UNSUPPORTED, ReadReason.MODEM_NOT_REPORTED, ReadReason.NO_REGISTERED_LTE -> ValueStatus.UNAVAILABLE
             ReadReason.READ_FAILED -> ValueStatus.ERROR
         }
         items += DeviceInfoItem(key, label, null, source, status, note, reason)
+    }
+
+    fun observation(key: String, label: String, reading: ReadResult<String>) {
+        items += reading.item(key, label)
     }
 }
 
@@ -56,25 +61,36 @@ internal object NetworkCollector : DeviceCollector {
     override val key = "network"
     override val title = "网络与 Wi-Fi"
 
+    @Suppress("DEPRECATION") // One-shot app-visible network inventory; no callback or active request.
     override fun collect(context: Context): DeviceSection {
         val fields = NetworkFields()
         val cm = context.getSystemService(ConnectivityManager::class.java)
         val active = cm?.activeNetwork
         val caps = active?.let { cm.getNetworkCapabilities(it) }
         val source = "ConnectivityManager.NetworkCapabilities"
+        val networks = SafeReader.read("ConnectivityManager.getAllNetworks / getNetworkCapabilities") {
+            cm?.allNetworks?.mapNotNull { cm.getNetworkCapabilities(it) }
+        }
         fields.read("transport", "当前默认网络", source, "默认路由可能是 VPN，不等于蜂窝注册状态。") {
             when {
                 cm == null -> null
                 active == null -> "无默认网络"
                 caps == null -> null
-                else -> buildList {
-                    if (caps.hasTransport(Caps.TRANSPORT_WIFI)) add("Wi-Fi")
-                    if (caps.hasTransport(Caps.TRANSPORT_CELLULAR)) add("蜂窝网络")
-                    if (caps.hasTransport(Caps.TRANSPORT_ETHERNET)) add("以太网")
-                    if (caps.hasTransport(Caps.TRANSPORT_VPN)) add("VPN")
-                    if (caps.hasTransport(Caps.TRANSPORT_BLUETOOTH)) add("蓝牙")
-                }.ifEmpty { listOf("其他网络") }.joinToString(" + ")
+                else -> transportLabels(caps).joinToString(" + ")
             }
+        }
+        fields.observation("visibleTransports", "应用可见网络", networks.map { items ->
+            (listOfNotNull(caps) + items).flatMap(::transportLabels).distinct().joinToString(" / ")
+                .ifEmpty { "当前未发现可见链路" }
+        }.let { it.copy(detail = listOfNotNull(it.detail,
+            "并列展示可见链路类型，不等于默认路由；蜂窝注册或 SIM 就绪不保证 App 可见蜂窝链路。").joinToString(" ")) })
+        val wifiCaps = caps?.takeIf { it.hasTransport(Caps.TRANSPORT_WIFI) && !it.hasTransport(Caps.TRANSPORT_VPN) }
+            ?: networks.value.orEmpty().firstOrNull { it.hasTransport(Caps.TRANSPORT_WIFI) && !it.hasTransport(Caps.TRANSPORT_VPN) }
+        if (wifiCaps != null) with(fields) {
+            read("wifiRouteRole", "Wi-Fi 路由角色", source, "仅表示应用当前观测到的默认网络与 Wi-Fi 链路关系。") {
+                if (wifiCaps === caps) "默认网络" else "非默认可见链路"
+            }
+            addWifi(context, wifiCaps)
         }
         if (caps != null) with(fields) {
             read("internetValidation", "互联网验证", "$source.VALIDATED", "Android 的验证结果；SigMark 不主动发起连接。") {
@@ -83,7 +99,6 @@ internal object NetworkCollector : DeviceCollector {
             read("metered", "计费属性", "$source.NOT_METERED") {
                 if (caps.hasCapability(Caps.NET_CAPABILITY_NOT_METERED)) "不计量" else "按计量网络处理"
             }
-            if (caps.hasTransport(Caps.TRANSPORT_WIFI)) addWifi(context, caps)
             read("captivePortal", "登录门户", "$source.CAPTIVE_PORTAL") {
                 if (caps.hasCapability(Caps.NET_CAPABILITY_CAPTIVE_PORTAL)) "系统检测到登录门户" else "系统未标记登录门户"
             }
@@ -128,6 +143,14 @@ internal object NetworkCollector : DeviceCollector {
         }
         return DeviceSection(key, title, fields.items)
     }
+
+    private fun transportLabels(caps: Caps): List<String> = buildList {
+        if (caps.hasTransport(Caps.TRANSPORT_WIFI)) add("Wi-Fi")
+        if (caps.hasTransport(Caps.TRANSPORT_CELLULAR)) add("蜂窝网络")
+        if (caps.hasTransport(Caps.TRANSPORT_ETHERNET)) add("以太网")
+        if (caps.hasTransport(Caps.TRANSPORT_VPN)) add("VPN")
+        if (caps.hasTransport(Caps.TRANSPORT_BLUETOOTH)) add("蓝牙")
+    }.ifEmpty { listOf("其他网络") }
 
     @Suppress("DEPRECATION")
     private fun NetworkFields.addWifi(context: Context, caps: Caps) {
@@ -242,6 +265,7 @@ internal object CellularCollector : DeviceCollector {
         } ?: Update(null, "等待系统刷新超时，已回退读取缓存。")
     }
 
+    @Suppress("DEPRECATION") // phoneCount is the legacy modem-count API.
     @SuppressLint("MissingPermission") // READ_BASIC_PHONE_STATE is a normal install-time permission on API 33+.
     fun collect(context: Context, update: Update?): DeviceSection {
         val fields = NetworkFields()
@@ -249,6 +273,14 @@ internal object CellularCollector : DeviceCollector {
         if (phone == null || !context.packageManager.hasSystemFeature(PackageManager.FEATURE_TELEPHONY)) {
             fields.read("support", "蜂窝能力", "PackageManager.FEATURE_TELEPHONY") { "设备未声明蜂窝能力" }
             return DeviceSection(key, title, fields.items)
+        }
+        fields.read("simState", "SIM 卡槽状态", "TelephonyManager.getSimState(slotIndex)",
+            "只显示逻辑卡槽状态，不读取号码或卡标识。不用 SIM 就绪推定已接入蜂窝网络。") {
+            val slots = if (Build.VERSION.SDK_INT >= 30) phone.activeModemCount else phone.phoneCount
+            if (slots <= 0) null else (0 until slots.coerceAtMost(8)).joinToString(" / ") { slot ->
+                val state = SafeReader.read("TelephonyManager.getSimState") { phone.getSimState(slot) }
+                "卡槽 ${slot + 1}：${state.value?.let(::simStateLabel) ?: if (state.status == ValueStatus.RESTRICTED) "访问受限" else "状态未确认"}"
+            }
         }
         val subId = SubscriptionManager.getDefaultDataSubscriptionId()
         // Never fall back to another SIM's carrier and label it as the default data subscription.
@@ -279,6 +311,14 @@ internal object CellularCollector : DeviceCollector {
                 }
                 if (Build.VERSION.SDK_INT >= 33) read("dataRat", "蜂窝数据制式", "TelephonyManager.dataNetworkType", "调制解调器的数据制式；不等于状态栏 5G 图标或 NSA 判断。") { radioType(data.dataNetworkType) }
                 if (Build.VERSION.SDK_INT >= 28) read("modemSignalLevel", "调制解调器信号等级", "TelephonyManager.signalStrength.level", "系统综合等级，不是 dBm。") { data.signalStrength?.level?.takeIf { it in 0..4 }?.let { "$it / 4" } }
+                if (Build.VERSION.SDK_INT >= 28 && hasFine(context) && locationEnabled(context)) {
+                    val widths = SafeReader.read("TelephonyManager.serviceState.cellBandwidths",
+                        "默认数据订阅的载波带宽列表。可能包含多载波，与单个 LTE 小区带宽分开展示。") {
+                        data.serviceState?.cellBandwidths?.filter { it in 1..400_000 }?.takeIf { it.isNotEmpty() }
+                            ?.joinToString(" / ") { "$it kHz" }
+                    }
+                    if (widths.value != null) observation("carrierBandwidths", "订阅载波带宽（补充）", widths)
+                }
             }
         }
         addRegisteredCells(context, phone, fields, update)
@@ -288,39 +328,51 @@ internal object CellularCollector : DeviceCollector {
     @SuppressLint("MissingPermission") // Checked before accessing getAllCellInfo().
     private fun addRegisteredCells(context: Context, phone: Phone, fields: NetworkFields, update: Update?) {
         val source = if (update?.cells != null) "TelephonyManager.requestCellInfoUpdate" else "TelephonyManager.allCellInfo"
-        val label = "小区无线参数"
+        val label = "小区注册与制式"
+        val bandwidthSource = "$source.CellIdentityLte.bandwidth"
+        fun absent(reason: ReadReason, detail: String) {
+            fields.missing("cellDiagnostics", label, source, reason, detail)
+            fields.missing("cellLTEBandwidth", "LTE 信道带宽", bandwidthSource,
+                if (Build.VERSION.SDK_INT < 28) ReadReason.INTERFACE_UNSUPPORTED else reason,
+                if (Build.VERSION.SDK_INT < 28) "该接口需要 Android 9（API 28）或更高版本。" else detail)
+        }
         if (!hasFine(context)) {
-            fields.missing("cellDiagnostics", label, source, ReadReason.PERMISSION_REQUIRED,
+            absent(ReadReason.PERMISSION_REQUIRED,
                 "查看频段、信道号和小区信号需授予精确位置权限，可在本页授权。")
             return
         }
         if (!locationEnabled(context)) {
-            fields.missing("cellDiagnostics", label, source, ReadReason.LOCATION_DISABLED,
+            absent(ReadReason.LOCATION_DISABLED,
                 "Android 仅在系统位置开关开启时提供该数据。开启后手动刷新。")
             return
         }
         val registered = try {
             (update?.cells ?: phone.allCellInfo.orEmpty()).filter { it.isRegistered }
         } catch (_: SecurityException) {
-            fields.missing("cellDiagnostics", label, source, ReadReason.ACCESS_DENIED, "权限已授予，系统仍拒绝该接口。")
+            absent(ReadReason.ACCESS_DENIED, "权限已授予，系统仍拒绝该接口。")
             return
         } catch (_: UnsupportedOperationException) {
-            fields.missing("cellDiagnostics", label, source, ReadReason.NOT_REPORTED, "设备未实现小区接口。")
+            absent(ReadReason.INTERFACE_UNSUPPORTED, "设备未实现小区接口。")
             return
         } catch (e: Exception) {
-            fields.missing("cellDiagnostics", label, source, ReadReason.READ_FAILED, "读取异常：${e.javaClass.simpleName}")
+            absent(ReadReason.READ_FAILED, "读取异常：${e.javaClass.simpleName}")
             return
         }
         if (registered.isEmpty()) {
             fields.missing("cellDiagnostics", label, source, ReadReason.NOT_REPORTED,
                 listOfNotNull(update?.note, "系统缓存没有已注册小区；可能无服务或 ROM 未上报。").joinToString(" "))
-            return
         }
         // Group by radio technology and keep the newest sample per technology. No subscription or location IDs.
         val samples = registered.groupBy(::cellTechnology).mapValues { (_, cells) -> cells.maxBy(::timestampMs) }
-        fields.read("cellDiagnostics", label, source,
+        if (samples.isNotEmpty()) fields.read("cellDiagnostics", label, source,
             listOfNotNull(update?.note, "设备范围小区数据；每制式显示最新一条，不归属到某张 SIM；NSA 辅小区可能缺失。").joinToString(" ")) {
             samples.keys.joinToString(" / ")
+        }
+        if (Build.VERSION.SDK_INT < 28 || "LTE" !in samples) {
+            fields.missing("cellLTEBandwidth", "LTE 信道带宽", bandwidthSource,
+                if (Build.VERSION.SDK_INT < 28) ReadReason.INTERFACE_UNSUPPORTED else ReadReason.NO_REGISTERED_LTE,
+                if (Build.VERSION.SDK_INT < 28) "该接口需要 Android 9（API 28）或更高版本。"
+                else "当前样本没有已注册的 LTE 小区；可在 LTE 注册后刷新。")
         }
         samples.forEach { (tech, cell) ->
             val prefix = "cell$tech"
@@ -348,9 +400,16 @@ internal object CellularCollector : DeviceCollector {
                     read("${prefix}Frequency", "$tech 下行参考频率", "EARFCN → 3GPP TS 36.101",
                         if (id.earfcn.validChannel() == null) "缺少系统上报的 EARFCN；频段范围不等于中心频率。"
                         else "仅转换内置常见频段。") { RadioMath.lteDownlinkKhz(id.earfcn)?.let(RadioMath::mhz) }
-                    if (Build.VERSION.SDK_INT >= 28) read("${prefix}Bandwidth", "$tech 信道带宽", "$source.CellIdentityLte.bandwidth",
-                        "$note 带宽取自调制解调器上报。缺值时可尝试在蜂窝连接正常时手动刷新。") {
-                        id.bandwidth.validChannel()?.takeIf { it > 0 }?.let { "$it kHz" }
+                    if (Build.VERSION.SDK_INT >= 28) {
+                        val bandwidth = SafeReader.read(bandwidthSource, note) { id.bandwidth }
+                        val classified = when (val khz = bandwidth.value) {
+                            null -> bandwidth.map { it.toString() }
+                            Int.MAX_VALUE -> SafeReader.missing(bandwidthSource, ReadReason.MODEM_NOT_REPORTED,
+                                "$note 已读取 LTE 样本，但系统未提供有效带宽。可在蜂窝连接正常时手动刷新。")
+                            else -> if (khz <= 0) SafeReader.missing(bandwidthSource, ReadReason.INVALID_VALUE,
+                                "$note 接口返回非有效带宽。") else bandwidth.map { "$it kHz" }
+                        }
+                        observation("${prefix}Bandwidth", "$tech 信道带宽", classified)
                     }
                     read("${prefix}Signal", "$tech 无线信号", "$source.CellSignalStrengthLte", note) { lteSignal(signal) }
                 }
@@ -380,6 +439,19 @@ internal object CellularCollector : DeviceCollector {
             }
         }
     }
+}
+
+internal fun simStateLabel(state: Int): String = when (state) {
+    Phone.SIM_STATE_ABSENT -> "未检测到 SIM"
+    Phone.SIM_STATE_READY -> "就绪"
+    Phone.SIM_STATE_PIN_REQUIRED -> "等待 PIN"
+    Phone.SIM_STATE_PUK_REQUIRED -> "等待 PUK"
+    Phone.SIM_STATE_NETWORK_LOCKED -> "网络锁定"
+    Phone.SIM_STATE_NOT_READY -> "尚未就绪"
+    Phone.SIM_STATE_PERM_DISABLED -> "已停用"
+    Phone.SIM_STATE_CARD_IO_ERROR -> "卡读取异常"
+    Phone.SIM_STATE_CARD_RESTRICTED -> "卡受限"
+    else -> "状态未确认"
 }
 
 @Suppress("DEPRECATION") // Recognize older CDMA reports without assuming modern support.

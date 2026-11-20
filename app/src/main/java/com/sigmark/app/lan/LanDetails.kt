@@ -9,7 +9,7 @@ internal data class LanParameter(
 )
 
 // Only the named fields are serialized, never raw DeviceSnapshot JSON.
-private val allowed = mapOf(
+private val legacyFields = mapOf(
     "system" to setOf("release","api","patch","type","manufacturer","brand","model","buildId","romHint","uptime","selinux","selinuxPolicy","selinuxBootHint","selinuxBuildHint","socModel","socManufacturer","declaredCapabilities"),
     "cpu" to setOf("kernel","kernelFull","abis","hardware","cores","pageSize","cpuInfo","features","cpu0MaxFrequency"),
     "memory" to setOf("totalRam","availableRam","lowMemory","lowMemoryThreshold","swap","internalTotal","internalAvailable","sharedState"),
@@ -21,9 +21,41 @@ private val allowed = mapOf(
         "cellLTEBands","cellLTEBandRange","cellLTEBandwidth","cellLTESignal","cellNRBands","cellNRSignal"),
 )
 
+private val diagnosticFields = mapOf(
+    "cellular" to setOf("carrierBandwidths", "simState"),
+    "network" to setOf("visibleTransports", "wifiRouteRole"),
+    "system" to setOf("display", "incremental", "buildTime", "board", "sku", "baseOs", "tags", "device", "product", "bootloader"),
+    "cpu" to setOf("arch", "abi32", "abi64"),
+    "memory" to setOf("ramUseEstimate", "volumeSummary", "systemSpace", "appCacheSpace"),
+    "display" to setOf("wideGamut", "visibleDisplays", "windowSize", "systemBarInsets", "cutoutInsets"),
+    "battery" to setOf("capacityPercent", "chargeCounter", "energyCounter", "currentAverage"),
+    "runtime" to setOf("featureCount", "openGlEs", "virtualMachine", "heapMax", "heapAllocated", "heapFree", "standbyBucket", "backgroundRestricted"),
+    "media" to setOf("cameraCount", "bluetoothCapabilities", "audioCapabilities", "audioSampleRate", "audioBuffer", "codecs"),
+    "environment" to setOf("selinuxDomain", "buildSignals", "systemDebuggable", "verifiedBoot", "vbmetaState", "flashLock"),
+    "app" to setOf("version", "appDebuggable", "debuggerConnected"),
+)
+
+internal data class LanCoverage(
+    val group: String,
+    val available: Int,
+    val restricted: Int,
+    val unavailable: Int,
+    val errors: Int,
+) {
+    val total: Int get() = available + restricted + unavailable + errors
+}
+
+internal fun lanCoverage(snapshot: DeviceSnapshot): List<LanCoverage> =
+    snapshot.sections.groupBy { it.key }.map { (group, sections) ->
+        val counts = sections.flatMap { it.items }.distinctBy { it.key }.groupingBy { it.status }.eachCount()
+        LanCoverage(group, counts[ValueStatus.AVAILABLE] ?: 0, counts[ValueStatus.RESTRICTED] ?: 0,
+            counts[ValueStatus.UNAVAILABLE] ?: 0, counts[ValueStatus.ERROR] ?: 0)
+    }.filter { it.total > 0 }
+
 internal fun lanParameters(snapshot: DeviceSnapshot): List<LanParameter> =
     snapshot.sections.flatMap { section ->
-        section.items.filter { it.key in allowed[section.key].orEmpty() }.mapNotNull { item ->
+        val fields = legacyFields[section.key].orEmpty() + diagnosticFields[section.key].orEmpty()
+        section.items.filter { it.key in fields }.mapNotNull { item ->
             val value = clean(item.value, 512)
             if (item.status == ValueStatus.AVAILABLE && value == null) return@mapNotNull null
             LanParameter(section.key, item.key, clean(item.label, 64) ?: item.key,

@@ -6,6 +6,35 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class FrameworkDiagnosticsTest {
+    @Test fun estimatesEnergyFromIndependentReadings() {
+        assertEquals(7.6, estimateEnergyWh(2_000_000, 3800)!!, 0.0001)
+        assertNull(estimateEnergyWh(Int.MIN_VALUE, 3800))
+        assertNull(estimateEnergyWh(2_000_000, 0))
+    }
+    @Test fun derivesBuildTypeWithoutTreatingTagsAsDebugFlag() {
+        assertEquals("user / test-keys（标准量产构建类型）", buildVariantSummary("user", "test-keys"))
+        assertEquals("userdebug / release-keys（标准调试构建类型）", buildVariantSummary("USERDEBUG", "release-keys"))
+        assertEquals("eng（标准调试构建类型）", buildVariantSummary("eng", null))
+        assertEquals("custom（自定义构建类型）", buildVariantSummary("custom", null))
+        assertNull(buildVariantSummary("unknown", "test-keys"))
+    }
+
+    @Test fun distinguishesBatterySentinelAndInvalidValueFromZero() {
+        val energy = 0L..Long.MAX_VALUE
+        assertEquals(ReadReason.INTERFACE_UNSUPPORTED, batteryReadingReason(Long.MIN_VALUE, Long.MIN_VALUE, energy))
+        assertEquals(ReadReason.INVALID_VALUE, batteryReadingReason(-1, Long.MIN_VALUE, energy))
+        assertNull(batteryReadingReason(0, Long.MIN_VALUE, energy))
+        val current = -30_000_000L..30_000_000L
+        assertEquals(ReadReason.INTERFACE_UNSUPPORTED, batteryReadingReason(Int.MIN_VALUE.toLong(), Int.MIN_VALUE.toLong(), current))
+        assertNull(batteryReadingReason(-1200, Int.MIN_VALUE.toLong(), current))
+    }
+
+    @Test fun qualifiedMissingPreservesRestrictionAndErrno() {
+        val denied = SafeReader.errnoResult<String>("/selinux/enforce", 13, 13, 1, 2, 19)
+        assertEquals(denied, denied.explainMissing(ReadReason.OPTIONAL_UNSET, "optional"))
+        val missing = SafeReader.read<String>("Build.VERSION.BASE_OS") { null }
+        assertEquals(ReadReason.OPTIONAL_UNSET, missing.explainMissing(ReadReason.OPTIONAL_UNSET, "optional").reason)
+    }
     @Test fun archiveDigestUsesCanonicalStableInputs() {
         val a = configurationDigest(listOf("Acme ", "Board"), listOf("arm64-v8a", "armeabi-v7a"))
         val b = configurationDigest(listOf("acme", " board"), listOf("armeabi-v7a", "arm64-v8a", "arm64-v8a"))

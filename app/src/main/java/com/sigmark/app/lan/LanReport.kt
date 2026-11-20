@@ -16,15 +16,18 @@ internal val reportFields = linkedMapOf(
 )
 
 internal data class LanMetric(val key: String, val status: String, val reason: String?)
+internal const val LanFieldSetVersion = 4
 
 internal data class LanReport(
     val model: String, val androidApi: Int, val network: String, val wifiBand: String, val radio: String,
     val capturedAt: Long, val appVersion: String, val metrics: List<LanMetric>, val feedback: String,
     val parameters: List<LanParameter>,
+    val coverage: List<LanCoverage>,
     val requestId: String = UUID.randomUUID().toString(),
 ) {
     fun json(): ByteArray = JSONObject().apply {
-        put("schemaVersion", 2); put("requestId", requestId); put("capturedAtEpochMs", capturedAt)
+        put("schemaVersion", 4); put("requestId", requestId); put("capturedAtEpochMs", capturedAt)
+        put("collectorVersion", appVersion); put("fieldSetVersion", LanFieldSetVersion)
         put("model", model); put("androidApi", androidApi); put("appVersion", appVersion)
         put("network", network); put("wifiBand", wifiBand); put("radio", radio)
         if (feedback.isNotEmpty()) put("feedback", feedback)
@@ -40,6 +43,12 @@ internal data class LanReport(
                 put("value", field.value ?: JSONObject.NULL); put("source", field.source); put("status", field.status)
                 field.reason?.let { put("reason", it) }; field.errno?.let { put("errno", it) }
                 field.note?.let { put("note", it) }
+            }) }
+        })
+        put("coverage", JSONArray().apply {
+            coverage.forEach { row -> put(JSONObject().apply {
+                put("group", row.group); put("available", row.available); put("restricted", row.restricted)
+                put("unavailable", row.unavailable); put("errors", row.errors)
             }) }
         })
     }.toString().toByteArray(Charsets.UTF_8)
@@ -65,7 +74,7 @@ internal fun lanReport(snapshot: DeviceSnapshot, appVersion: String, feedback: S
     }
     val metrics = reportFields.keys.mapNotNull { key -> fields[key]?.let { LanMetric(key,it.status.name,it.reason?.name) } }
     return LanReport(model, get("system.api").toIntOrNull()?.takeIf { it in 1..999 } ?: 0,
-        network, band, radio, snapshot.collectedAt, appVersion, metrics, feedback, lanParameters(snapshot))
+        network, band, radio, snapshot.collectedAt, appVersion, metrics, feedback, lanParameters(snapshot), lanCoverage(snapshot))
 }
 
 // Numeric IPv4 only: keeps test reports on the configured local endpoint.

@@ -1,10 +1,24 @@
 package com.sigmark.app.model
 
+import com.sigmark.app.BuildConfig
 import org.json.JSONArray
 import org.json.JSONObject
 
 enum class ValueStatus { AVAILABLE, UNAVAILABLE, RESTRICTED, ERROR }
-enum class ReadReason { PERMISSION_REQUIRED, LOCATION_DISABLED, ACCESS_DENIED, NOT_REPORTED, NODE_MISSING, INVALID_VALUE, READ_FAILED }
+enum class ReadReason {
+    PERMISSION_REQUIRED, LOCATION_DISABLED, ACCESS_DENIED, NOT_REPORTED, NODE_MISSING, INVALID_VALUE, READ_FAILED,
+    OPTIONAL_UNSET, INTERFACE_UNSUPPORTED, MODEM_NOT_REPORTED, NO_REGISTERED_LTE,
+}
+
+fun unavailableLabel(reason: ReadReason?): String = when (reason) {
+    ReadReason.NODE_MISSING -> "节点未暴露"
+    ReadReason.INVALID_VALUE -> "状态未确认"
+    ReadReason.OPTIONAL_UNSET -> "可选字段未提供"
+    ReadReason.INTERFACE_UNSUPPORTED -> "当前接口不提供"
+    ReadReason.MODEM_NOT_REPORTED -> "调制解调器未上报"
+    ReadReason.NO_REGISTERED_LTE -> "无已注册 LTE 小区"
+    else -> "暂无数据"
+}
 
 data class DeviceInfoItem(
     val key: String,
@@ -22,6 +36,7 @@ data class DeviceSection(val key: String, val title: String, val items: List<Dev
 data class DeviceSnapshot(val collectedAt: Long, val sections: List<DeviceSection>) {
     fun toJson(): String = JSONObject().apply {
         put("schemaVersion", 1)
+        put("collectorVersion", BuildConfig.VERSION_NAME)
         put("app", "SigMark")
         put("collectedAtEpochMs", collectedAt)
         put("sections", JSONArray().also { sectionArray ->

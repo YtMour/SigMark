@@ -8,6 +8,94 @@ import (
 	"time"
 )
 
+func TestDiagnosticCoverageContract(t *testing.T) {
+	report := synthetic()
+	report.SchemaVersion = 3
+	report.Parameters = []Parameter{
+		{Group: "battery", Key: "energyCounter", Label: "Remaining energy", Source: "BatteryManager", Status: "UNAVAILABLE", Reason: "NOT_REPORTED"},
+		{Group: "environment", Key: "selinuxDomain", Label: "Process domain", Source: "/proc/self/attr/current", Status: "RESTRICTED", Reason: "ACCESS_DENIED"},
+	}
+	report.Coverage = []Coverage{
+		{Group: "battery", Unavailable: 1},
+		{Group: "environment", Available: 2, Restricted: 1},
+	}
+	if !report.valid() {
+		t.Fatal("valid v3 report rejected")
+	}
+	report.Coverage[1].Restricted = 0
+	if report.valid() {
+		t.Fatal("coverage undercounts archived status")
+	}
+	report.Coverage[1].Restricted = 1
+	report.Coverage = append(report.Coverage, report.Coverage[1])
+	if report.valid() {
+		t.Fatal("duplicate coverage group accepted")
+	}
+	report.Coverage = report.Coverage[:2]
+	report.Parameters[1].Key = "configurationDigest"
+	if report.valid() {
+		t.Fatal("local-only configuration digest accepted")
+	}
+	report.Parameters[1].Key = "selinuxDomain"
+	report.SchemaVersion = 2
+	report.Coverage = nil
+	if report.valid() {
+		t.Fatal("legacy v2 accepted a v3-only field")
+	}
+}
+
+func TestVersionedDiagnosticsAndMissingReasons(t *testing.T) {
+	p := synthetic()
+	p.SchemaVersion = 4
+	p.CollectorVersion = "0.11.0"
+	p.FieldSetVersion = 2
+	p.Parameters = []Parameter{{Group: "battery", Key: "energyCounter", Label: "Energy", Source: "BatteryManager", Status: "UNAVAILABLE", Reason: "INTERFACE_UNSUPPORTED"}}
+	p.Coverage = []Coverage{{Group: "battery", Unavailable: 1}}
+	for _, reason := range []string{"INTERFACE_UNSUPPORTED", "OPTIONAL_UNSET", "MODEM_NOT_REPORTED", "NO_REGISTERED_LTE"} {
+		p.Parameters[0].Reason = reason
+		if !p.valid() {
+			t.Fatalf("%s rejected", reason)
+		}
+	}
+	p.Parameters[0].Reason = "NOT_COLLECTED"
+	if p.valid() {
+		t.Fatal("comparison-only absence accepted as a device reading")
+	}
+	p.Parameters[0].Reason = "INTERFACE_UNSUPPORTED"
+	p.FieldSetVersion = 0
+	if p.valid() {
+		t.Fatal("v4 accepted without field set")
+	}
+	p.FieldSetVersion = 2
+	p.CollectorVersion = ""
+	if p.valid() {
+		t.Fatal("v4 accepted without collector version")
+	}
+	p.CollectorVersion = "0.12.0"
+	value := "10000 kHz / 20000 kHz"
+	p.Parameters = append(p.Parameters, Parameter{Group: "cellular", Key: "carrierBandwidths", Label: "Carrier bandwidths",
+		Source: "TelephonyManager.serviceState.cellBandwidths", Value: &value, Status: "AVAILABLE"})
+	p.Coverage = append(p.Coverage, Coverage{Group: "cellular", Available: 1})
+	if p.valid() {
+		t.Fatal("field set 2 accepted a field set 3 parameter")
+	}
+	p.FieldSetVersion = 3
+	if !p.valid() {
+		t.Fatal("field set 3 rejected the carrier bandwidths")
+	}
+	sim := "卡槽 1：就绪"
+	p.Parameters = append(p.Parameters, Parameter{Group: "cellular", Key: "simState", Label: "SIM", Value: &sim,
+		Source: "TelephonyManager.getSimState(slotIndex)", Status: "AVAILABLE"})
+	p.Coverage[len(p.Coverage)-1].Available++
+	if p.valid() {
+		t.Fatal("field set 3 accepted field set 4 data")
+	}
+	p.FieldSetVersion = 4
+	if !p.valid() {
+		t.Fatal("field set 4 rejected independent SIM state")
+	}
+}
+
 func synthetic() Report {
 	return Report{SchemaVersion: 1, RequestID: "00000000-0000-4000-8000-000000000001", CapturedAt: 1800000000000,
 		Model: "Synthetic QA", AndroidAPI: 34, AppVersion: "0.3.0", Network: "wifi", WifiBand: "5", Radio: "lte",

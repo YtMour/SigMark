@@ -124,9 +124,11 @@ func (s server) routes() http.Handler {
 				admin.Get("/settings", s.getSettings)
 				admin.Put("/settings", s.putSettings)
 				admin.Get("/builds", s.buildIndex)
+				admin.Get("/builds/{id}/apk", s.downloadBuild)
 				admin.Post("/builds", s.requestBuild)
 				admin.Post("/builds/{id}/publish", s.publishBuild)
 				admin.Get("/reports", s.reports)
+				admin.Get("/report-count", s.reportCount)
 				admin.Post("/reports/manage", s.manageReports)
 				admin.Get("/reports/{id}", s.reportDetail)
 				admin.Get("/summary", s.summary)
@@ -277,7 +279,8 @@ func (s server) reports(w http.ResponseWriter, r *http.Request) {
 	const pageSize = 30
 	rows, err := s.db.Query(ctx, `SELECT id,batch,received_at,jsonb_build_object(
 	  'model',body->'model','androidApi',body->'androidApi','network',body->'network',
-	  'appVersion',body->'appVersion','schemaVersion',body->'schemaVersion'),trashed_at
+	  'appVersion',body->'appVersion','schemaVersion',body->'schemaVersion',
+	  'collectorVersion',body->'collectorVersion','fieldSetVersion',body->'fieldSetVersion'),trashed_at
 	  FROM reports WHERE `+archivePredicate+`
 	  AND (trashed_at IS NOT NULL)=$6
 	  AND ($3::timestamptz IS NULL OR (received_at,id)<($3::timestamptz,$4::uuid))
@@ -329,7 +332,7 @@ func (s server) summary(w http.ResponseWriter, r *http.Request) {
 	  UNION ALL
 	  SELECT jsonb_build_object('key',(p->>'group')||'.'||(p->>'key'),'status',p->>'status')
 	  FROM filtered CROSS JOIN LATERAL jsonb_array_elements(body->'parameters') p
-	  WHERE body->>'schemaVersion' = '2'
+	  WHERE body->>'schemaVersion' IN ('2', '3', '4')
 	),
 	status AS (SELECT field->>'status' AS key, count(*) AS n FROM metrics GROUP BY 1),
 	network AS (SELECT body->>'network' AS key,count(*) AS n FROM filtered GROUP BY 1),
@@ -343,4 +346,24 @@ func (s server) summary(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	send(w, 200, result)
+}
+
+func (s server) reportCount(w http.ResponseWriter, r *http.Request) {
+	batch, query, ok := reportFilters(w, r)
+	if !ok {
+		return
+	}
+	trash, ok := trashFilter(w, r)
+	if !ok {
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 4*time.Second)
+	defer cancel()
+	var total int64
+	if err := s.db.QueryRow(ctx, `SELECT count(*) FROM reports WHERE `+archivePredicate+
+		` AND (trashed_at IS NOT NULL)=$3`, batch, query, trash).Scan(&total); err != nil {
+		fail(w, 503, "storage_unavailable")
+		return
+	}
+	send(w, 200, map[string]int64{"total": total})
 }

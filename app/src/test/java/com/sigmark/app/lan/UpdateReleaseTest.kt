@@ -5,6 +5,11 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class UpdateReleaseTest {
+    @Test fun verifiesKnownCertificatesAndDefersMissingRomData() {
+        org.junit.Assert.assertEquals(UpdateSigners.MATCH, compareUpdateSigners(setOf("A"), setOf("A")))
+        org.junit.Assert.assertEquals(UpdateSigners.MISMATCH, compareUpdateSigners(setOf("A"), setOf("B")))
+        org.junit.Assert.assertEquals(UpdateSigners.SYSTEM_CHECK, compareUpdateSigners(setOf("A"), emptySet()))
+    }
     @Test fun validatesUntrustedReleaseMetadata() {
         val valid = UpdateRelease("0.9.0", 9, 4096, "a".repeat(64))
         assertTrue(valid.isValid())

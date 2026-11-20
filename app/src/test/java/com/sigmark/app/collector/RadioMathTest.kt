@@ -5,6 +5,12 @@ import org.junit.Assert.assertNull
 import org.junit.Test
 
 class RadioMathTest {
+    @Test fun simUnknownIsNotEquivalentToAbsent() {
+        assertEquals("未检测到 SIM", simStateLabel(android.telephony.TelephonyManager.SIM_STATE_ABSENT))
+        assertEquals("就绪", simStateLabel(android.telephony.TelephonyManager.SIM_STATE_READY))
+        assertEquals("状态未确认", simStateLabel(android.telephony.TelephonyManager.SIM_STATE_UNKNOWN))
+        assertEquals("等待 PIN", simStateLabel(android.telephony.TelephonyManager.SIM_STATE_PIN_REQUIRED))
+    }
     @Test fun bandEdgesAreNotCarrierCentres() {
         assertEquals("B3：1805–1880 MHz / B41：2496–2690 MHz",
             RadioMath.lteBandRanges(listOf(3, 3, 41, 999)))

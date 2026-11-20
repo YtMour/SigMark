@@ -50,6 +50,7 @@ func TestBuildQueueAndPublishedDownload(t *testing.T) {
 	call("POST", queue, request, false, false, 403)
 	call("POST", queue, request, true, true, 403)
 	call("POST", queue, `{"commit":"`+strings.Repeat("2", 40)+`"}`, true, false, 403)
+	call("POST", queue, `{"commit":"`+revision+`","profile":{"version":"0.12.42","versionCode":42}}`, true, false, 400)
 	call("POST", queue, request, true, false, 202)
 	call("POST", queue, request, true, false, 409)
 	call("GET", "/downloads/sigmark.apk", "", false, false, 404)
@@ -83,11 +84,50 @@ func TestBuildQueueAndPublishedDownload(t *testing.T) {
 		t.Fatal(index)
 	}
 	call("GET", "/api/downloads/current", "", false, false, 200)
+	call("GET", "/downloads/sigmark.apk?sha256="+strings.Repeat("0", 64), "", false, false, 409)
+	call("GET", "/downloads/sigmark.apk?sha256="+job.SHA256, "", false, false, 200)
+	call("GET", queue+"/"+job.ID+"/apk", "", false, false, 200)
 	apk := call("GET", "/downloads/sigmark.apk", "", false, false, 200)
 	if apk.Body.String() != string(payload) || apk.Header().Get("Content-Type") != "application/vnd.android.package-archive" {
 		t.Fatal("incorrect APK response")
 	}
 	if call(http.MethodHead, "/downloads/sigmark.apk", "", false, false, 200).Body.Len() != 0 {
 		t.Fatal("HEAD sent a body")
+	}
+}
+
+func TestBuildProfilePair(t *testing.T) {
+	good := buildProfile{Label: "MI 8", Version: "0.12.42", VersionCode: 42, Checks: true}
+	if !good.valid() || !(buildProfile{Checks: true}).valid() {
+		t.Fatal("valid profiles rejected")
+	}
+	for _, bad := range []buildProfile{
+		{Version: good.Version}, {VersionCode: 42}, {Version: "not-a-version", VersionCode: 42},
+		{Version: good.Version, VersionCode: 2_100_000_001}, {Label: " line\nchange "},
+	} {
+		if bad.valid() {
+			t.Fatalf("invalid profile accepted: %+v", bad)
+		}
+	}
+}
+
+func TestSnapshotCatalogRequiresMatchingDigest(t *testing.T) {
+	dir := t.TempDir()
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer root.Close()
+	digest := strings.Repeat("a", 64)
+	if err := writeJSON(root, "versions.json", []buildVersion{
+		{Name: "Invalid snapshot", Commit: strings.Repeat("b", 40), SnapshotSHA256: digest},
+		{Name: "Local snapshot", Commit: digest[:40], SnapshotSHA256: digest, Profiles: true, Version: "0.13.0"},
+		{Name: "Historical commit", Commit: strings.Repeat("c", 40)},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	result := (&buildCenter{catalog: filepath.Join(dir, "versions.json")}).versions()
+	if len(result) != 2 || result[0].SnapshotSHA256 != digest || !result[0].Profiles || result[1].Profiles {
+		t.Fatalf("unexpected source list: %+v", result)
 	}
 }

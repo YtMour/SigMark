@@ -1,6 +1,8 @@
 package com.sigmark.app
 
 import android.os.Bundle
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -9,6 +11,8 @@ import androidx.activity.viewModels
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -51,6 +55,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
+import androidx.compose.foundation.Image
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -63,11 +72,12 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-private val Ink = Color(0xFF09131B)
-private val CardColor = Color(0xFF13242C)
-private val Teal = Color(0xFF78E6D2)
-private val Muted = Color(0xFFA6B6BB)
-private val Stroke = Color(0xFF2B4148)
+private val Ink = Color(0xFF09151B)
+private val CardColor = Color(0xFF11232B)
+private val PanelRaised = Color(0xFF172D35)
+private val Teal = Color(0xFF7CE7D2)
+private val Muted = Color(0xFFACBEC2)
+private val Stroke = Color(0xFF294149)
 
 class MainActivity : ComponentActivity() {
     private val viewModel: MainViewModel by viewModels()
@@ -141,72 +151,39 @@ private fun SigMarkScreen(
     }
     val listState = rememberLazyListState()
 
-    Scaffold(containerColor = Ink) { padding ->
+    Scaffold(containerColor = Ink, topBar = { AppHeader(snapshot, state.refreshing, onRefresh, onExportRequest = { showExportConfirmation = true }) }) { padding ->
         LazyColumn(
             state = listState,
             modifier = Modifier.fillMaxSize().padding(padding),
-            contentPadding = PaddingValues(bottom = 32.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
+            contentPadding = PaddingValues(bottom = 28.dp),
+            verticalArrangement = Arrangement.spacedBy(11.dp),
         ) {
             item {
-                Column(modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 26.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            modifier = Modifier.size(40.dp).background(Teal, RoundedCornerShape(12.dp)),
-                            contentAlignment = Alignment.Center,
-                        ) { Text("印", color = Ink, fontWeight = FontWeight.Black, fontSize = 22.sp) }
-                        Spacer(Modifier.width(12.dp))
-                        Column {
-                            Text("印迹", fontSize = 22.sp, fontWeight = FontWeight.Bold)
-                            Text("SIGMARK · DEVICE SNAPSHOT", fontSize = 10.sp, color = Muted,
-                                letterSpacing = 1.5.sp)
-                        }
-                    }
-                    Spacer(Modifier.height(22.dp))
+                Column(Modifier.padding(horizontal = 16.dp)) {
                     OverviewCard(snapshot)
-                    Spacer(Modifier.height(16.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Button(
-                            onClick = onRefresh,
-                            enabled = !state.refreshing,
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(12.dp),
-                        ) {
-                            if (state.refreshing) {
-                                CircularProgressIndicator(Modifier.size(17.dp), strokeWidth = 2.dp)
-                                Spacer(Modifier.width(8.dp))
-                            }
-                            Text(if (state.refreshing) "采集中" else "刷新采集")
-                        }
-                        OutlinedButton(
-                            onClick = { if (snapshot != null) showExportConfirmation = true },
-                            enabled = snapshot != null,
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(12.dp),
-                            border = BorderStroke(1.dp, Stroke),
-                        ) { Text("导出 JSON", color = Teal) }
-                    }
-                    if (state.error != null) {
-                        Spacer(Modifier.height(12.dp))
-                        Text(state.error, color = Color(0xFFFFB4A9))
-                    }
-                    Spacer(Modifier.height(22.dp))
-                    Text("设备详情", fontSize = 19.sp, fontWeight = FontWeight.Bold)
                     Spacer(Modifier.height(12.dp))
                     SearchBox(query, onChange = { query = it })
-                    if (snapshot != null && issueCount > 0) {
-                        Spacer(Modifier.height(8.dp))
-                        TextButton(onClick = { issuesOnly = !issuesOnly }) {
-                            Text(if (issuesOnly) "查看全部采集项" else "查看 $issueCount 项受限 / 待确认",
-                                color = Teal, fontSize = 13.sp)
+                    Spacer(Modifier.height(10.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("采集目录", color = Color.White, fontSize = 16.sp,
+                            fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                        if (issueCount > 0) {
+                            Surface(onClick = { issuesOnly = !issuesOnly; selected = "all" },
+                                color = if (issuesOnly) Color(0xFFF4C589) else CardColor,
+                                shape = RoundedCornerShape(9.dp),
+                                border = BorderStroke(1.dp, if (issuesOnly) Color(0xFFF4C589) else Stroke)) {
+                                Text(if (issuesOnly) "仅看异常 · $issueCount" else "待确认 · $issueCount",
+                                    color = if (issuesOnly) Ink else Color(0xFFF4C589),
+                                    fontSize = 12.sp, modifier = Modifier.padding(horizontal = 11.dp, vertical = 8.dp))
+                            }
                         }
                     }
                 }
             }
             item {
                 androidx.compose.foundation.lazy.LazyRow(
-                    contentPadding = PaddingValues(horizontal = 20.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    contentPadding = PaddingValues(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(7.dp),
                 ) {
                     item { CategoryChip("all", "全部", selected, onSelect = { selected = it }) }
                     snapshot?.sections?.forEach { section ->
@@ -223,18 +200,24 @@ private fun SigMarkScreen(
                 }
             } else if (sections.isEmpty()) {
                 item {
-                    Text("没有匹配的采集项；可清除搜索或切换分类", color = Muted,
-                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 32.dp))
+                    Column(Modifier.padding(horizontal = 20.dp, vertical = 24.dp)) {
+                        Text("没有匹配的采集项", color = Color.White, fontSize = 15.sp)
+                        Spacer(Modifier.height(5.dp))
+                        Text("可清除搜索、关闭异常筛选或切换分类", color = Muted, fontSize = 12.sp)
+                        TextButton(onClick = { query = ""; issuesOnly = false; selected = "all" }) {
+                            Text("重置筛选", color = Teal)
+                        }
+                    }
                 }
             } else {
                 items(sections, key = { it.key }) { section ->
-                    SectionCard(section, Modifier.padding(horizontal = 20.dp))
+                    SectionCard(section, Modifier.padding(horizontal = 16.dp))
                 }
             }
             item {
-                Text("本机采集 · 无后台上传 · 部分字段受 Android 权限与厂商实现限制",
-                    color = Muted, fontSize = 11.sp,
-                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp))
+                Text("仅本机采集  /  点按字段查看来源，长按复制数值  /  无后台上传",
+                    color = Muted, fontSize = 11.sp, lineHeight = 16.sp,
+                    modifier = Modifier.padding(horizontal = 18.dp, vertical = 8.dp))
             }
         }
     }
@@ -257,70 +240,93 @@ private fun SigMarkScreen(
 }
 
 @Composable
-private fun OverviewCard(snapshot: DeviceSnapshot?) {
-    val model = snapshot?.sections?.firstOrNull { it.key == "system" }?.items
-        ?.firstOrNull { it.key == "model" }?.value ?: "正在识别设备"
-    val release = snapshot?.sections?.firstOrNull { it.key == "system" }?.items
-        ?.firstOrNull { it.key == "release" }?.value
-    val items = snapshot?.sections?.sumOf { it.items.size } ?: 0
-    val available = snapshot?.sections?.sumOf { section ->
-        section.items.count { it.status == ValueStatus.AVAILABLE }
-    } ?: 0
-    Card(
-        shape = RoundedCornerShape(22.dp),
-        colors = CardDefaults.cardColors(containerColor = CardColor),
-        border = BorderStroke(1.dp, Stroke),
-    ) {
-        Column(
-            modifier = Modifier.fillMaxWidth().background(
-                Brush.linearGradient(listOf(Color(0xFF18393E), CardColor, CardColor))
-            ).padding(22.dp),
-        ) {
-            Text("当前设备", color = Teal, fontSize = 12.sp, letterSpacing = 1.sp)
-            Spacer(Modifier.height(10.dp))
-            Text(model, color = Color.White, fontSize = 27.sp, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.height(4.dp))
-            Text(if (release == null) "等待首次采集" else "Android $release  ·  本机快照",
-                color = Muted, fontSize = 13.sp)
-            Spacer(Modifier.height(20.dp))
-            HorizontalDivider(color = Stroke)
-            Spacer(Modifier.height(14.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(24.dp)) {
-                OverviewStat("$items", "采集项")
-                OverviewStat("$available", "已获取")
-                OverviewStat("${snapshot?.sections?.size ?: 0}", "分类")
+private fun AppHeader(snapshot: DeviceSnapshot?, refreshing: Boolean, onRefresh: () -> Unit,
+    onExportRequest: () -> Unit) {
+    Surface(color = Ink) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically) {
+            Image(painter = painterResource(R.mipmap.ic_launcher), contentDescription = "SigMark 图标",
+                modifier = Modifier.size(39.dp))
+            Spacer(Modifier.width(10.dp))
+            Column(Modifier.weight(1f)) {
+                Text("印迹  SigMark", color = Color.White, fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold, lineHeight = 19.sp)
+                Text("DEVICE INSPECTOR", color = Muted, fontSize = 9.sp,
+                    fontFamily = FontFamily.Monospace, letterSpacing = 1.sp)
             }
-            if (snapshot != null) {
-                Spacer(Modifier.height(14.dp))
-                Text("采集于 ${SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date(snapshot.collectedAt))}",
-                    color = Muted, fontSize = 11.sp)
+            OutlinedButton(onClick = onRefresh, enabled = !refreshing,
+                modifier = Modifier.height(39.dp),
+                contentPadding = PaddingValues(horizontal = 12.dp),
+                shape = RoundedCornerShape(10.dp), border = BorderStroke(1.dp, Stroke)) {
+                Text(if (refreshing) "采集中" else "刷新", fontSize = 12.sp)
             }
+            Spacer(Modifier.width(7.dp))
+            Button(onClick = onExportRequest, enabled = snapshot != null,
+                modifier = Modifier.height(39.dp),
+                contentPadding = PaddingValues(horizontal = 12.dp),
+                shape = RoundedCornerShape(10.dp)) { Text("导出", fontSize = 12.sp) }
         }
     }
 }
 
 @Composable
-private fun OverviewStat(value: String, label: String) {
-    Column {
-        Text(value, color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
-        Text(label, color = Muted, fontSize = 11.sp)
+private fun OverviewCard(snapshot: DeviceSnapshot?) {
+    val system = snapshot?.sections?.firstOrNull { it.key == "system" }
+    val model = system?.items?.firstOrNull { it.key == "model" }?.value ?: "等待采集"
+    val release = system?.items?.firstOrNull { it.key == "release" }?.value ?: "—"
+    val total = snapshot?.sections?.sumOf { it.items.size } ?: 0
+    val available = snapshot?.sections?.sumOf { section ->
+        section.items.count { it.status == ValueStatus.AVAILABLE }
+    } ?: 0
+    val issues = total - available
+    Card(shape = RoundedCornerShape(17.dp),
+        colors = CardDefaults.cardColors(containerColor = CardColor),
+        border = BorderStroke(1.dp, Stroke)) {
+        Column(Modifier.fillMaxWidth().padding(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("当前设备 · 应用视角", color = Teal, fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                Text("LOCAL SNAPSHOT", color = Muted, fontSize = 9.sp,
+                    fontFamily = FontFamily.Monospace)
+            }
+            Spacer(Modifier.height(7.dp))
+            Text(model, color = Color.White, fontSize = 25.sp, fontWeight = FontWeight.Bold,
+                maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text("Android $release  ·  ${snapshot?.sections?.size ?: 0} 分类  ·  $total 项",
+                color = Muted, fontSize = 12.sp)
+            Spacer(Modifier.height(10.dp))
+            HorizontalDivider(color = Stroke)
+            Spacer(Modifier.height(10.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(6.dp).background(Teal, CircleShape))
+                Spacer(Modifier.width(6.dp))
+                Text("$available 已获取", color = Color.White, fontSize = 12.sp)
+                Spacer(Modifier.width(16.dp))
+                Box(Modifier.size(6.dp).background(Color(0xFFF4C589), CircleShape))
+                Spacer(Modifier.width(6.dp))
+                Text("$issues 待确认", color = Color(0xFFF4C589), fontSize = 12.sp)
+                Spacer(Modifier.weight(1f))
+                Text(snapshot?.let { SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date(it.collectedAt)) } ?: "—",
+                    color = Muted, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+            }
+        }
     }
 }
-
 @Composable
 private fun SearchBox(value: String, onChange: (String) -> Unit) {
     Surface(color = CardColor, shape = RoundedCornerShape(12.dp), border = BorderStroke(1.dp, Stroke)) {
-        Row(Modifier.fillMaxWidth().height(48.dp).padding(horizontal = 14.dp),
+        Row(Modifier.fillMaxWidth().height(45.dp).padding(horizontal = 13.dp),
             verticalAlignment = Alignment.CenterVertically) {
-            Text("⌕", color = Teal, fontSize = 24.sp)
-            Spacer(Modifier.width(10.dp))
+            Text("⌕", color = Teal, fontSize = 22.sp)
+            Spacer(Modifier.width(8.dp))
             Box(Modifier.weight(1f)) {
-                if (value.isEmpty()) Text("搜索名称、数值或来源", color = Muted, fontSize = 14.sp)
+                if (value.isEmpty()) Text("搜索字段 / 数值 / 来源", color = Muted, fontSize = 12.sp)
                 BasicTextField(value, onValueChange = onChange, singleLine = true,
-                    textStyle = androidx.compose.ui.text.TextStyle(color = Color.White, fontSize = 14.sp),
+                    textStyle = androidx.compose.ui.text.TextStyle(color = Color.White, fontSize = 12.sp),
                     modifier = Modifier.fillMaxWidth())
             }
-            if (value.isNotEmpty()) TextButton(onClick = { onChange("") }) { Text("清除") }
+            if (value.isNotEmpty()) Text("清除", color = Teal, fontSize = 12.sp,
+                modifier = Modifier.clickable { onChange("") }.padding(5.dp))
         }
     }
 }
@@ -330,52 +336,78 @@ private fun CategoryChip(key: String, title: String, selected: String, onSelect:
     val isSelected = key == selected
     Surface(
         onClick = { onSelect(key) },
-        shape = RoundedCornerShape(12.dp),
+        shape = RoundedCornerShape(10.dp),
         color = if (isSelected) Teal else CardColor,
         border = BorderStroke(1.dp, if (isSelected) Teal else Stroke),
     ) {
         Text(title, color = if (isSelected) Ink else Muted,
-            fontSize = 13.sp, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp))
+            fontSize = 12.sp, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp))
     }
 }
 
 @Composable
 private fun SectionCard(section: DeviceSection, modifier: Modifier = Modifier) {
-    Card(modifier = modifier.fillMaxWidth(), shape = RoundedCornerShape(18.dp),
+    var expanded by rememberSaveable(section.key) { mutableStateOf(false) }
+    val visibleItems = if (expanded || section.items.size <= 5) section.items else
+        (section.items.take(5) + section.items.filter { it.status != ValueStatus.AVAILABLE })
+            .distinctBy { it.key }
+    Card(modifier = modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = CardColor), border = BorderStroke(1.dp, Stroke)) {
-        Column(Modifier.padding(18.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(8.dp).background(Teal, CircleShape))
+        Column {
+            Row(Modifier.fillMaxWidth().background(PanelRaised).padding(horizontal = 14.dp, vertical = 11.dp),
+                verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(width = 3.dp, height = 18.dp)
+                    .background(Teal, RoundedCornerShape(3.dp)))
                 Spacer(Modifier.width(9.dp))
-                Text(section.title, fontWeight = FontWeight.Bold, fontSize = 16.sp,
+                Text(section.title, fontWeight = FontWeight.SemiBold, fontSize = 14.sp,
                     modifier = Modifier.weight(1f))
-                Text("${section.items.size} 项", color = Muted, fontSize = 12.sp)
+                Text("${section.items.size} 项", color = Muted, fontSize = 11.sp)
             }
-            Spacer(Modifier.height(12.dp))
-            section.items.forEachIndexed { index, item ->
-                if (index > 0) HorizontalDivider(color = Stroke)
+            visibleItems.forEachIndexed { index, item ->
+                if (index > 0) HorizontalDivider(color = Stroke,
+                    modifier = Modifier.padding(horizontal = 14.dp))
                 InfoRow(item)
+            }
+            if (section.items.size > visibleItems.size || expanded) {
+                HorizontalDivider(color = Stroke, modifier = Modifier.padding(horizontal = 14.dp))
+                TextButton(onClick = { expanded = !expanded },
+                    modifier = Modifier.fillMaxWidth()) {
+                    Text(if (expanded) "收起" else "展开其余 ${section.items.size - visibleItems.size} 项",
+                        color = Teal, fontSize = 12.sp)
+                }
             }
         }
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun InfoRow(item: DeviceInfoItem) {
     var expanded by rememberSaveable(item.key) { mutableStateOf(false) }
-    Column(Modifier.fillMaxWidth().clickable { expanded = !expanded }.padding(vertical = 11.dp)) {
+    val context = LocalContext.current
+    val clipboard = context.getSystemService(ClipboardManager::class.java)
+    Column(Modifier.fillMaxWidth().combinedClickable(
+        onClick = { expanded = !expanded },
+        onLongClick = {
+            item.value?.let {
+                clipboard?.setPrimaryClip(ClipData.newPlainText(item.label, it))
+                Toast.makeText(context, "已复制 ${item.label}", Toast.LENGTH_SHORT).show()
+            }
+        },
+    ).padding(horizontal = 14.dp, vertical = 10.dp)) {
         Row(verticalAlignment = Alignment.Top) {
-            Text(item.label, color = Muted, fontSize = 13.sp, modifier = Modifier.weight(0.42f))
-            Spacer(Modifier.width(12.dp))
+            Text(item.label, color = Muted, fontSize = 12.sp, lineHeight = 17.sp,
+                modifier = Modifier.weight(0.42f))
+            Spacer(Modifier.width(10.dp))
             val value = when (item.status) {
                 ValueStatus.AVAILABLE -> item.value.orEmpty()
-                ValueStatus.UNAVAILABLE -> "不可用"
-                ValueStatus.RESTRICTED -> "受限"
-                ValueStatus.ERROR -> "读取错误"
+                ValueStatus.UNAVAILABLE -> "暂无数据"
+                ValueStatus.RESTRICTED -> "访问受限"
+                ValueStatus.ERROR -> "读取异常"
             }
             Text(value, color = if (item.status == ValueStatus.AVAILABLE) Color.White else Color(0xFFFFC58A),
-                fontSize = 13.sp, fontWeight = FontWeight.Medium,
+                fontSize = 12.sp, lineHeight = 17.sp, fontWeight = FontWeight.Medium,
                 modifier = Modifier.weight(0.58f))
         }
         if (item.status != ValueStatus.AVAILABLE || expanded) {

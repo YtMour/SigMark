@@ -16,6 +16,7 @@ import android.os.StatFs
 import android.os.SystemClock
 import android.system.Os
 import android.system.OsConstants
+import android.system.ErrnoException
 import com.sigmark.app.model.DeviceInfoItem
 import com.sigmark.app.model.DeviceSection
 import com.sigmark.app.model.DeviceSnapshot
@@ -42,6 +43,11 @@ private class SectionBuilder(private val key: String, private val title: String)
         } catch (e: SecurityException) {
             DeviceInfoItem(key, label, null, source, ValueStatus.RESTRICTED,
                 "系统拒绝应用读取；${note ?: source}")
+        } catch (e: ErrnoException) {
+            val restricted = e.errno == OsConstants.EACCES || e.errno == OsConstants.EPERM
+            DeviceInfoItem(key, label, null, source,
+                if (restricted) ValueStatus.RESTRICTED else ValueStatus.ERROR,
+                "errno=${e.errno}；${note ?: "读取失败"}")
         } catch (e: IOException) {
             val restricted = e.message?.contains("Permission denied", ignoreCase = true) == true ||
                 e.message?.contains("EACCES", ignoreCase = true) == true
@@ -63,6 +69,22 @@ private fun section(key: String, title: String, block: SectionBuilder.() -> Unit
 
 private fun readFirstLine(path: String): String? = File(path).useLines { it.firstOrNull() }
 private fun bytes(value: Long): String = String.format(Locale.US, "%.2f GiB", value / 1073741824.0)
+private fun readSelinuxMode(): String? {
+    val fd = Os.open("/sys/fs/selinux/enforce", OsConstants.O_RDONLY, 0)
+    return try {
+        val data = ByteArray(4)
+        when (Os.read(fd, data, 0, data.size)) {
+            0 -> null
+            else -> when (data[0].toInt().toChar()) {
+                '1' -> "Enforcing"
+                '0' -> "Permissive"
+                else -> null
+            }
+        }
+    } finally {
+        Os.close(fd)
+    }
+}
 private fun cpuFrequency(path: String): String =
     String.format(Locale.US, "%.0f MHz", readFirstLine(path)!!.trim().toLong() / 1000.0)
 
@@ -89,13 +111,8 @@ private object SystemCollector : DeviceCollector {
             val minutes = SystemClock.elapsedRealtime() / 60_000
             "${minutes / 1440} 天 ${minutes % 1440 / 60} 小时 ${minutes % 60} 分钟"
         }
-        value("selinux", "SELinux 模式", "/sys/fs/selinux/enforce", "普通应用可能无权读取；不据此推断模式") {
-            when (readFirstLine("/sys/fs/selinux/enforce")) {
-                "1" -> "Enforcing"
-                "0" -> "Permissive"
-                else -> null
-            }
-        }
+        value("selinux", "SELinux 模式", "Os.open(/sys/fs/selinux/enforce)",
+            "内核访问控制限制；不据此推断模式") { readSelinuxMode() }
     }
 }
 

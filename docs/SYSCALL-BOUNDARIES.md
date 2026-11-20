@@ -1,0 +1,17 @@
+# syscall / Native 采集边界
+
+SigMark 可以使用 `android.system.Os` 或 NDK/libc 读取某些底层信息。本版已使用 `Os.uname()`、`Os.sysconf()`，并用 `Os.open()`/`Os.read()` 验证 SELinux 节点在普通应用进程内的访问结果。
+
+## 结论
+
+`syscall` 是进入内核的调用路径，不是额外权限。Java `File`、`android.system.Os`、Native libc 最终受同一应用 UID、文件权限和 SELinux 域约束。把 `/sys/fs/selinux/enforce` 从 Java 文件读取改为 `Os.open()` 后，在连接设备上仍返回 `errno=13`（`EACCES`）。因此 UI 显示 `RESTRICTED`，而不猜测 Enforcing/Permissive。
+
+可用的底层补充信息包括 `uname` 的内核 release/编译版本、`sysconf` 的页大小，以及当前应用可读的 `/proc/cpuinfo`、部分 CPU 频率节点。它们是应用进程观察值，不一定与 ADB shell 或物理硬件规格相同。
+
+## 后续技术选项
+
+- **普通安装版**：继续优先使用公开 Android API、`android.system.Os` 与可读节点；权限错误记录 `errno` 和来源。
+- **专用系统集成版**：若未来在自有 ROM 中预装为具有明确系统能力的组件，可在单独模块/构建变体中提供额外采集接口，保持普通安装版的数据契约一致并标注来源。此路线需要独立构建和真机验证。
+- **NDK**：仅当需要 ABI 信息、特定 libc API 或性能/交叉核验时引入；不把它当作访问控制的替代路径。
+
+任何跨视角比对都应分别标明 `App`、`ADB shell` 或系统组件，避免将不同权限上下文的结果混作一项。

@@ -2,8 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/sha256"
-	"crypto/subtle"
 	"embed"
 	"encoding/json"
 	"errors"
@@ -27,9 +25,11 @@ import (
 var assets embed.FS
 
 type server struct {
-	db    *pgxpool.Pool
-	token string
-	batch string
+	db            *pgxpool.Pool
+	token         string
+	batch         string
+	secureCookies bool
+	builds        *buildCenter
 }
 
 func main() {
@@ -51,7 +51,8 @@ func main() {
 	if err != nil {
 		log.Fatal("database schema initialization failed")
 	}
-	s := server{db, token, batch}
+	s := server{db: db, token: token, batch: batch, secureCookies: os.Getenv("COOKIE_SECURE") == "true",
+		builds: &buildCenter{root: os.Getenv("BUILD_DATA"), catalog: os.Getenv("BUILD_CATALOG")}}
 	srv := listener(":8080", s.routes())
 	go func() {
 		if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
@@ -109,14 +110,26 @@ func (s server) routes() http.Handler {
 	r.Use(headers)
 	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) { send(w, 200, map[string]string{"status": "ok"}) })
 	r.Get("/readyz", s.ready)
+	r.Get("/downloads/sigmark.apk", s.downloadAPK)
+	r.Head("/downloads/sigmark.apk", s.downloadAPK)
+	r.Get("/api/downloads/current", s.downloadInfo)
 	r.Route("/api", func(api chi.Router) {
 		api.Post("/v1/reports", limit(rate.NewLimiter(2, 8))(http.HandlerFunc(s.submit)).ServeHTTP)
 		api.Route("/admin", func(admin chi.Router) {
-			admin.Use(limit(rate.NewLimiter(6, 20)), s.requireAdmin)
-			admin.Get("/session", func(w http.ResponseWriter, _ *http.Request) { send(w, 200, map[string]bool{"ok": true}) })
-			admin.Get("/reports", s.reports)
-			admin.Get("/reports/{id}", s.reportDetail)
-			admin.Get("/summary", s.summary)
+			admin.With(limit(rate.NewLimiter(1, 5))).Post("/login", s.login)
+			admin.Group(func(admin chi.Router) {
+				admin.Use(limit(rate.NewLimiter(6, 20)), s.requireAdmin)
+				admin.Get("/session", func(w http.ResponseWriter, _ *http.Request) { send(w, 200, map[string]bool{"ok": true}) })
+				admin.Post("/logout", s.logout)
+				admin.Get("/settings", s.getSettings)
+				admin.Put("/settings", s.putSettings)
+				admin.Get("/builds", s.buildIndex)
+				admin.Post("/builds", s.requestBuild)
+				admin.Post("/builds/{id}/publish", s.publishBuild)
+				admin.Get("/reports", s.reports)
+				admin.Get("/reports/{id}", s.reportDetail)
+				admin.Get("/summary", s.summary)
+			})
 		})
 	})
 	web, _ := fs.Sub(assets, "web")
@@ -132,18 +145,6 @@ func (s server) ready(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	send(w, 200, map[string]string{"status": "ready"})
-}
-
-func (s server) requireAdmin(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		token, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
-		provided, expected := sha256.Sum256([]byte(token)), sha256.Sum256([]byte(s.token))
-		if !ok || token == "" || subtle.ConstantTimeCompare(provided[:], expected[:]) != 1 {
-			fail(w, 401, "admin_auth_required")
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
 }
 
 func (s server) submit(w http.ResponseWriter, r *http.Request) {
@@ -173,9 +174,18 @@ func (s server) submit(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 4*time.Second)
 	defer cancel()
+	config, err := s.readSettings(ctx)
+	if err != nil {
+		fail(w, 503, "storage_unavailable")
+		return
+	}
+	if !config.UploadsEnabled {
+		fail(w, 503, "uploads_paused")
+		return
+	}
 	var id string
-	err := s.db.QueryRow(ctx, `INSERT INTO reports (id,batch,request_id,body) VALUES (gen_random_uuid(),$1,$2,$3)
-	ON CONFLICT (batch, request_id) DO UPDATE SET body = reports.body WHERE reports.body = EXCLUDED.body RETURNING id`, s.batch, report.RequestID, report).Scan(&id)
+	err = s.db.QueryRow(ctx, `INSERT INTO reports (id,batch,request_id,body) VALUES (gen_random_uuid(),$1,$2,$3)
+	ON CONFLICT (batch, request_id) DO UPDATE SET body = reports.body WHERE reports.body = EXCLUDED.body RETURNING id`, config.Batch, report.RequestID, report).Scan(&id)
 	if errors.Is(err, pgx.ErrNoRows) {
 		fail(w, 409, "request_id_conflict")
 		return
@@ -185,7 +195,7 @@ func (s server) submit(w http.ResponseWriter, r *http.Request) {
 		fail(w, 503, "storage_unavailable")
 		return
 	}
-	send(w, 201, map[string]string{"reportId": id, "batch": s.batch})
+	send(w, 201, map[string]string{"reportId": id, "batch": config.Batch})
 }
 
 type storedReport struct {

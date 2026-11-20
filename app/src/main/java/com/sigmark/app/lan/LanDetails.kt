@@ -10,13 +10,13 @@ internal data class LanParameter(
 
 // Only the named fields are serialized, never raw DeviceSnapshot JSON.
 private val allowed = mapOf(
-    "system" to setOf("release","api","patch","type","manufacturer","brand","model","buildId","romHint","uptime","selinux","selinuxPolicy","selinuxBootHint","selinuxBuildHint"),
+    "system" to setOf("release","api","patch","type","manufacturer","brand","model","buildId","romHint","uptime","selinux","selinuxPolicy","selinuxBootHint","selinuxBuildHint","socModel","socManufacturer","declaredCapabilities"),
     "cpu" to setOf("kernel","kernelFull","abis","hardware","cores","pageSize","cpuInfo","features","cpu0MaxFrequency"),
     "memory" to setOf("totalRam","availableRam","lowMemory","lowMemoryThreshold","swap","internalTotal","internalAvailable","sharedState"),
     "display" to setOf("resolution","densityDpi","density","fontScale","refresh","modes","hdr","sizeEstimate"),
-    "battery" to setOf("level","status","plugged","temperature","voltage","health","current"),
+    "battery" to setOf("level","status","plugged","temperature","voltage","health","current","powerSaver","thermalStatus"),
     "sensors" to setOf("count"),
-    "network" to setOf("transport","internetValidation","metered","captivePortal","bandwidthEstimate","wifiDetails","wifiFrequency","wifiBandChannel","wifiRssi","wifiLinkSpeed","wifiStandard","wifiSecurity"),
+    "network" to setOf("transport","internetValidation","metered","captivePortal","bandwidthEstimate","wifiDetails","wifiFrequency","wifiBandChannel","wifiRssi","wifiLinkSpeed","wifiStandard","wifiSecurity","linkDetails","defaultRouteFamilies","privateDnsActive","linkMtu"),
     "cellular" to setOf("support","subscription","dataState","mobileDataToggle","roaming","dataRat","modemSignalLevel","cellDiagnostics",
         "cellLTEBands","cellLTEBandRange","cellLTEBandwidth","cellLTESignal","cellNRBands","cellNRSignal"),
 )

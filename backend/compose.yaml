@@ -19,6 +19,12 @@ services:
       DATABASE_URL: postgres://sigmark:${DB_PASSWORD:?Set DB_PASSWORD}@db:5432/sigmark?sslmode=disable
       ADMIN_TOKEN: ${ADMIN_TOKEN:?Set ADMIN_TOKEN}
       LAN_BATCH: ${LAN_BATCH:-lan-direct}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      BUILD_DATA: /build-data
+      BUILD_CATALOG: /build-catalog/versions.json
+    volumes:
+      - ./build-data:/build-data
+      - ./build-catalog:/build-catalog:ro
     depends_on:
       db:
         condition: service_healthy

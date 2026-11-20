@@ -30,13 +30,13 @@ type Parameter struct {
 }
 
 var parameterKeys = map[string][]string{
-	"system":  {"release", "api", "patch", "type", "manufacturer", "brand", "model", "buildId", "romHint", "uptime", "selinux", "selinuxPolicy", "selinuxBootHint", "selinuxBuildHint"},
+	"system":  {"release", "api", "patch", "type", "manufacturer", "brand", "model", "buildId", "romHint", "uptime", "selinux", "selinuxPolicy", "selinuxBootHint", "selinuxBuildHint", "socModel", "socManufacturer", "declaredCapabilities"},
 	"cpu":     {"kernel", "kernelFull", "abis", "hardware", "cores", "pageSize", "cpuInfo", "features", "cpu0MaxFrequency"},
 	"memory":  {"totalRam", "availableRam", "lowMemory", "lowMemoryThreshold", "swap", "internalTotal", "internalAvailable", "sharedState"},
 	"display": {"resolution", "densityDpi", "density", "fontScale", "refresh", "modes", "hdr", "sizeEstimate"},
-	"battery": {"level", "status", "plugged", "temperature", "voltage", "health", "current"},
+	"battery": {"level", "status", "plugged", "temperature", "voltage", "health", "current", "powerSaver", "thermalStatus"},
 	"sensors": {"count"},
-	"network": {"transport", "internetValidation", "metered", "captivePortal", "bandwidthEstimate", "wifiDetails", "wifiFrequency", "wifiBandChannel", "wifiRssi", "wifiLinkSpeed", "wifiStandard", "wifiSecurity"},
+	"network": {"transport", "internetValidation", "metered", "captivePortal", "bandwidthEstimate", "wifiDetails", "wifiFrequency", "wifiBandChannel", "wifiRssi", "wifiLinkSpeed", "wifiStandard", "wifiSecurity", "linkDetails", "defaultRouteFamilies", "privateDnsActive", "linkMtu"},
 	"cellular": {"support", "subscription", "dataState", "mobileDataToggle", "roaming", "dataRat", "modemSignalLevel", "cellDiagnostics",
 		"cellLTEBands", "cellLTEBandRange", "cellLTEBandwidth", "cellLTESignal", "cellNRBands", "cellNRSignal"},
 }

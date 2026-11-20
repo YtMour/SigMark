@@ -53,4 +53,22 @@ class LanReportTest {
         assertNull(projected.single { it.key == "selinux" }.value)
         assertEquals("RSRP -95 dBm", projected.single { it.key == "cellLTESignal" }.value)
     }
+
+    @Test fun projectionKeepsPublicHardwarePowerAndLinkReadings() {
+        val fields = mapOf(
+            "system" to mapOf("socModel" to "Sample SoC", "socManufacturer" to "Example",
+                "declaredCapabilities" to "NFC 已声明"),
+            "battery" to mapOf("powerSaver" to "关闭", "thermalStatus" to "正常"),
+            "network" to mapOf("defaultRouteFamilies" to "IPv4 / IPv6", "privateDnsActive" to "已启用",
+                "linkMtu" to "1500 字节")
+        )
+        val snapshot = DeviceSnapshot(1800000000000, fields.map { (group, values) ->
+            DeviceSection(group, group, values.map { (key, value) ->
+                DeviceInfoItem(key, key, value, "public Android API")
+            })
+        })
+        assertEquals(fields, lanParameters(snapshot).groupBy { it.group }.mapValues { (_, values) ->
+            values.associate { it.key to it.value }
+        })
+    }
 }

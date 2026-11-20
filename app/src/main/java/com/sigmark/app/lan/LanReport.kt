@@ -118,6 +118,15 @@ internal fun sendLanReport(endpoint: URI, report: LanReport): String {
             413 -> throw LanFailure("报告超过后台接收上限。")
             409 -> throw LanFailure("提交编号冲突，请关闭预览后重新打开。")
             429 -> throw LanFailure("提交过快，请稍候再试。")
+            503 -> {
+                val message = http.errorStream?.bufferedReader()?.use {
+                    val text = CharArray(512)
+                    val count = it.read(text)
+                    if (count > 0) String(text, 0, count) else ""
+                }
+                if (message?.contains("\"uploads_paused\"") == true) throw LanFailure("管理员已暂停接收报告。可先保存本地 JSON。")
+                throw LanFailure("后台暂时无法接收报告，请稍后重试。")
+            }
             else -> throw LanFailure("服务端暂未接收报告（HTTP ${http.responseCode}）。")
         }
     } finally { http.disconnect() }

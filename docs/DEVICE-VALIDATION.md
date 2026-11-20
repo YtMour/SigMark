@@ -1,5 +1,13 @@
 # 设备验证记录与复测清单
 
+## 0.7.0 · 会话、构建中心与公开下载（2026-11-20，Asia/Shanghai）
+
+- 构建通过 `assembleDebug`、15 项 Android 单测、`lintDebug` 和 Release 合并清单检查。内网 Debug APK 签名校验通过，经免登录 HTTP 下载后 SHA-256 与本地产物一致，值为 `5441A05464AB86BEEC7348DC2145B766F2DE2076963F40304ECF7188D8CA4711`。
+- 下载的 APK 已覆盖安装到 Pixel 6 / Android 14（ADB 设备代号 `oriole`）。App 页面和系统文件选择器导出的 JSON 均记录 8 类、125 项。主机验证了本地 JSON 的结构及新增字段。App 视角得到 IPv4 默认路由和专用 DNS 未启用。显式 MTU 暂无数据。SELinux 的 enforce 和 policy 均为 `RESTRICTED / ACCESS_DENIED`、`errno=13`。
+- 手机在预览中确认后收到上传回执，从档案 API 按编号读回 76 项白名单参数。Chrome 验证了登录刷新、锁定与服务端会话注销、设置持久化、暂停时返回 `uploads_paused`、浏览器返回导航、APK 下载和报告 JSON 下载。设置已恢复测试前的值。桌面及 390 px 下检查布局。
+- 在网页排队构建已登记的 `9923b70f`，Windows 工作进程成功生成并校验 0.6.0 APK。当前下载页仍发布本地构建并单独导入的 0.7.0。Go 测试、vet、Web 三项单测及生产构建通过。
+- 第二台手机、Linux 构建主机与公网 HTTPS 环境待验证。浏览器、手机页面和 JSON 证据保存在忽略目录 `app/build/lan-qa/console-v07/`。
+
 ## 0.6.0：报告档案库与普通应用读取（2026-11-20，Asia/Shanghai）
 
 - Debug 构建、Lint、14 项 Android 单测通过；已升级安装到 Pixel 6 / Android 14 并冷启动。APK SHA-256：`A6351782769CB5648675CD648C78170F5E14975582B4D3FBE599DC64B56722A1`。

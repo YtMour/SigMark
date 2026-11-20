@@ -6,7 +6,7 @@ SigMark 当前采用单模块 Kotlin / Compose 结构，目标是让每一项信
 
 `DeviceCollector` → `DeviceRepository` → `MainViewModel (StateFlow)` → Compose 页面 → 系统文档选择器导出 JSON。
 
-Debug 内网试验分支：冻结当前本地快照 → `lan/LanReport.kt` 按白名单投影 → 用户确认上传 → 内置局域网地址的 Go API → PostgreSQL。管理台同源，通过独立 Bearer 令牌读取；App 不携带管理员令牌。与完整 JSON 导出独立；详细契约和运行说明见 [内网试验手册](LAN-PILOT.md)。
+Debug 内网试验分支：冻结当前本地快照 → `lan/LanReport.kt` 按白名单投影 → 用户确认上传 → 内置局域网地址的 Go API → PostgreSQL。浏览器用管理会话读取，同源脚本联调也可使用独立 Bearer 令牌。上传与完整 JSON 导出各自走独立流程。详细契约和运行说明见 [内网试验手册](LAN-PILOT.md)。
 
 - `collector/DeviceCollectors.kt`：各分类独立采集；字段级捕获异常，分类级兜底，避免单项失败导致整页空白。当前只在进入页面和手动刷新时采集，不做后台定时轮询。
 - `collector/SafeReader.kt`：`ReadResult<T>` 统一返回值、来源、状态、原因、详情及可选 errno。只读固定节点设字节上限与等待上限，使用有限线程池；固定属性查询仅通过应用自身身份调用 `getprop`，带进程超时。若驱动忽略非阻塞，超时停止等待不等于保证内核调用立刻结束；线程和队列上限限制影响范围。
@@ -38,6 +38,7 @@ Debug 内网试验分支：冻结当前本地快照 → `lan/LanReport.kt` 按�
 - Android 上传投影：`lan/LanDetails.kt`；服务端独立白名单和类型校验：`backend/cmd/sigmark/protocol.go`。新增上传字段时同步更新两端、用户预览、隐私文档和测试。
 - 稳定字段标识为 `group + key`；标签仅供显示。记录有 `value`、`status`、`source`，可带 `reason`、`errno`、`note`。非可用值固定为 JSON null。`/api/admin/reports/{id}` 返回原始结构化报告，不通过抓网页获取。
 - 列表/详情分离，游标由接收时间和 UUID 组成；分析脚本保持相同 `q` 和 `batch`、使用 `nextCursor` 翻页并按 `id` 去重。PostgreSQL 默认不自动清理。旧报告没有的值不反推，不应把旧版缺字段当作设备异常。界面比较逻辑见 `backend/web/src/compare.ts`。
+- `backend/web/src/main.tsx` 根据 URL 片段选择工作区页面。会话和接收设置在 `backend/cmd/sigmark/admin.go`。构建中心由 Go API 写入文件队列，主机上的 `backend/scripts/build_worker.py` 从已登记的 Git SHA 构建并验证 APK。公开下载只读取当前发布记录，构建完成后由管理端独立发布。
 
 ### 普通设备兼容策略
 

@@ -4,12 +4,14 @@ import android.app.ActivityManager
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.PackageManager
 import android.hardware.Sensor
 import android.hardware.SensorManager
 import android.hardware.display.DisplayManager
 import android.os.BatteryManager
 import android.os.Build
 import android.os.Environment
+import android.os.PowerManager
 import android.os.StatFs
 import android.os.SystemClock
 import android.system.Os
@@ -56,6 +58,20 @@ private object SystemCollector : DeviceCollector {
         value("release", "Android 版本", "Build.VERSION.RELEASE") { Build.VERSION.RELEASE }
         value("api", "API 级别", "Build.VERSION.SDK_INT") { Build.VERSION.SDK_INT.toString() }
         value("patch", "安全补丁", "Build.VERSION.SECURITY_PATCH") { Build.VERSION.SECURITY_PATCH }
+        if (Build.VERSION.SDK_INT >= 31) {
+            value("socModel", "SoC 型号", "Build.SOC_MODEL") { Build.SOC_MODEL }
+            value("socManufacturer", "SoC 厂商", "Build.SOC_MANUFACTURER") { Build.SOC_MANUFACTURER }
+        }
+        value("declaredCapabilities", "系统声明能力", "PackageManager.hasSystemFeature", "ROM 声明，实际功能仍需真机验证。") {
+            val pm = context.packageManager
+            listOf(
+                PackageManager.FEATURE_NFC to "NFC",
+                PackageManager.FEATURE_BLUETOOTH_LE to "BLE",
+                PackageManager.FEATURE_WIFI_RTT to "Wi-Fi RTT",
+                PackageManager.FEATURE_SENSOR_GYROSCOPE to "陀螺仪",
+                PackageManager.FEATURE_USB_HOST to "USB Host",
+            ).joinToString(" / ") { (feature, name) -> "$name ${if (pm.hasSystemFeature(feature)) "已声明" else "未声明"}" }
+        }
         value("fingerprint", "构建指纹", "Build.FINGERPRINT", "应用进程视角；可能与 ADB 属性不同") { Build.FINGERPRINT }
         value("buildId", "构建 ID", "Build.ID") { Build.ID }
         value("display", "构建显示名", "Build.DISPLAY") { Build.DISPLAY }
@@ -232,6 +248,15 @@ private object BatteryCollector : DeviceCollector {
                 ?.takeIf { it in -30_000_000..30_000_000 }?.let {
                     String.format(Locale.US, "%.1f mA", it / 1000.0)
                 }
+        }
+        value("powerSaver", "省电模式", "PowerManager.isPowerSaveMode") {
+            context.getSystemService(PowerManager::class.java)?.isPowerSaveMode?.let { if (it) "开启" else "关闭" }
+        }
+        if (Build.VERSION.SDK_INT >= 29) value("thermalStatus", "系统热状态", "PowerManager.currentThermalStatus",
+            "系统热管理分级，不代表 CPU 温度。") {
+            context.getSystemService(PowerManager::class.java)?.currentThermalStatus?.let { state ->
+                listOf("正常", "轻度", "中度", "严重", "临界", "紧急", "关机保护").getOrNull(state)
+            }
         }
     }
 }

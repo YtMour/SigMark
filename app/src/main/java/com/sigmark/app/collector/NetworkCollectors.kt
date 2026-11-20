@@ -93,6 +93,31 @@ internal object NetworkCollector : DeviceCollector {
                     .takeIf { it.isNotEmpty() }?.joinToString(" / ")
             }
         }
+        if (active != null) with(fields) {
+            val link = SafeReader.read("ConnectivityManager.getLinkProperties") { cm.getLinkProperties(active) }
+            val properties = link.value
+            if (properties == null) {
+                items += DeviceInfoItem("linkDetails", "默认网络链路属性", null,
+                    link.source, link.status, link.detail, link.reason, link.errno)
+            } else {
+                read("defaultRouteFamilies", "默认路由地址族", "LinkProperties.routes",
+                    "仅显示默认网络公布的 IPv4 / IPv6 路由类型，不记录 IP 或网关。") {
+                    val defaults = properties.routes.filter { it.isDefaultRoute }
+                    buildList {
+                        if (defaults.any { it.destination.address is java.net.Inet4Address }) add("IPv4")
+                        if (defaults.any { it.destination.address is java.net.Inet6Address }) add("IPv6")
+                    }.joinToString(" / ").ifEmpty { null }
+                }
+                if (Build.VERSION.SDK_INT >= 28) read(
+                    "privateDnsActive", "专用 DNS 状态", "LinkProperties.isPrivateDnsActive",
+                    "当前默认网络的系统状态，不记录 DNS 服务器地址或主机名。"
+                ) { if (properties.isPrivateDnsActive) "已启用" else "未启用" }
+                if (Build.VERSION.SDK_INT >= 29) read("linkMtu", "链路 MTU", "LinkProperties.mtu",
+                    "单位为字节。系统未报告显式值时留空，不推定为 1500。") {
+                    properties.mtu.takeIf { it > 0 }?.let { "$it 字节" }
+                }
+            }
+        }
         return DeviceSection(key, title, fields.items)
     }
 

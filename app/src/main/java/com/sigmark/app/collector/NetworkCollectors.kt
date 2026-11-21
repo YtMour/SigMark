@@ -311,7 +311,10 @@ internal object CellularCollector : DeviceCollector {
                 read("roaming", "漫游状态", "TelephonyManager.isNetworkRoaming") {
                     if (data.networkOperator.isNullOrBlank()) null else if (data.isNetworkRoaming) "漫游中" else "未漫游"
                 }
-                if (Build.VERSION.SDK_INT >= 33) read("dataRat", "蜂窝数据制式", "TelephonyManager.dataNetworkType", "调制解调器的数据制式；不等于状态栏 5G 图标或 NSA 判断。") { radioType(data.dataNetworkType) }
+                if (canReadDataRat(Build.VERSION.SDK_INT, context.checkSelfPermission(Manifest.permission.READ_PHONE_STATE) == PackageManager.PERMISSION_GRANTED))
+                    read("dataRat", "蜂窝数据制式", "TelephonyManager.dataNetworkType", "调制解调器的数据制式；不等于状态栏 5G 图标或 NSA 判断。") { radioType(data.dataNetworkType) }
+                else missing("dataRat", "蜂窝数据制式", "TelephonyManager.dataNetworkType", ReadReason.PERMISSION_REQUIRED,
+                    "此版本 Android 需电话状态权限才能读取默认数据卡制式。设备看到的小区类型在小区无线参数单独展示。")
                 if (Build.VERSION.SDK_INT >= 28) read("modemSignalLevel", "调制解调器信号等级", "TelephonyManager.signalStrength.level", "系统综合等级，不是 dBm。") { data.signalStrength?.level?.takeIf { it in 0..4 }?.let { "$it / 4" } }
                 if (Build.VERSION.SDK_INT >= 28 && hasFine(context) && locationEnabled(context)) {
                     val widths = SafeReader.read("TelephonyManager.serviceState.cellBandwidths",
@@ -557,3 +560,5 @@ private fun radioType(type: Int): String? = when (type) {
     Phone.NETWORK_TYPE_UNKNOWN -> null
     else -> "Android 制式 $type"
 }
+
+internal fun canReadDataRat(api: Int, phonePermission: Boolean): Boolean = api >= 33 || (api >= 24 && phonePermission)

@@ -41,3 +41,5 @@ CREATE TABLE IF NOT EXISTS regression_baselines (
   created_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE UNIQUE INDEX IF NOT EXISTS regression_baseline_name ON regression_baselines (lower(name));
+ALTER TABLE regression_baselines ADD COLUMN IF NOT EXISTS expected_network varchar(12) NOT NULL DEFAULT ''
+  CHECK (expected_network IN ('','wifi','cellular','ethernet','vpn','none'));

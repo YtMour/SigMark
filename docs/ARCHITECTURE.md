@@ -52,8 +52,17 @@ Debug 内网试验分支：冻结当前本地快照 → `lan/LanReport.kt` 按�
 - 列表/详情分离，游标由接收时间和 UUID 组成；分析脚本保持相同 `q` 和 `batch`、使用 `nextCursor` 翻页并按 `id` 去重。PostgreSQL 默认不自动清理。旧报告没有的值不反推，不应把旧版缺字段当作设备异常。界面比较逻辑见 `backend/web/src/compare.ts`。
 - `backend/web/src/main.tsx` 根据 URL 片段选择工作区页面。会话和接收设置在 `backend/cmd/sigmark/admin.go`。构建中心由 Go API 写入文件队列，主机上的 `backend/scripts/build_worker.py` 从已登记的 Git SHA 构建并验证 APK。公开下载只读取当前发布记录，构建完成后由管理端独立发布。
 - 持久回归基线由 `baselines.go` / `regression_baselines` 保存引用和实验预期，不复制报告。前端 `security-rules.ts` 负责解释证据，`regression.ts` 生成版本化对比导出，均可独立测试。读数缺失、字段未归档、跨资产对照与当前读数变化是独立信号。详见 [复测工作流](REGRESSION-WORKFLOW.md)。
+- 资产搜索和高级筛选由 `asset-filters.tsx` 组合；Radix Popover 负责焦点、逃逸键和视口定位，业务只在确认后更新 URL 作用域。现有 React、Vite、CSS 和 API 保持不变。Android 用已有 Compose Material 3，复测准备不增加上传字段。
+- `workspace-route.ts` 是档案、资产、字段覆盖和复测的 URL 范围契约。只迁移公开的筛选参数，不迁移勾选、回收站状态或当前报告；需要时通过显式 `report`、`baseline` 参数进入详情。`report-picker.tsx` 重用原报告查询与分页接口，不加入新的报告读写协议。
+- `workspace-ui.tsx` 和 `workspace-ui.css` 提供统一的后台框架、页头、子页链接及空态；业务页各自保留数据请求与操作逻辑。`sampleAsset` 只用于设备采样深链接，不进入报告筛选或导出范围。详见 [后台工作台](WORKSPACE-UI.md)。
+- 档案列表和独立阅读页按路由分别挂载；直接打开报告只读对应详情（对照时另读基线），不预取档案列表。`reader-history.ts` 将来源、分页游标、焦点和视口位置保存在该条浏览器历史记录中，不放入可分享 URL，不改变报告。设备采样按游标补载后才恢复定位。
+- `reader-fields.ts` 从原始参数派生分类、检索结果与按状态计数；`reader-parameters.tsx` 展示读数与可展开的诊断依据。搜索和状态是交集，『全部』只清除状态条件。未归档字段不补行；手机快照统计与归档明细不是同一口径。自动化的稳定字段标识仍是 `group + key`，不依赖页面展示顺序。
 
 ### 普通设备兼容策略
+
+- LAN v4 字段集 7：`system.partitionCount`、`system.partition_<name>`、`system.webViewProvider/webViewVersion/webViewCode`、`system.systemSpl/vendorSpl`、`environment.keyProtection`、`app.package/channel/certSha256`。动态分区名仅限小写字母、数字、下划线（1–32 字符、最多 24 个），只允许在 system 下。v7 最多 192 条，旧 v3/v4 仍最多 160 条。对照按稳定键，不按显示顺序。按需密钥测试的采样时刻在该项说明里，不改原快照时间。
+- 启动规则的 Kotlin / TypeScript 实现共用测试样例 `app/src/test/resources/security-boot.tsv`；单份和对比都先判红色与冲突，再判符合预期的解锁。复测 JSON 新增 `ruleVersion: rom-evidence/2`，与采集器和字段集版本独立。
+- 管理端 `GET /api/admin/release-signer?package=com.sigmark.app&channel=lan-debug&version=0.18.0&code=20` 仅查已发布版本。当前记录来自发布指针，切换前将原发布证书摘要保存在构建数据目录 `published-signers/`；旧文件中从未记录的历史不作猜测。无对应数据是 `unregistered`，存储不可读是服务故障，不能作为证书不匹配。未改变用户归组或报告鉴权机制。
 
 - 公开 API 优先：Build、ActivityManager、StatFs、Display、BatteryManager、SensorManager、ConnectivityManager。CPU 文本、首核频率、Swap、SELinux 与厂商属性是可选补充，不阻断其他参数。
 - EACCES/EPERM 标记 `RESTRICTED`；ENOENT/ENODEV 映射 `UNAVAILABLE / NODE_MISSING`。`UNAVAILABLE` 是兼容旧版 JSON 的“暂无数据/不支持”状态，不另造 `UNSUPPORTED` 枚举。属性无返回值为 `NOT_REPORTED`；真正的失败或超时标记 `ERROR`。不根据缺失或受限推断风险。
@@ -63,3 +72,16 @@ Debug 内网试验分支：冻结当前本地快照 → `lan/LanReport.kt` 按�
 ## 扩展约定
 
 新增字段时优先使用公开 Android API；再考虑常见可读节点。先保留原始来源与单位，再做显示格式化。动态值仅随手动刷新更新；若未来加入实时页，监听器应随页面可见性注册/注销。涉及 `Build.*` 的值注明“应用进程视角”，不当作物理硬件真值。新增数据导出字段应同步更新 `schemaVersion` 文档、单测和隐私提示。
+
+### 0.18.1 · 采样、上传与资产的三个边界
+
+- 「整体获取」先采集快照（含无线刷新），再自测临时密钥，最后预览，不自动提交。自测无结果时保留具体状态；本机配置摘要不进入上传。预览包含当前窗口信息；同次预览冻结同一份上传内容。
+- SampleUpload 由 MainViewModel 持有。首次发送后锁定反馈、关联选择、请求编号与内容；网络错误后可重试，成功后只看回执。关窗或旋转不会丢失；结束进程、成功刷新或主动重测后是新采样操作，不承诺跨进程恢复。
+- 提交按 (batch, requestId) 串行。先核对原 JSONB，再决定是否解析安装标记；重放不创建资产、不更改归属，同编号不同内容返回 409。成功回执含 reportId、batch、assetLinked；后者反映服务器所存关联，而非客户端勾选。旧服务无此字段时显示「后台未返回归组状态」。服务端切换批次后不保证跨批次去重。
+- 回归命令（仓库根）：先在 backend 下执行 docker compose build api，再执行 python backend/scripts/qa_asset_uploads.py。脚本使用临时网络、数据库和 API，不访问部署仓库。
+
+### 0.18.2 · 独立的本机待上传列表
+
+- 普通启动及权限结果回调只更新首页显示。主动整体获取、手动刷新、密钥复测在配置 LAN 的构建中产生独立条目；首次可手动选择首页结果。采集不会发起网络请求。
+- ReportShelf 在 App 私有 SQLite 中按后台地址隔离报告，仅存 LAN 允许的投影、采集网络和时间、备注、关联选择和发送状态，不保存完整本地导出。成功上传不自动删除本机副本。用户可按条删除；默认无自动上传、无后台重试。
+- 首次确认时以事务固定正文、提交编号和关联选择，再发送；中断后从同一目的地恢复原始字节。回执保存在本机，查看已上传不重复发出请求。服务器仍按批次与提交编号去重，切换服务端批次不承诺跨批次去重。

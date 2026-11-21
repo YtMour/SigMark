@@ -18,6 +18,10 @@ func TestBaselineInputAndAuth(t *testing.T) {
 			t.Fatalf("invalid baseline: %+v", input)
 		}
 	}
+	if (baselineInput{Name: "Network", ReportID: id, ExpectedNetwork: "unknown"}).valid() ||
+		!(baselineInput{Name: "Network", ReportID: id, ExpectedNetwork: "cellular"}).valid() {
+		t.Fatal("unexpected network condition validation")
+	}
 	router := (server{token: "qa"}).routes()
 	for _, test := range []struct {
 		method, path, token, intent string

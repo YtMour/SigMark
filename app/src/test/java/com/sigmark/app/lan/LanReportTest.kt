@@ -9,6 +9,20 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class LanReportTest {
+    @Test fun headerUsesInstalledVariantVersion() {
+        val snap = DeviceSnapshot(1,listOf(DeviceSection("app","app",listOf(DeviceInfoItem("version","版本","0.18.42 (42)","PackageManager")))))
+        assertEquals("0.18.42",lanReport(snap,"0.18.0","").appVersion)
+    }
+    @Test fun v7OnlyProjectsSecurityEvidenceInItsOwnGroup() {
+        val groups = mapOf("system" to listOf("partition_vendor","partition_../x","webViewProvider","vendorSpl"),
+            "app" to listOf("package","channel","certSha256","keyProtection"),
+            "environment" to listOf("keyProtection","privateKey","partition_vendor"))
+        val snap = DeviceSnapshot(1,groups.map { (g,keys) -> DeviceSection(g,g,keys.map {
+            DeviceInfoItem(it,it,"value","test")
+        }) })
+        assertEquals(setOf("system.partition_vendor","system.webViewProvider","system.vendorSpl","app.package",
+            "app.channel","app.certSha256","environment.keyProtection"),lanParameters(snap).map { it.group+"."+it.key }.toSet())
+    }
     @Test fun sharesProtectionFlagsButNotLocalIdentityEvidence() {
         val values = mapOf("keyguardSecure" to "是", "storageEncryption" to "已启用", "configurationDigest" to "private",
             "strongBiometrics" to "private", "virtualDeviceHints" to "private")
@@ -16,7 +30,7 @@ class LanReportTest {
             DeviceInfoItem(key,key,value,"public Android API")
         })))
         assertEquals(setOf("keyguardSecure","storageEncryption"),lanParameters(snapshot).map { it.key }.toSet())
-        assertEquals(6,LanFieldSetVersion)
+        assertEquals(7,LanFieldSetVersion)
     }
     @Test fun assetIdentityIsScopedToTheBackendAddressAndPort() {
         fun scope(origin: String) = assetIdentityScope(requireNotNull(lanEndpoint(origin)))
@@ -27,7 +41,7 @@ class LanReportTest {
 
     @Test fun keepsPrivateDiagnosticsOffTheWire() {
         val keys = mapOf(
-            "app" to listOf("permissions", "installedAt", "certSha256", "visibleLauncherApps"),
+            "app" to listOf("permissions", "installedAt", "certificateChain", "visibleLauncherApps","partition_vendor"),
             "environment" to listOf("configurationDigest", "suFileHint", "strongBiometrics"),
             "system" to listOf("fingerprint", "buildHost", "buildUser"),
             "runtime" to listOf("locale", "timeZone", "featureList"),

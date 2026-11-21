@@ -1,10 +1,20 @@
 import type {Report} from './reports';
 import type {Baseline} from './baselines';
 import type {compareSecurity} from './security-rules';
+import {ruleVersion} from './security-rules.ts';
 
 type Change = ReturnType<typeof compareSecurity>[number];
+const defaultNetworks=new Set(['wifi','cellular','ethernet','vpn','none']);
+export function networkCondition(expected:string|undefined,before:string|undefined,after:string|undefined){
+  const required=expected&&defaultNetworks.has(expected)?expected:null;
+  const baseline=before&&defaultNetworks.has(before)?before:null;
+  const current=after&&defaultNetworks.has(after)?after:null;
+  const state=!required?'not_required':(baseline&&baseline!==required)||(current&&current!==required)?'mismatch':
+    !baseline||!current?'insufficient':'matched';
+  return {expected:required,baseline,current,state};
+}
 export function regressionResult(reference:Report,current:Report,changes:Change[],options:{
-  sameAsset:boolean;expectUnlock:boolean;baseline?:Pick<Baseline,'id'|'name'>;
+  sameAsset:boolean;expectUnlock:boolean;baseline?:Pick<Baseline,'id'|'name'>;expectedNetwork?:string;
 }){
   const describe=(row:Report)=>({reportId:row.id,model:row.report.model,batch:row.batch,
     capturedAtEpochMs:row.report.capturedAtEpochMs,collectorVersion:row.report.collectorVersion??null,
@@ -26,11 +36,12 @@ export function regressionResult(reference:Report,current:Report,changes:Change[
   }
   const verdicts={review:0,expected:0,insufficient:0,changed:0,unchanged:0};
   for(const item of changes)verdicts[item.verdict]++;
-  return {schemaVersion:1,kind:'sigmark.regression',baseline:describe(reference),current:describe(current),
+  return {schemaVersion:1,ruleVersion,kind:'sigmark.regression',baseline:describe(reference),current:describe(current),
     savedBaseline:options.baseline??null,
     context:{sameAsset:options.sameAsset,expectUnlock:options.sameAsset&&options.expectUnlock,
       baselineEarlier:reference.report.capturedAtEpochMs<current.report.capturedAtEpochMs,
-      differentFieldSets:(reference.report.fieldSetVersion??null)!==(current.report.fieldSetVersion??null),attestation:'not_verified'},
+      differentFieldSets:(reference.report.fieldSetVersion??null)!==(current.report.fieldSetVersion??null),attestation:'not_verified',
+      network:networkCondition(options.expectedNetwork,reference.report.network,current.report.network)},
     counts,verdicts,checks:changes.map(item=>({key:item.key,verdict:item.verdict,explanation:item.note,
       baseline:source(item.baseline),current:source(item.current)}))};
 }

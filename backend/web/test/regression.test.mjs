@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {regressionResult} from '../src/regression.ts';
+import {networkCondition,regressionResult} from '../src/regression.ts';
 const row=(id,parameters,fieldSetVersion)=>({id,batch:'qa',assetId:'private-asset',report:{model:'QA',capturedAtEpochMs:1,parameters,fieldSetVersion}});
 test('coverage distinguishes unavailable readings from fields not archived, and export omits asset identifiers',()=>{
   const base=row('a',[
@@ -16,4 +16,10 @@ test('coverage distinguishes unavailable readings from fields not archived, and 
   assert.equal(result.context.differentFieldSets,true);
   assert.equal(result.context.expectUnlock,false);
   assert.equal(JSON.stringify(result).includes('private-asset'),false);
+});
+test('compare default network without confusing VPN, unknown or no route',()=>{
+  assert.equal(networkCondition('wifi','wifi','vpn').state,'mismatch');
+  assert.equal(networkCondition('wifi','wifi','unknown').state,'insufficient');
+  assert.equal(networkCondition('none','none','none').state,'matched');
+  assert.equal(networkCondition('', 'wifi','cellular').state,'not_required');
 });

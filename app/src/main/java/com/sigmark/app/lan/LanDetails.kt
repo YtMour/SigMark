@@ -2,6 +2,7 @@ package com.sigmark.app.lan
 
 import com.sigmark.app.model.DeviceSnapshot
 import com.sigmark.app.model.ValueStatus
+import com.sigmark.app.collector.partitionField
 
 internal data class LanParameter(
     val group: String, val key: String, val label: String, val value: String?, val source: String,
@@ -24,7 +25,8 @@ private val legacyFields = mapOf(
 private val diagnosticFields = mapOf(
     "cellular" to setOf("carrierBandwidths", "simState", "defaultDataSlot", "slotService"),
     "network" to setOf("visibleTransports", "wifiRouteRole"),
-    "system" to setOf("display", "incremental", "buildTime", "board", "sku", "baseOs", "tags", "device", "product", "bootloader"),
+    "system" to setOf("display", "incremental", "buildTime", "board", "sku", "baseOs", "tags", "device", "product", "bootloader",
+        "partitionCount","webViewProvider","webViewVersion","webViewCode","systemSpl","vendorSpl"),
     "cpu" to setOf("arch", "abi32", "abi64"),
     "memory" to setOf("ramUseEstimate", "volumeSummary", "systemSpace", "appCacheSpace"),
     "display" to setOf("wideGamut", "visibleDisplays", "windowSize", "systemBarInsets", "cutoutInsets"),
@@ -32,8 +34,8 @@ private val diagnosticFields = mapOf(
     "runtime" to setOf("featureCount", "openGlEs", "virtualMachine", "heapMax", "heapAllocated", "heapFree", "standbyBucket", "backgroundRestricted"),
     "media" to setOf("cameraCount", "bluetoothCapabilities", "audioCapabilities", "audioSampleRate", "audioBuffer", "codecs"),
     "environment" to setOf("selinuxDomain", "buildSignals", "systemDebuggable", "verifiedBoot", "vbmetaState", "flashLock",
-        "keyguardSecure", "storageEncryption"),
-    "app" to setOf("version", "appDebuggable", "debuggerConnected"),
+        "keyguardSecure", "storageEncryption", "keyProtection"),
+    "app" to setOf("version", "appDebuggable", "debuggerConnected","package","certSha256","channel"),
 )
 
 internal data class LanCoverage(
@@ -56,7 +58,7 @@ internal fun lanCoverage(snapshot: DeviceSnapshot): List<LanCoverage> =
 internal fun lanParameters(snapshot: DeviceSnapshot): List<LanParameter> =
     snapshot.sections.flatMap { section ->
         val fields = legacyFields[section.key].orEmpty() + diagnosticFields[section.key].orEmpty()
-        section.items.filter { it.key in fields }.mapNotNull { item ->
+        section.items.filter { it.key in fields || (section.key == "system" && partitionField(it.key)) }.mapNotNull { item ->
             val value = clean(item.value, 512)
             if (item.status == ValueStatus.AVAILABLE && value == null) return@mapNotNull null
             LanParameter(section.key, item.key, clean(item.label, 64) ?: item.key,

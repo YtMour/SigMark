@@ -79,6 +79,7 @@ private object SystemCollector : DeviceCollector {
         value("release", "Android 版本", "Build.VERSION.RELEASE") { Build.VERSION.RELEASE }
         value("api", "API 级别", "Build.VERSION.SDK_INT") { Build.VERSION.SDK_INT.toString() }
         value("patch", "安全补丁", "Build.VERSION.SECURITY_PATCH") { Build.VERSION.SECURITY_PATCH }
+        add(SecurityObservations.system(context))
         if (Build.VERSION.SDK_INT >= 31) {
             value("socModel", "SoC 型号", "Build.SOC_MODEL") { Build.SOC_MODEL }
             value("socManufacturer", "SoC 厂商", "Build.SOC_MANUFACTURER") { Build.SOC_MANUFACTURER }

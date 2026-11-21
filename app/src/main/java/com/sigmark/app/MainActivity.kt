@@ -43,6 +43,8 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -80,6 +82,10 @@ import com.sigmark.app.model.DeviceSnapshot
 import com.sigmark.app.model.ReadReason
 import com.sigmark.app.model.unavailableLabel
 import com.sigmark.app.model.ValueStatus
+import com.sigmark.app.lan.SavedSample
+import com.sigmark.app.lan.SavedReportsDialog
+import com.sigmark.app.lan.networkLabel
+import com.sigmark.app.lan.SampleUpload
 import com.sigmark.app.lan.LanReportDialog
 import com.sigmark.app.lan.AppUpdate
 import java.text.SimpleDateFormat
@@ -136,7 +142,12 @@ class MainActivity : ComponentActivity() {
                 surface = CardColor, onSurface = Color.White,
             )) {
                 val state by viewModel.state.collectAsStateWithLifecycle()
-                SigMarkScreen(state, onRefresh = { viewModel.refresh(refreshRadio = true) }, onCellPermission = {
+                val upload by viewModel.upload.collectAsStateWithLifecycle()
+                val saved by viewModel.saved.collectAsStateWithLifecycle()
+                val decorate = windowDecorator()
+                val screenState = remember(state, decorate) { state.copy(snapshot = state.snapshot?.let(decorate)) }
+                SigMarkScreen(screenState, upload, saved, { viewModel.collectAll(decorate) }, viewModel::selectReport, viewModel::removeReport, viewModel::setAssociation,
+                    viewModel::setFeedback, viewModel::submitUpload, onTestKey = { viewModel.testKey(decorate) }, onRefresh = { viewModel.refresh(refreshRadio = true, decorate = decorate) }, onCellPermission = {
                     cellPermission.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
                 }, onAppSettings = {
                     diagnosticSettings.launch(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", packageName, null)))
@@ -158,7 +169,10 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 private fun SigMarkScreen(
-    state: MainUiState,
+    state: MainUiState, upload: SampleUpload?, saved: List<SavedSample>, onCollectAll: () -> Unit,
+    onOpenUpload: (String?, DeviceSnapshot?) -> Unit, onRemove: (String) -> Unit,
+    onAssociate: (Boolean) -> Unit, onFeedback: (String) -> Unit, onSubmit: () -> Unit,
+    onTestKey: () -> Unit,
     onRefresh: () -> Unit,
     onCellPermission: () -> Unit,
     onAppSettings: () -> Unit,
@@ -177,10 +191,14 @@ private fun SigMarkScreen(
     var showUpdate by remember { mutableStateOf(false) }
     var showTimeline by remember { mutableStateOf(false) }
     var showSecurity by rememberSaveable { mutableStateOf(false) }
+    var showRecheck by rememberSaveable { mutableStateOf(false) }
+    var showTools by remember { mutableStateOf(false) }
     var showPhoneExplanation by remember { mutableStateOf(false) }
     val context = LocalContext.current
-    var lanSnapshot by remember { mutableStateOf<DeviceSnapshot?>(null) }
-    val snapshot = withWindowObservations(state.snapshot)
+    var showUpload by rememberSaveable { mutableStateOf(false) }
+    var showShelf by rememberSaveable { mutableStateOf(false) }
+    val snapshot = state.snapshot
+    val busy = state.refreshing || state.testingKey || state.saving || upload?.sending == true
     val issueCount = snapshot?.sections?.sumOf { section ->
         section.items.count { it.status != ValueStatus.AVAILABLE }
     } ?: 0
@@ -200,9 +218,9 @@ private fun SigMarkScreen(
     val listState = rememberLazyListState()
     val permissionMissing = snapshot?.sections?.any { it.key == "cellular" && it.items.any { row -> row.key == "cellDiagnostics" && row.reason == ReadReason.PERMISSION_REQUIRED } } == true
     val phoneMissing = context.checkSelfPermission(Manifest.permission.READ_PHONE_STATE) != android.content.pm.PackageManager.PERMISSION_GRANTED &&
-        snapshot?.sections?.any { it.key == "cellular" && it.items.any { row -> row.key == "slotService" && row.reason == ReadReason.PERMISSION_REQUIRED } } == true
+        snapshot?.sections?.any { it.key == "cellular" && it.items.any { row -> row.key in setOf("slotService", "dataRat") && row.reason == ReadReason.PERMISSION_REQUIRED } } == true
 
-    Scaffold(containerColor = Ink, topBar = { AppHeader(snapshot, state.refreshing, onRefresh, onExportRequest = { showExportConfirmation = true }) }) { padding ->
+    Scaffold(containerColor = Ink, topBar = { AppHeader(snapshot, busy, onRefresh, onExportRequest = { showExportConfirmation = true }) }) { padding ->
         LazyColumn(
             state = listState,
             modifier = Modifier.fillMaxSize().padding(padding),
@@ -212,26 +230,39 @@ private fun SigMarkScreen(
             item {
                 Column(Modifier.padding(horizontal = 16.dp)) {
                     OverviewCard(snapshot)
-                    if (snapshot != null) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        TextButton(onClick = { showSensors = true }, modifier = Modifier.weight(1f)) { Text("实时传感器") }
-                        TextButton(onClick = { showVisibleApps = true }, modifier = Modifier.weight(1f)) { Text("可见应用") }
-                        if (BuildConfig.DEBUG && BuildConfig.LAN_ORIGIN.isNotEmpty()) {
-                            TextButton(onClick = { showUpdate = true }, modifier = Modifier.weight(1f)) { Text("检查更新") }
-                        }
-                    }
-                    if (snapshot != null) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        TextButton(onClick = { showTimeline = true }, modifier = Modifier.weight(1f)) { Text("链路切换记录") }
-                        TextButton(onClick = { showSecurity = true }, modifier = Modifier.weight(1f)) { Text("指纹安全") }
-                        if (phoneMissing) TextButton(onClick = { showPhoneExplanation = true }, modifier = Modifier.weight(1f)) { Text("授权查看各卡状态") }
-                    }
-                    if (permissionMissing || BuildConfig.DEBUG) {
-                        Surface(color = CardColor, shape = RoundedCornerShape(12.dp), modifier = Modifier.padding(top = 9.dp)) {
-                            Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
-                                if (permissionMissing) TextButton(onClick = { showCellExplanation = true }) { Text("授权查看小区无线参数") }
-                                if (BuildConfig.DEBUG) Button(enabled = snapshot != null, onClick = { lanSnapshot = snapshot },
-                                    modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)) { Text("上传报告") }
+                    if (snapshot == null && saved.isNotEmpty()) OutlinedButton(onClick = { showShelf = true }) { Text("上传报告") }
+                    if (snapshot != null) {
+                        val lanEnabled = BuildConfig.DEBUG && BuildConfig.LAN_ORIGIN.isNotEmpty()
+                        Row(Modifier.fillMaxWidth().padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(enabled = !busy, onClick = onCollectAll, modifier = Modifier.weight(1f)) { Text("整体获取") }
+                            if (lanEnabled) OutlinedButton(enabled = !busy, onClick = { showShelf = true }, modifier = Modifier.weight(1f)) {
+                                Text("上传报告")
                             }
                         }
+                        Text(when (state.fullStage) {
+                            1 -> "1/2 · 正在采集设备参数"
+                            2 -> "2/2 · 正在进行指纹安全自测"
+                            else -> if (!lanEnabled) "采集设备与安全信息，结果只在本机查看。"
+                                else saved.firstOrNull()?.let { "最近保存：" + networkLabel(it.network) + " · " +
+                                    java.text.DateFormat.getTimeInstance().format(Date(it.time)) + "　待上传 " + saved.count { row -> !row.sent } + " 份" }
+                                    ?: "先采集，再上传。换回 Wi-Fi 后也能上传之前的报告。"
+                        }, color = Muted, fontSize = 12.sp)
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            TextButton(enabled = !busy, onClick = { showRecheck = true }, modifier = Modifier.weight(1f)) { Text("复测准备") }
+                            TextButton(onClick = { showSecurity = true }, modifier = Modifier.weight(1f)) { Text("指纹安全") }
+                            Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                                TextButton(onClick = { showTools = true }) { Text("更多工具") }
+                                DropdownMenu(expanded = showTools, onDismissRequest = { showTools = false }) {
+                                    DropdownMenuItem(text = { Text("链路记录") }, onClick = { showTools = false; showTimeline = true })
+                                    if (lanEnabled) DropdownMenuItem(text = { Text("检查更新") }, onClick = { showTools = false; showUpdate = true })
+                                    DropdownMenuItem(text = { Text("实时传感器") }, onClick = { showTools = false; showSensors = true })
+                                    DropdownMenuItem(text = { Text("可见应用") }, onClick = { showTools = false; showVisibleApps = true })
+                                }
+                            }
+                        }
+                    }
+                    if (permissionMissing || phoneMissing) {
+                        Text("蜂窝诊断可在「复测准备」单独授权", color = Muted, fontSize = 11.sp, modifier = Modifier.padding(start = 2.dp))
                     }
                     Spacer(Modifier.height(12.dp))
                     SearchBox(query, onChange = { query = it })
@@ -326,10 +357,20 @@ private fun SigMarkScreen(
         confirmButton = { TextButton(onClick = { showCellExplanation = false; onCellPermission() }) { Text("请求授权") } },
         dismissButton = { TextButton(onClick = { showCellExplanation = false }) { Text("暂不授权") } },
     )
-    lanSnapshot?.let { frozen -> LanReportDialog(frozen) { lanSnapshot = null } }
+    if (showShelf && (!showUpload || (upload == null && !state.saving))) SavedReportsDialog(saved,
+        snapshot != null && saved.none { it.time == snapshot.collectedAt }, busy, state.error, { id ->
+        onOpenUpload(id, snapshot); showUpload = true
+    }, onRemove) { showShelf = false; showUpload = false }
+    if (showShelf && showUpload && upload != null) LanReportDialog(upload, onAssociate, onFeedback, onSubmit) { showUpload = false }
     if (showSensors) SensorMonitor { showSensors = false }
     if (showTimeline) NetworkTimeline(onTimelineExport) { showTimeline = false }
-    if (showSecurity && snapshot != null) SecurityPanel(snapshot) { showSecurity = false }
+    if (showRecheck && snapshot != null) RecheckPanel(snapshot, state.refreshing, onRefresh,
+        close = { showRecheck = false },
+        requestCell = { showRecheck = false; showCellExplanation = true },
+        requestPhone = { showRecheck = false; showPhoneExplanation = true },
+        appSettings = { showRecheck = false; onAppSettings() },
+        locationSettings = { showRecheck = false; onLocationSettings() })
+    if (showSecurity && snapshot != null) SecurityPanel(snapshot, state.testingKey, state.refreshing, onTestKey) { showSecurity = false }
     if (showPhoneExplanation) AlertDialog(
         onDismissRequest = { showPhoneExplanation = false },
         title = { Text("查看各卡槽服务状态") },
@@ -342,8 +383,7 @@ private fun SigMarkScreen(
 }
 
 @Composable
-private fun withWindowObservations(snapshot: DeviceSnapshot?): DeviceSnapshot? {
-    if (snapshot == null) return null
+private fun windowDecorator(): (DeviceSnapshot) -> DeviceSnapshot {
     val size = LocalWindowInfo.current.containerSize
     val density = LocalDensity.current
     val direction = LocalLayoutDirection.current
@@ -352,10 +392,10 @@ private fun withWindowObservations(snapshot: DeviceSnapshot?): DeviceSnapshot? {
             "右 ${insets.getRight(density, direction)} · 下 ${insets.getBottom(density)} px"
     val bars = margins(WindowInsets.systemBars)
     val cutout = margins(WindowInsets.displayCutout)
-    return remember(snapshot, size, bars, cutout) {
+    return remember(size, bars, cutout) { { snapshot: DeviceSnapshot ->
         snapshot.copy(sections = snapshot.sections.map { section ->
             if (section.key != "display" || size.width <= 0 || size.height <= 0) section else section.copy(items =
-                section.items + listOf(
+                section.items.filterNot { it.key in setOf("windowSize", "systemBarInsets", "cutoutInsets") } + listOf(
                     DeviceInfoItem("windowSize", "当前应用窗口尺寸", "${size.width} × ${size.height} px",
                         "Compose LocalWindowInfo.containerSize", note = "由当前页面布局提供。物理分辨率见显示模式字段。"),
                     DeviceInfoItem("systemBarInsets", "系统栏边距", bars, "WindowInsets.systemBars"),
@@ -363,7 +403,7 @@ private fun withWindowObservations(snapshot: DeviceSnapshot?): DeviceSnapshot? {
                         note = "0 表示窗口当前未收到该方向的边距，不代表硬件一定没有挖孔。"),
                 ))
         })
-    }
+    } }
 }
 
 @Composable

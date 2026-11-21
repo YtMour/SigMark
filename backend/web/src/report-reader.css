@@ -1,0 +1,50 @@
+.reading-workspace { container: reading / inline-size; align-content: start; }
+.reading-workspace:focus { outline: none; }
+.reading-header { display: flex; align-items: center; flex-wrap: wrap; gap: .65rem 1.1rem; border-block-end: 1px solid var(--line-subtle); padding-block-end: .75rem; }
+.reading-header h1 { font-size: clamp(1.5rem, 2.1vw, 2rem); overflow-wrap: anywhere; }
+.reading-identity { margin-inline-start: auto; text-align: end; color: var(--muted); font-variant-numeric: tabular-nums; }
+.reading-actions { gap: .5rem 1rem; align-items: baseline; }
+.report-options { min-inline-size: 0; }
+.report-options[open] { flex-basis: 100%; }
+.report-options summary,.field-evidence summary { cursor: pointer; }
+.report-options summary { color: var(--mint); }
+.report-options .actions { padding-block: .6rem; }
+.report-options small { flex-basis: 100%; overflow-wrap: anywhere; }
+.reading-panel > .inspector-tabs { margin: 0; padding-inline: .8rem; }
+.reader-controls { display: grid; gap: .65rem; padding: .85rem 1rem; }
+.reader-search { display: grid; grid-template-columns: minmax(0,1fr) minmax(10rem,18rem); gap: .7rem; align-items: end; }
+.reader-states { display: flex; align-items: center; gap: .35rem; flex-wrap: wrap; }
+.reader-states button { font-size: .87rem; }
+.reader-states [aria-pressed=true] { color: var(--mint); border-color: var(--mint); }
+.reader-states small { margin-inline-start: auto; }
+.parameter-group header { display:flex; align-items:center; justify-content:space-between; padding: .55rem 1rem; background: var(--alt); border-block: 1px solid var(--border); }
+.parameter-group h2 { font-size: 1.05rem; scroll-margin-block-start: .65rem; }
+.parameter-group h2 small { margin-inline-start: .65rem; font-size: .8rem; font-weight: normal; }
+.parameter-group header button { font-size: .82rem; }
+.parameter-group ul { list-style: none; margin: 0; padding: 0; }
+.parameter-group li+li { border-block-start: 1px solid var(--line-subtle); }
+.field-evidence summary {
+  display: grid; grid-template-columns: minmax(8rem,min(26%,22rem)) minmax(0,1fr) auto 4rem;
+  grid-template-areas: "label reading status cue";
+  align-items: baseline; gap: .25rem .85rem; padding: .64rem 1rem; list-style: none;
+}
+.field-evidence summary::-webkit-details-marker { display: none; }
+.field-evidence summary:hover,.field-evidence[open] { background: var(--surface-recessed); }
+.field-label { grid-area: label; color: #d4e2e0; overflow-wrap: anywhere; }
+.field-reading { grid-area: reading; font-weight: 650; white-space: pre-wrap; overflow-wrap: anywhere; }
+.field-reading.no-value { font-weight: normal; color: var(--muted); }
+.field-evidence summary .state { grid-area: status; justify-self: start; }
+.evidence-cue { grid-area: cue; text-align: end; color: var(--muted); font-size: .83rem; }
+.evidence-cue::after { content: ' ▾'; }
+.field-evidence[open] .evidence-cue::after { content: ' ▴'; }
+.field-evidence dl { margin: 0 1rem; padding: .55rem 0 .85rem; border-block-start: 1px dashed var(--border); display: grid; grid-template-columns: auto minmax(0,1fr); gap: .3rem .8rem; }
+.field-evidence dt { color: var(--muted); }
+.field-evidence dd { margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+.reading-workspace :is(summary,h2):focus-visible { outline: 2px solid var(--mint); outline-offset: -2px; }
+.reading-workspace .table-wrap { max-height: none; }
+@container reading (max-width: 42rem) {
+  .reading-identity { margin-inline-start: 0; text-align: start; }
+  .reader-search { grid-template-columns: minmax(0,1fr); }
+  .reader-states small { flex-basis: 100%; margin: 0; }
+  .field-evidence summary { grid-template-columns: minmax(0,1fr) auto auto; grid-template-areas: "label status cue" "reading reading reading"; }
+}

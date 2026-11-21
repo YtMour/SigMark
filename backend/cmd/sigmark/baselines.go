@@ -14,19 +14,21 @@ import (
 )
 
 type baselineInput struct {
-	Name         string `json:"name"`
-	ReportID     string `json:"reportId"`
-	ExpectUnlock bool   `json:"expectUnlock"`
+	Name            string `json:"name"`
+	ReportID        string `json:"reportId"`
+	ExpectUnlock    bool   `json:"expectUnlock"`
+	ExpectedNetwork string `json:"expectedNetwork"`
 }
 
 const baselineLimit = 100
 
 func (b baselineInput) valid() bool {
-	return strings.TrimSpace(b.Name) != "" && textValid(b.Name, 60) && requestPattern.MatchString(b.ReportID)
+	return strings.TrimSpace(b.Name) != "" && textValid(b.Name, 60) && requestPattern.MatchString(b.ReportID) &&
+		oneOf(b.ExpectedNetwork, "", "wifi", "cellular", "ethernet", "vpn", "none")
 }
 
 const listBaselineSQL = `SELECT coalesce(jsonb_agg(jsonb_build_object(
-	'id',b.id,'name',b.name,'reportId',b.report_id,'expectUnlock',b.expect_unlock,
+	'id',b.id,'name',b.name,'reportId',b.report_id,'expectUnlock',b.expect_unlock,'expectedNetwork',b.expected_network,
 	'createdAt',b.created_at,'state',CASE WHEN r.id IS NULL THEN 'missing' WHEN r.trashed_at IS NOT NULL THEN 'trashed' ELSE 'ready' END,
 	'model',r.body->>'model','batch',r.batch,'assetId',r.asset_id) ORDER BY b.created_at DESC,b.id DESC),'[]')
 	FROM regression_baselines b LEFT JOIN reports r ON r.id=b.report_id`
@@ -70,9 +72,9 @@ func (s server) createBaseline(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var id string
-	err = tx.QueryRow(ctx, `INSERT INTO regression_baselines(name,report_id,expect_unlock)
-		SELECT $1,id,$3 FROM reports WHERE id=$2 AND trashed_at IS NULL FOR SHARE RETURNING id`,
-		strings.TrimSpace(input.Name), input.ReportID, input.ExpectUnlock).Scan(&id)
+	err = tx.QueryRow(ctx, `INSERT INTO regression_baselines(name,report_id,expect_unlock,expected_network)
+		SELECT $1,id,$3,$4 FROM reports WHERE id=$2 AND trashed_at IS NULL FOR SHARE RETURNING id`,
+		strings.TrimSpace(input.Name), input.ReportID, input.ExpectUnlock, input.ExpectedNetwork).Scan(&id)
 	var pgerr *pgconn.PgError
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):

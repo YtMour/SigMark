@@ -1,6 +1,8 @@
 import {useEffect,useState} from 'react';
 import {errorMessage,request} from './console';
-import {linkedReportFilters,ReportFilterBar,reportWorkspaceLink,type ReportFilters} from './facets';
+import {linkedReportFilters,reportWorkspaceLink,type ReportFilters} from './facets';
+import {hashParams} from './workspace-route';
+import {ReportFiltersBar} from './asset-filters';
 import {caption,date,groups,saveDownload} from './reports';
 
 type FieldCoverage = {
@@ -22,8 +24,8 @@ const statuses = [
 const fmt = (n:number|undefined)=>n==null?'—':n.toLocaleString('zh-CN');
 
 export function RepositoryStats(){
-  const [filters,setFilters]=useState<ReportFilters>(linkedReportFilters);
-  const [fieldSet,setFieldSet]=useState(()=>new URLSearchParams(location.hash.split('?')[1]).get('fieldSet')??'');
+  const [filters]=useState<ReportFilters>(linkedReportFilters);
+  const [fieldSet]=useState(()=>hashParams(location.hash).get('fieldSet')??'');
   const [group,setGroup]=useState('');
   const [search,setSearch]=useState('');
   const [mode,setMode]=useState('recorded');
@@ -51,9 +53,9 @@ export function RepositoryStats(){
   },[path,revision]);
 
   return <>
-    <ReportFilterBar filters={filters} showCounts={false} apply={next=>{setFilters(next);refresh(value=>value+1);}}>
+    <div className="panel"><ReportFiltersBar filters={filters} apply={next=>{location.hash=reportWorkspaceLink('stats',next,{fieldSet});}}>
       <a className="subtle-link" href={reportWorkspaceLink('reports',filters)}>返回档案查看样本 →</a>
-    </ReportFilterBar>
+    </ReportFiltersBar></div>
     <section className="panel stats-analysis" aria-labelledby="coverage-title">
       <div className="pane-title"><div><h2 id="coverage-title">字段覆盖</h2>
         <p className="muted">{fmt(current?.scope.archived)} 份匹配报告（同一设备可有多次采样）
@@ -64,7 +66,7 @@ export function RepositoryStats(){
         )}>导出覆盖 JSON</button></div>
       </div>
       <div className="stats-tools">
-        <label>字段集<select aria-label="字段集" value={fieldSet} onChange={e=>setFieldSet(e.target.value)}>
+        <label>字段集<select aria-label="字段集" value={fieldSet} onChange={e=>{location.hash=reportWorkspaceLink('stats',filters,{fieldSet:e.target.value});}}>
           <option value="">所有版本</option>
           {fieldSetOptions.map(item=><option value={item} key={item}>{item==='legacy'?'旧协议 · 无字段集版本':'字段集 v'+item}</option>)}
         </select></label>

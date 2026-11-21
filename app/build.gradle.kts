@@ -14,8 +14,8 @@ android {
         applicationId = "com.sigmark.app"
         minSdk = 26
         targetSdk = 34
-        versionCode = 18
-        versionName = "0.16.1"
+        versionCode = 22
+        versionName = "0.18.2"
     }
 
     buildTypes {

@@ -1,25 +1,24 @@
-import {useEffect,useState,type ReactNode} from 'react';
+import {useEffect,useState} from 'react';
 import {errorMessage,request} from './console';
 import {useVisiblePoll} from './live';
+import {reportScope,type ReportFilters} from './workspace-route';
+export {emptyReportFilters,reportWorkspaceLink,type ReportFilters} from './workspace-route';
 
 const dimensions = [
   ['android','Android 版本'],['api','API 级别'],['brand','品牌'],['model','型号'],['device','子型号 / 设备代号'],
 ] as const;
 type Key = typeof dimensions[number][0];
-export type ReportFilters = {q:string;batch:string}&Record<Key,string>;
 type Options = Partial<Record<Key,{value:string;count:number}[]>>;
-export const emptyReportFilters:ReportFilters = {q:'',batch:'',android:'',api:'',brand:'',model:'',device:''};
 const display=(value:string)=>value==='~missing'?'未记录':value;
-
-export function linkedReportFilters():ReportFilters {
-  const params=new URLSearchParams(location.hash.split('?')[1]);
-  return {...emptyReportFilters,...Object.fromEntries(Object.keys(emptyReportFilters).map(key=>[key,params.get(key)??'']))};
+export const facetCaptions = Object.fromEntries(dimensions) as Record<Key,string>;
+export function activeReportFilters(filters:ReportFilters) {
+  return (['q','batch',...dimensions.map(([key])=>key)] as const).flatMap(key=>filters[key]?
+    [{key,label:key==='q'?'搜索':key==='batch'?'批次':facetCaptions[key],
+      value:filters[key]==='asset:unassigned'?'待归组报告':display(filters[key])}]:[]);
 }
 
-export function reportWorkspaceLink(section:'reports'|'assets'|'stats',filters:ReportFilters):string {
-  const params=new URLSearchParams(Object.entries(filters).filter(([,value])=>value));
-  if(section==='stats')params.set('tab','coverage');
-  return '#'+(section==='stats'?'assets':section)+(params.size?'?'+params:'');
+export function linkedReportFilters():ReportFilters {
+  return reportScope(location.hash);
 }
 
 export function withFacet(filters:ReportFilters,key:Key,value:string):ReportFilters {
@@ -59,26 +58,4 @@ export function ReportFacets({filters,select,view='archive',showCounts=true}:{
     })}
     {(error||!options)&&<small role="status">{error??'正在更新分类…'}</small>}
   </fieldset>;
-}
-
-export function ReportFilterBar({filters,apply,children,showCounts=true}:{
-  filters:ReportFilters;apply:(value:ReportFilters)=>void;children?:ReactNode;showCounts?:boolean;
-}){
-  const [query,setQuery]=useState(filters.q),[batch,setBatch]=useState(filters.batch);
-  const active=Object.values(filters).some(Boolean);
-  return <form className="panel top-report-filters" aria-label="报告筛选条件"
-      onSubmit={event=>{event.preventDefault();apply({...filters,q:query.trim(),batch:batch.trim()});}}>
-    <ReportFacets filters={filters} showCounts={showCounts} select={(key,value)=>apply(withFacet(filters,key,value))}/>
-    <div className="top-filter-tools">
-      <label className="report-query">搜索<input value={query} onChange={e=>setQuery(e.target.value)} maxLength={80}
-        placeholder="型号、构建号、报告编号…"/></label>
-      <label>批次<input value={batch} onChange={e=>setBatch(e.target.value)} maxLength={32} placeholder="全部批次"/></label>
-      <div className="actions"><button>应用搜索</button>
-        {(active||query||batch)&&<button type="button" className="secondary" onClick={()=>{
-          setQuery('');setBatch('');apply(emptyReportFilters);
-        }}>清除筛选</button>}
-        {children}
-      </div>
-    </div>
-  </form>;
 }

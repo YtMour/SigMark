@@ -276,6 +276,10 @@ func (s server) publishBuild(w http.ResponseWriter, r *http.Request) {
 				fail(w, 409, "publish_signer_changed")
 				return
 			}
+			if retainPublished(root, old) != nil {
+				fail(w, 503, "build_store_unavailable")
+				return
+			}
 		}
 	}
 	sum := sha256.New()

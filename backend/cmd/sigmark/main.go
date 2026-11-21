@@ -124,6 +124,7 @@ func (s server) routes() http.Handler {
 				admin.Get("/settings", s.getSettings)
 				admin.Put("/settings", s.putSettings)
 				admin.Get("/builds", s.buildIndex)
+				admin.Get("/release-signer", s.releaseSigner)
 				admin.Get("/builds/{id}/apk", s.downloadBuild)
 				admin.Post("/builds", s.requestBuild)
 				admin.Post("/builds/{id}/publish", s.publishBuild)
@@ -200,7 +201,7 @@ func (s server) submit(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "invalid_asset_key")
 		return
 	}
-	id, err := s.storeReport(ctx, config.Batch, report, key)
+	id, linked, err := s.storeReport(ctx, config.Batch, report, key)
 	if errors.Is(err, pgx.ErrNoRows) {
 		fail(w, 409, "request_id_conflict")
 		return
@@ -210,7 +211,7 @@ func (s server) submit(w http.ResponseWriter, r *http.Request) {
 		fail(w, 503, "storage_unavailable")
 		return
 	}
-	send(w, 201, map[string]string{"reportId": id, "batch": config.Batch})
+	send(w, 201, map[string]any{"reportId": id, "batch": config.Batch, "assetLinked": linked})
 }
 
 type storedReport struct {

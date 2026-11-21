@@ -254,6 +254,9 @@ internal object AppCollector : DeviceCollector {
             pm.getPackageInfo(name, PM.GET_PERMISSIONS)
         }
         value("package", "应用包名", "Context.packageName") { name }
+        value("channel", "采集器渠道", "BuildConfig.BUILD_TYPE") {
+            if (com.sigmark.app.BuildConfig.BUILD_TYPE == "debug") "lan-debug" else "release"
+        }
         value("visibleLauncherApps", "可见的桌面应用数", "PackageManager.queryIntentActivities(MAIN / LAUNCHER)",
             "按当前资料和包可见性去重计数，不是全设备安装总量。不保留其他应用名称或包名。") {
             pm.queryIntentActivities(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER), 0)

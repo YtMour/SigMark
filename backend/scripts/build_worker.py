@@ -306,6 +306,18 @@ def main():
                    createdAt=datetime.datetime.now(datetime.UTC).isoformat())
         register_artifact(folder, job, args.file.resolve(), args.origin)
         if args.publish:
+            current = DATA / "current.json"
+            if current.exists():
+                old_id = json.loads(current.read_text(encoding="utf-8"))
+                if not re.fullmatch(r"[a-f0-9]{32}", old_id):
+                    raise ValueError("Invalid current publication.")
+                old = json.loads((DATA / "jobs" / old_id / "job.json").read_text(encoding="utf-8"))
+                if job["versionCode"] <= old.get("versionCode",0) or (old.get("signerSha256") and old["signerSha256"] != job["signerSha256"]):
+                    raise ValueError("Publication must advance versionCode with the same signer.")
+                if re.fullmatch(r"[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}", old.get("version","")) and re.fullmatch(r"[a-f0-9]{64}",old.get("signerSha256","")):
+                    history = DATA / "published-signers"
+                    history.mkdir(exist_ok=True)
+                    atomic_json(history / f"{old['version']}-{int(old['versionCode'])}.json", old["signerSha256"])
             atomic_json(DATA / "current.json", id_)
 
 

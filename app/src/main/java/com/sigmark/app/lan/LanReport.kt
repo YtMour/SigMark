@@ -16,7 +16,7 @@ internal val reportFields = linkedMapOf(
 )
 
 internal data class LanMetric(val key: String, val status: String, val reason: String?)
-internal const val LanFieldSetVersion = 6
+internal const val LanFieldSetVersion = 7
 
 internal data class LanReport(
     val model: String, val androidApi: Int, val network: String, val wifiBand: String, val radio: String,
@@ -73,8 +73,11 @@ internal fun lanReport(snapshot: DeviceSnapshot, appVersion: String, feedback: S
         "LTE" -> "lte"; "NR" -> "nr"; "IWLAN" -> "iwlan"; "" -> "unknown"; else -> "other"
     }
     val metrics = reportFields.keys.mapNotNull { key -> fields[key]?.let { LanMetric(key,it.status.name,it.reason?.name) } }
+    // Variant output overrides can differ from the source build's default version.
+    val installedVersion = Regex("""([0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}) \([1-9][0-9]*\)""")
+        .matchEntire(get("app.version"))?.groupValues?.get(1) ?: appVersion
     return LanReport(model, get("system.api").toIntOrNull()?.takeIf { it in 1..999 } ?: 0,
-        network, band, radio, snapshot.collectedAt, appVersion, metrics, feedback, lanParameters(snapshot), lanCoverage(snapshot))
+        network, band, radio, snapshot.collectedAt, installedVersion, metrics, feedback, lanParameters(snapshot), lanCoverage(snapshot))
 }
 
 // Numeric IPv4 only: keeps test reports on the configured local endpoint.
@@ -96,7 +99,7 @@ internal fun lanEndpoint(raw: String): URI? {
 internal fun validFeedback(text: String): Boolean = text.codePointCount(0,text.length) <= 300 &&
     text.none { Character.isISOControl(it) }
 
-internal fun sendLanReport(endpoint: URI, report: LanReport, assetKey: String? = null): String {
+internal fun sendLanReport(endpoint: URI, payload: ByteArray, assetKey: String? = null): UploadReceipt {
     check(lanEndpoint("http://${endpoint.host}:${endpoint.port}") == endpoint)
     val http = endpoint.toURL().openConnection(Proxy.NO_PROXY) as HttpURLConnection
     return try {
@@ -107,7 +110,6 @@ internal fun sendLanReport(endpoint: URI, report: LanReport, assetKey: String? =
         http.setRequestProperty("Content-Type", "application/json")
         http.setRequestProperty("X-SigMark-Client", "android-lan")
         assetKey?.let { http.setRequestProperty("X-SigMark-Asset-Key", it) }
-        val payload = report.json()
         http.setFixedLengthStreamingMode(payload.size)
         http.outputStream.use { it.write(payload) }
         when (http.responseCode) {
@@ -119,14 +121,15 @@ internal fun sendLanReport(endpoint: URI, report: LanReport, assetKey: String? =
                     if (n < 0) break
                     count += n
                 }
-                val id = JSONObject(String(bytes, 0, count, Charsets.UTF_8)).optString("reportId")
+                val reply = JSONObject(String(bytes, 0, count, Charsets.UTF_8))
+                val id = reply.optString("reportId")
                 require(runCatching { UUID.fromString(id).toString() == id }.getOrDefault(false))
-                id
+                UploadReceipt(id, reply.opt("assetLinked") as? Boolean)
             }
             403 -> throw LanFailure("后台未接受当前客户端，请确认手机和管理台版本匹配。")
             400 -> throw LanFailure("报告未通过校验。请检查设备时间，刷新采集后重试。")
             413 -> throw LanFailure("报告超过后台接收上限。")
-            409 -> throw LanFailure("提交编号冲突，请关闭预览后重新打开。")
+            409 -> throw LanFailure("提交编号已对应另一份内容，未覆盖旧报告。如需产生新报告，请重新采样。")
             429 -> throw LanFailure("提交过快，请稍候再试。")
             503 -> {
                 val message = http.errorStream?.bufferedReader()?.use {

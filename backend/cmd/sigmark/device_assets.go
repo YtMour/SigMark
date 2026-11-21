@@ -13,43 +13,59 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-func (s server) storeReport(ctx context.Context, batch string, report Report, key string) (string, error) {
-	const insert = `INSERT INTO reports (id,batch,request_id,body,asset_id) VALUES (gen_random_uuid(),$1,$2,$3,$4)
-	ON CONFLICT (batch, request_id) DO UPDATE SET body=reports.body WHERE reports.body=EXCLUDED.body RETURNING id`
-	var id string
-	if key == "" {
-		err := s.db.QueryRow(ctx, insert, batch, report.RequestID, report, nil).Scan(&id)
-		return id, err
-	}
+// Serialize retries before resolving an installation: even a client which lost the
+// receipt and changed consent must never create or relink an asset on replay.
+func (s server) storeReport(ctx context.Context, batch string, report Report, key string) (string, bool, error) {
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	defer tx.Rollback(ctx)
-	if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock_shared(714301,5527)`); err != nil {
-		return "", err
+	// Two-int advisory locks are separate from the bigint installation locks.
+	if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(714302,hashtext($1))`, batch+":"+report.RequestID); err != nil {
+		return "", false, err
 	}
-	digest := sha256.Sum256([]byte(key))
-	hash := hex.EncodeToString(digest[:])
-	// Serializes the first upload from each installation, without storing the sent key.
-	if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,712166))`, hash); err != nil {
-		return "", err
-	}
-	var asset string
-	err = tx.QueryRow(ctx, `SELECT asset_id FROM asset_installations WHERE digest=$1`, hash).Scan(&asset)
-	if errors.Is(err, pgx.ErrNoRows) {
-		err = tx.QueryRow(ctx, `INSERT INTO device_assets DEFAULT VALUES RETURNING id`).Scan(&asset)
-		if err == nil {
-			_, err = tx.Exec(ctx, `INSERT INTO asset_installations(digest,asset_id) VALUES($1,$2)`, hash, asset)
+	var id string
+	var linked, identical bool
+	err = tx.QueryRow(ctx, `SELECT id, asset_id IS NOT NULL, body=$3::jsonb FROM reports WHERE batch=$1 AND request_id=$2`, batch, report.RequestID, report).Scan(&id, &linked, &identical)
+	switch {
+	case err == nil:
+		if !identical {
+			return "", false, pgx.ErrNoRows
 		}
+		return id, linked, tx.Commit(ctx)
+	case !errors.Is(err, pgx.ErrNoRows):
+		return "", false, err
 	}
+	var asset *string
+	if key != "" {
+		// Protect installation resolution against a concurrent manual merge.
+		if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock_shared(714301,5527)`); err != nil {
+			return "", false, err
+		}
+		digest := sha256.Sum256([]byte(key))
+		hash := hex.EncodeToString(digest[:])
+		if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,712166))`, hash); err != nil {
+			return "", false, err
+		}
+		var resolved string
+		err = tx.QueryRow(ctx, `SELECT asset_id FROM asset_installations WHERE digest=$1`, hash).Scan(&resolved)
+		if errors.Is(err, pgx.ErrNoRows) {
+			err = tx.QueryRow(ctx, `INSERT INTO device_assets DEFAULT VALUES RETURNING id`).Scan(&resolved)
+			if err == nil {
+				_, err = tx.Exec(ctx, `INSERT INTO asset_installations(digest,asset_id) VALUES($1,$2)`, hash, resolved)
+			}
+		}
+		if err != nil {
+			return "", false, err
+		}
+		asset = &resolved
+	}
+	err = tx.QueryRow(ctx, `INSERT INTO reports(id,batch,request_id,body,asset_id) VALUES(gen_random_uuid(),$1,$2,$3,$4) RETURNING id,asset_id IS NOT NULL`, batch, report.RequestID, report, asset).Scan(&id, &linked)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
-	if err = tx.QueryRow(ctx, insert, batch, report.RequestID, report, asset).Scan(&id); err != nil {
-		return "", err
-	}
-	return id, tx.Commit(ctx)
+	return id, linked, tx.Commit(ctx)
 }
 
 type deviceAssignment struct {

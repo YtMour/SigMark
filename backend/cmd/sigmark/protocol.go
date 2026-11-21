@@ -65,7 +65,12 @@ var versionedParameters = []versionedParameter{
 	{"network", "visibleTransports", 4}, {"network", "wifiRouteRole", 4},
 	{"cellular", "defaultDataSlot", 5}, {"cellular", "slotService", 5},
 	{"environment", "keyguardSecure", 6}, {"environment", "storageEncryption", 6},
+	{"system", "partitionCount", 7}, {"system", "webViewProvider", 7}, {"system", "webViewVersion", 7}, {"system", "webViewCode", 7},
+	{"system", "systemSpl", 7}, {"system", "vendorSpl", 7}, {"environment", "keyProtection", 7},
+	{"app", "package", 7}, {"app", "channel", 7}, {"app", "certSha256", 7},
 }
+
+var partitionField = regexp.MustCompile(`^partition_[a-z0-9_]{1,32}$`)
 
 func textValid(s string, max int) bool {
 	return utf8.RuneCountInString(s) <= max && strings.IndexFunc(s, unicode.IsControl) < 0
@@ -82,6 +87,7 @@ func stateValid(status, reason string) bool {
 func (p Parameter) valid(schema, fieldSet int) bool {
 	allowed := oneOf(p.Key, parameterKeys[p.Group]...) || (schema >= 3 && oneOf(p.Key, diagnosticKeys[p.Group]...))
 	if !allowed && schema >= 4 {
+		allowed = fieldSet >= 7 && p.Group == "system" && partitionField.MatchString(p.Key)
 		for _, item := range versionedParameters {
 			if p.Group == item.group && p.Key == item.key && fieldSet >= item.since {
 				allowed = true
@@ -213,10 +219,10 @@ func (p Report) valid() bool {
 		!textValid(p.Feedback, 300) || len(p.Metrics) == 0 || len(p.Metrics) > 6 ||
 		(p.SchemaVersion == 1 && len(p.Parameters) != 0) ||
 		(p.SchemaVersion == 2 && (len(p.Parameters) == 0 || len(p.Parameters) > 96)) ||
-		(p.SchemaVersion >= 3 && (len(p.Parameters) == 0 || len(p.Parameters) > 160)) ||
+		(p.SchemaVersion >= 3 && (len(p.Parameters) == 0 || len(p.Parameters) > 192 || (p.FieldSetVersion < 7 && len(p.Parameters) > 160))) ||
 		(p.SchemaVersion < 3 && p.Coverage != nil) ||
 		(p.SchemaVersion < 4 && (p.CollectorVersion != "" || p.FieldSetVersion != 0)) ||
-		(p.SchemaVersion == 4 && (!versionPattern.MatchString(p.CollectorVersion) || p.FieldSetVersion < 2 || p.FieldSetVersion > 6)) {
+		(p.SchemaVersion == 4 && (!versionPattern.MatchString(p.CollectorVersion) || p.FieldSetVersion < 2 || p.FieldSetVersion > 7)) {
 		return false
 	}
 	seen := map[string]bool{}
@@ -229,7 +235,14 @@ func (p Report) valid() bool {
 			return false
 		}
 	}
+	partitions := 0
 	for _, field := range p.Parameters {
+		if field.Group == "system" && partitionField.MatchString(field.Key) {
+			partitions++
+			if partitions > 24 {
+				return false
+			}
+		}
 		key := field.Group + "/" + field.Key
 		if seen[key] || !field.valid(p.SchemaVersion, p.FieldSetVersion) {
 			return false

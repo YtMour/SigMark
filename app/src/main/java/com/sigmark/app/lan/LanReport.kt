@@ -16,7 +16,7 @@ internal val reportFields = linkedMapOf(
 )
 
 internal data class LanMetric(val key: String, val status: String, val reason: String?)
-internal const val LanFieldSetVersion = 7
+internal const val LanFieldSetVersion = 10
 
 internal data class LanReport(
     val model: String, val androidApi: Int, val network: String, val wifiBand: String, val radio: String,
@@ -24,10 +24,11 @@ internal data class LanReport(
     val parameters: List<LanParameter>,
     val coverage: List<LanCoverage>,
     val requestId: String = UUID.randomUUID().toString(),
+    val fieldSetVersion: Int = LanFieldSetVersion,
 ) {
     fun json(): ByteArray = JSONObject().apply {
         put("schemaVersion", 4); put("requestId", requestId); put("capturedAtEpochMs", capturedAt)
-        put("collectorVersion", appVersion); put("fieldSetVersion", LanFieldSetVersion)
+        put("collectorVersion", appVersion); put("fieldSetVersion", fieldSetVersion)
         put("model", model); put("androidApi", androidApi); put("appVersion", appVersion)
         put("network", network); put("wifiBand", wifiBand); put("radio", radio)
         if (feedback.isNotEmpty()) put("feedback", feedback)

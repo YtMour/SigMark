@@ -4,6 +4,11 @@ SigMark 当前采用单模块 Kotlin / Compose 结构，目标是让每一项信
 
 ## 数据流
 
+- 字段集 9 把「标准采集／ROM 验收／网络复测」与采样开始时的授权状态挂在同一份报告。ROM 方案额外附固定样片实测结果，使用既有字段白名单协议；独立本地解码工具不改历史。详见 [1.0 验收手册](ACCEPTANCE-1.0.md)。
+
+- `CollectionAccess.kt` 集中定义蜂窝字段的授权前置条件和 UI 路由。只对已知可由用户处理的受限原因显示入口。权限回调使用不创建草稿的刷新路径，遇到正在进行的采集时等待后补刷新。
+- `MediaDecodeProbe.kt` 是按需执行的本机能力实测，和常规采集及指纹判定独立。内置 `sigmark-avc/1` 固定样片，通过 MediaExtractor/MediaCodec 检查首个非配置输出，区分文件、解码器初始化与首帧阶段，不读取个人文件、不上传。
+
 - 管理端设备画像由 Go 按当前规则从原报告只读计算，React 只渲染返回值。上传字段集、移动端权限和库表均不变；导出的派生结果以稳定的规则代码、字段键及规则版本为准，不解析界面中文文案。详见[读取契约](LAN-PILOT.md#设备风险画像读取契约)。
 
 `DeviceCollector` → `DeviceRepository` → `MainViewModel (StateFlow)` → Compose 页面 → 系统文档选择器导出 JSON。
@@ -39,6 +44,7 @@ Debug 内网试验分支：冻结当前本地快照 → `lan/LanReport.kt` 按�
 ### LAN v4 · 开发与自动化入口
 
 - Android 上传投影：`lan/LanDetails.kt`；服务端独立白名单和类型校验：`backend/cmd/sigmark/protocol.go`。新增上传字段时同步更新两端、用户预览、隐私文档和测试。
+- LAN v4 字段集 8 新增 `runtime.vulkanVersion`、`media.cameraCapabilitySummary`、`sensors.typeWakeupSummary`。待上传队列读取各报告存入时的字段集。旧字段集沿用原有权限与字段白名单。
 - 稳定字段标识为 `group + key`；标签仅供显示。记录有 `value`、`status`、`source`，可带 `reason`、`errno`、`note`。非可用值固定为 JSON null。`/api/admin/reports/{id}` 返回原始结构化报告，不通过抓网页获取。
 - v3 在报告正文新增 `coverage`。每个 `group` 有 `available`、`restricted`、`unavailable`、`errors` 四项快照计数。每组各状态的计数覆盖对应归档行。自动化分析应使用 `parameters` 读明细，使用 `coverage` 对照快照口径。历史 v1/v2 缺少此元数据。
 - v4 新增 `collectorVersion`（采集实现版本）和 `fieldSetVersion`（归档字段语义版本）。状态保留已有四类；`OPTIONAL_UNSET`、`INTERFACE_UNSUPPORTED`、`MODEM_NOT_REPORTED`、`NO_REGISTERED_LTE` 在 `UNAVAILABLE` 下细分原因。历史报告缺行只在对比视图标作「报告未记录」，不改写为采集状态或设备不支持。

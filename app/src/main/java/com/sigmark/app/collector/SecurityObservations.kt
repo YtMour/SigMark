@@ -19,6 +19,10 @@ import javax.crypto.SecretKeyFactory
 
 private const val partitionsApi = "Build.getFingerprintedPartitions"
 internal fun partitionField(key: String) = Regex("partition_[a-z0-9_]{1,32}").matches(key)
+internal fun patchDate(raw: String?): String? {
+    val value = raw?.trim()?.takeIf { it.matches(Regex("[0-9]{4}-[0-9]{2}-[0-9]{2}")) } ?: return null
+    return runCatching { java.time.LocalDate.parse(value).toString() }.getOrNull()
+}
 
 internal object SecurityObservations {
     @Suppress("DEPRECATION")
@@ -44,13 +48,22 @@ internal object SecurityObservations {
         observation("webViewCode", "WebView 内部版本号", provider.map {
             (if (Build.VERSION.SDK_INT >= 28) it.longVersionCode else it.versionCode.toLong()).toString()
         })
-        if (Build.VERSION.SDK_INT >= 35) {
+        val securityState = if (Build.VERSION.SDK_INT >= 35) {
             val info = SafeReader.read("SecurityStateManager.getGlobalSecurityState") {
                 context.getSystemService(SecurityStateManager::class.java)?.globalSecurityState
             }
             observation("systemSpl", "系统组件声明补丁", info.map { it.getString(SecurityStateManager.KEY_SYSTEM_SPL) })
-            observation("vendorSpl", "厂商组件声明补丁", info.map { it.getString(SecurityStateManager.KEY_VENDOR_SPL) })
+            info.map { patchDate(it.getString(SecurityStateManager.KEY_VENDOR_SPL)) }
+        } else null
+        val vendorProperty = {
+            val result = SafeReader.property(SafeReader.Property.VENDOR_PATCH)
+            if (result.value != null) result.map(::patchDate)
+                .explainMissing(ReadReason.INVALID_VALUE, "厂商属性没有返回有效补丁日期。")
+            else result
         }
+        val vendor = if (securityState == null) vendorProperty() else SafeReader.firstAvailable({ securityState }, vendorProperty)
+        observation("vendorSpl", "厂商组件声明补丁", if (vendor.value != null)
+            vendor.copy(detail = "当前 App 可见的厂商补丁日期（YYYY-MM-DD），不表示已核验补丁内容。") else vendor)
     }.items
 
     @Suppress("DEPRECATION")

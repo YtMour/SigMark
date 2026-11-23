@@ -2,6 +2,7 @@ import type {Report} from './reports';
 import type {Baseline} from './baselines';
 import type {compareSecurity} from './security-rules';
 import {ruleVersion} from './security-rules.ts';
+import {acceptanceComparison} from './acceptance.ts';
 
 type Change = ReturnType<typeof compareSecurity>[number];
 const defaultNetworks=new Set(['wifi','cellular','ethernet','vpn','none']);
@@ -42,6 +43,6 @@ export function regressionResult(reference:Report,current:Report,changes:Change[
       baselineEarlier:reference.report.capturedAtEpochMs<current.report.capturedAtEpochMs,
       differentFieldSets:(reference.report.fieldSetVersion??null)!==(current.report.fieldSetVersion??null),attestation:'not_verified',
       network:networkCondition(options.expectedNetwork,reference.report.network,current.report.network)},
-    counts,verdicts,checks:changes.map(item=>({key:item.key,verdict:item.verdict,explanation:item.note,
+    counts,verdicts,acceptance:acceptanceComparison(reference,current,options.sameAsset),checks:changes.map(item=>({key:item.key,verdict:item.verdict,explanation:item.note,
       baseline:source(item.baseline),current:source(item.current)}))};
 }

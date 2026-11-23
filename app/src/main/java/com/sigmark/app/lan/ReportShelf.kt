@@ -18,8 +18,8 @@ internal fun networkLabel(value: String) = when (value) {
 }
 
 // Keep only the projected LAN payload. Each destination owns a separate set of drafts.
-internal class ReportShelf(context: Context, private val origin: String) :
-    SQLiteOpenHelper(context, "lan-samples.db", null, 1) {
+internal class ReportShelf(context: Context, private val origin: String, databaseName: String = "lan-samples.db") :
+    SQLiteOpenHelper(context, databaseName, null, 1) {
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL("""CREATE TABLE samples (
             id TEXT PRIMARY KEY, origin TEXT NOT NULL, captured INTEGER NOT NULL, network TEXT NOT NULL,
@@ -109,5 +109,5 @@ private fun restoreReport(data: JSONObject): LanReport {
         rows("parameters") { LanParameter(it.getString("group"),it.getString("key"),it.getString("label"),it.optional("value"),
             it.getString("source"),it.getString("status"),it.optional("reason"),if(it.isNull("errno")) null else it.getInt("errno"),it.optional("note")) },
         rows("coverage") { LanCoverage(it.getString("group"),it.getInt("available"),it.getInt("restricted"),it.getInt("unavailable"),it.getInt("errors")) },
-        data.getString("requestId"))
+        data.getString("requestId"), data.getInt("fieldSetVersion"))
 }

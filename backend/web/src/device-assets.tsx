@@ -204,8 +204,10 @@ function AssetTimeline({row,close}:{row:DeviceRow;close:()=>void}){
       </label>
       <div>{[report.android&&'Android '+report.android,report.buildId,report.romHint].filter(Boolean).join(' · ')||'构建信息未归档'}
         <small>API {report.androidApi||'—'} · App {report.appVersion} · {report.fieldSetVersion?'字段集 '+report.fieldSetVersion:'旧协议'}</small></div>
-      <a className="subtle-link" id={'sample-read-'+id} onClick={e=>openFromList(e,visited.current,'返回设备采样')}
+      <div className="actions"><a className="subtle-link" id={'sample-read-'+id} onClick={e=>openFromList(e,visited.current,'返回设备采样')}
         href={reportWorkspaceLink('reports',{...emptyReportFilters,q:'asset:'+row.id},{report:id})}>查看报告 →</a>
+        <a className="subtle-link" id={'sample-lab-'+id} onClick={e=>openFromList(e,visited.current,'返回设备采样')}
+          href={'#lab?'+new URLSearchParams({report:id})}>验收工作台 →</a></div>
     </li>)}</ul>
     <div className="pages"><span>{loading?'正在读取…':`已载入 ${entries.length} 份`}</span>
       {next&&<button disabled={loading} className="secondary" type="button" onClick={()=>{setError('');setLoading(true);setCursor(next);}}>加载更早采样</button>}</div>

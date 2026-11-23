@@ -51,13 +51,16 @@ internal fun LanReportDialog(upload: SampleUpload, onAssociate: (Boolean) -> Uni
                         Text("只发送这份已保存的报告，不会重新检测。")
                         Text("发送到：" + BuildConfig.LAN_ORIGIN + "（内网，传输未加密）")
                         Text("包含设备型号、系统、网络及安全检查结果，共 " + data.parameters.size + " 项明细。不发送密钥、应用清单或手机号码。")
+                        if (data.fieldSetVersion >= 9) Text("含采集时的授权状态；仅在运行 ROM 验收后包含样片结果、解码器名称和耗时，不发送视频或位置。")
+                        if (data.parameters.any { it.group == "network" && it.key == "checkStartTransport" })
+                            Text("此报告另含切换实验的起点、终点默认网络、验证结果和观测间隔。不含 IP、SSID 或位置。")
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Checkbox(checked = upload.associate, enabled = !upload.attempted, onCheckedChange = onAssociate)
                             Text("关联到同一设备资产")
                         }
                         Text("勾选后，用本机为此后台生成的随机编号归组。多次测试仍分别保留；重装或清除数据后编号会变。")
                         TextButton(onClick = { details = !details }) { Text(if (details) "收起参数" else "查看上传参数") }
-                        if (details) Text("应用 " + data.appVersion + " · " + data.model + "。含分区构建信息及本应用签名摘要；运营商、精确频点和设备配置摘要仅留本机。")
+                        if (details) Text("应用 " + data.appVersion + " · 字段集 " + data.fieldSetVersion + " · " + data.model + "。可包含分区、签名及相机、图形和传感器静态能力；运营商、精确频点和设备配置摘要仅留本机。")
                         if (details) data.parameters.forEach { field ->
                             val status = when (field.status) {
                                 "RESTRICTED" -> "受限"

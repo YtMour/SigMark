@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"unicode"
@@ -68,6 +69,13 @@ var versionedParameters = []versionedParameter{
 	{"system", "partitionCount", 7}, {"system", "webViewProvider", 7}, {"system", "webViewVersion", 7}, {"system", "webViewCode", 7},
 	{"system", "systemSpl", 7}, {"system", "vendorSpl", 7}, {"environment", "keyProtection", 7},
 	{"app", "package", 7}, {"app", "channel", 7}, {"app", "certSha256", 7},
+	{"runtime", "vulkanVersion", 8}, {"media", "cameraCapabilitySummary", 8}, {"sensors", "typeWakeupSummary", 8},
+	{"environment", "capturePlan", 9}, {"environment", "capturePhoneAccess", 9},
+	{"environment", "captureLocationAccess", 9}, {"environment", "captureLocationSwitch", 9},
+	{"media", "avcFixture", 9}, {"media", "avcFirstFrame", 9}, {"media", "avcStage", 9},
+	{"media", "avcDecoder", 9}, {"media", "avcElapsed", 9},
+	{"network", "checkStartTransport", 10}, {"network", "checkEndTransport", 10},
+	{"network", "checkStartValidated", 10}, {"network", "checkEndValidated", 10}, {"network", "checkElapsed", 10},
 }
 
 var partitionField = regexp.MustCompile(`^partition_[a-z0-9_]{1,32}$`)
@@ -107,9 +115,47 @@ func (p Parameter) valid(schema, fieldSet int) bool {
 		return false
 	}
 	if p.Status == "AVAILABLE" {
-		return p.Value != nil && strings.TrimSpace(*p.Value) != "" && textValid(*p.Value, 512)
+		return p.Value != nil && strings.TrimSpace(*p.Value) != "" && textValid(*p.Value, 512) &&
+			validAcceptanceValue(p.Group, p.Key, *p.Value)
 	}
 	return p.Value == nil
+}
+
+var decoderName = regexp.MustCompile(`^[a-zA-Z0-9._+\-]{1,128}$`)
+var decodeDuration = regexp.MustCompile(`^[0-9]{1,9} ms$`)
+
+func validAcceptanceValue(group, key, value string) bool {
+	switch group + "." + key {
+	case "environment.capturePlan":
+		return oneOf(value, "standard", "rom", "network")
+	case "environment.capturePhoneAccess":
+		return oneOf(value, "granted", "not_granted")
+	case "environment.captureLocationAccess":
+		return oneOf(value, "precise", "approximate", "not_granted")
+	case "environment.captureLocationSwitch":
+		return oneOf(value, "enabled", "disabled")
+	case "media.avcFixture":
+		return value == "sigmark-avc/1"
+	case "media.avcFirstFrame":
+		return oneOf(value, "pass", "fail")
+	case "media.avcStage":
+		return oneOf(value, "source", "configure", "decode", "done")
+	case "media.avcDecoder":
+		return decoderName.MatchString(value)
+	case "media.avcElapsed":
+		return decodeDuration.MatchString(value)
+	case "network.checkStartTransport", "network.checkEndTransport":
+		return oneOf(value, "wifi", "cellular", "ethernet", "vpn", "none", "other")
+	case "network.checkStartValidated", "network.checkEndValidated":
+		return oneOf(value, "yes", "no")
+	case "network.checkElapsed":
+		if !decodeDuration.MatchString(value) {
+			return false
+		}
+		n, err := strconv.Atoi(strings.TrimSuffix(value, " ms"))
+		return err == nil && n <= 600_000
+	}
+	return true
 }
 
 type Coverage struct {
@@ -222,7 +268,7 @@ func (p Report) valid() bool {
 		(p.SchemaVersion >= 3 && (len(p.Parameters) == 0 || len(p.Parameters) > 192 || (p.FieldSetVersion < 7 && len(p.Parameters) > 160))) ||
 		(p.SchemaVersion < 3 && p.Coverage != nil) ||
 		(p.SchemaVersion < 4 && (p.CollectorVersion != "" || p.FieldSetVersion != 0)) ||
-		(p.SchemaVersion == 4 && (!versionPattern.MatchString(p.CollectorVersion) || p.FieldSetVersion < 2 || p.FieldSetVersion > 7)) {
+		(p.SchemaVersion == 4 && (!versionPattern.MatchString(p.CollectorVersion) || p.FieldSetVersion < 2 || p.FieldSetVersion > latestFieldSet)) {
 		return false
 	}
 	seen := map[string]bool{}

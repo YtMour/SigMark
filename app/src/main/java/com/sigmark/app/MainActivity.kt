@@ -7,6 +7,8 @@ import android.os.Bundle
 import android.provider.Settings
 import android.content.ClipData
 import android.content.ClipboardManager
+import android.content.ActivityNotFoundException
+import android.os.Build
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -16,6 +18,8 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -82,6 +86,8 @@ import com.sigmark.app.model.DeviceSnapshot
 import com.sigmark.app.model.ReadReason
 import com.sigmark.app.model.unavailableLabel
 import com.sigmark.app.model.ValueStatus
+import com.sigmark.app.collector.CapturePlan
+import com.sigmark.app.collector.RouteCheck
 import com.sigmark.app.lan.SavedSample
 import com.sigmark.app.lan.SavedReportsDialog
 import com.sigmark.app.lan.networkLabel
@@ -101,14 +107,75 @@ private val Stroke = Color(0xFF294149)
 
 class MainActivity : ComponentActivity() {
     private val viewModel: MainViewModel by viewModels()
+    private var access by mutableStateOf(CollectionAccess(false, false, false, null))
+    private var permissionFeedback by mutableStateOf<String?>(null)
+    private val permissionHistory by lazy { getSharedPreferences("network-permission-rationales", MODE_PRIVATE) }
+
     private val cellPermission = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
-        viewModel.refresh()
+        onAccessResult(Manifest.permission.ACCESS_FINE_LOCATION)
     }
     private val diagnosticSettings = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
-        viewModel.refresh()
+        access = CollectionAccess.read(this)
+        permissionFeedback = null
+        viewModel.refreshForAccessChange()
     }
     private val phonePermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) {
-        viewModel.refresh()
+        onAccessResult(Manifest.permission.READ_PHONE_STATE)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        val current = CollectionAccess.read(this)
+        if (access != current) {
+            access = current
+            viewModel.refreshForAccessChange()
+        }
+    }
+
+    private fun onAccessResult(permission: String) {
+        access = CollectionAccess.read(this)
+        if (shouldShowRequestPermissionRationale(permission))
+            permissionHistory.edit().putBoolean(permission, true).apply()
+        permissionFeedback = when (permission) {
+            Manifest.permission.ACCESS_FINE_LOCATION -> when {
+                access.fine -> if (access.location == false) "精确位置已授权；小区参数还需要开启系统位置。" else "精确位置已授权，正在更新采集列表。"
+                access.coarse -> "当前只允许大致位置。查看小区频段需要精确位置，可在应用权限设置中调整。"
+                else -> "精确位置未授权，基础采集仍可使用。"
+            }
+            else -> if (access.phone) "电话状态已授权，正在更新采集列表。" else "电话状态未授权，基础采集仍可使用。"
+        }
+        viewModel.refreshForAccessChange()
+    }
+
+    private fun openDiagnosticSettings(intent: Intent) {
+        try { diagnosticSettings.launch(intent) }
+        catch (_: ActivityNotFoundException) {
+            permissionFeedback = "当前系统未提供此设置入口，请从系统设置手动打开。"
+        } catch (_: SecurityException) {
+            permissionFeedback = "当前系统拒绝打开此页面，请从系统设置手动进入。"
+        }
+    }
+
+    private fun openAppSettings() = openDiagnosticSettings(
+        Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", packageName, null)))
+
+    private fun requestNetworkPermission(permission: String) {
+        access = CollectionAccess.read(this)
+        val route = permissionRoute(
+            granted = checkSelfPermission(permission) == android.content.pm.PackageManager.PERMISSION_GRANTED,
+            wasDenied = permissionHistory.getBoolean(permission, false),
+            rationale = shouldShowRequestPermissionRationale(permission),
+            approximateOnly = permission == Manifest.permission.ACCESS_FINE_LOCATION && !access.fine && access.coarse,
+        )
+        when (route) {
+            PermissionRoute.RECHECK -> viewModel.refreshForAccessChange()
+            PermissionRoute.SETTINGS -> openAppSettings()
+            PermissionRoute.REQUEST -> {
+                if (permission == Manifest.permission.ACCESS_FINE_LOCATION)
+                    cellPermission.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
+                else phonePermission.launch(Manifest.permission.READ_PHONE_STATE)
+            }
+        }
     }
     private var pendingExport: String? = null
     private val createDocument = registerForActivityResult(
@@ -146,15 +213,15 @@ class MainActivity : ComponentActivity() {
                 val saved by viewModel.saved.collectAsStateWithLifecycle()
                 val decorate = windowDecorator()
                 val screenState = remember(state, decorate) { state.copy(snapshot = state.snapshot?.let(decorate)) }
-                SigMarkScreen(screenState, upload, saved, { viewModel.collectAll(decorate) }, viewModel::selectReport, viewModel::removeReport, viewModel::setAssociation,
-                    viewModel::setFeedback, viewModel::submitUpload, onTestKey = { viewModel.testKey(decorate) }, onRefresh = { viewModel.refresh(refreshRadio = true, decorate = decorate) }, onCellPermission = {
-                    cellPermission.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
-                }, onAppSettings = {
-                    diagnosticSettings.launch(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", packageName, null)))
-                }, onLocationSettings = {
-                    diagnosticSettings.launch(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS))
+                SigMarkScreen(screenState, upload, saved, { viewModel.collectAll(decorate, it) }, viewModel::selectReport, viewModel::removeReport, viewModel::setAssociation,
+                    viewModel::setFeedback, viewModel::submitUpload, onTestKey = { viewModel.testKey(decorate) }, onRefresh = { viewModel.refresh(refreshRadio = true, decorate = decorate) },
+                    onRoute = { viewModel.collectAll(decorate, CapturePlan.NETWORK, it) },
+                    access = access, permissionFeedback = permissionFeedback, onCellPermission = {
+                    requestNetworkPermission(Manifest.permission.ACCESS_FINE_LOCATION)
+                }, onAppSettings = ::openAppSettings, onLocationSettings = {
+                    openDiagnosticSettings(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS))
                 }, onPhonePermission = {
-                    phonePermission.launch(Manifest.permission.READ_PHONE_STATE)
+                    requestNetworkPermission(Manifest.permission.READ_PHONE_STATE)
                 }, onTimelineExport = { json ->
                     pendingExport = json
                     createDocument.launch("SigMark-network-${System.currentTimeMillis()}.json")
@@ -169,11 +236,14 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 private fun SigMarkScreen(
-    state: MainUiState, upload: SampleUpload?, saved: List<SavedSample>, onCollectAll: () -> Unit,
+    state: MainUiState, upload: SampleUpload?, saved: List<SavedSample>, onCollectAll: (CapturePlan) -> Unit,
     onOpenUpload: (String?, DeviceSnapshot?) -> Unit, onRemove: (String) -> Unit,
     onAssociate: (Boolean) -> Unit, onFeedback: (String) -> Unit, onSubmit: () -> Unit,
     onTestKey: () -> Unit,
     onRefresh: () -> Unit,
+    onRoute: (RouteCheck) -> Unit,
+    access: CollectionAccess,
+    permissionFeedback: String?,
     onCellPermission: () -> Unit,
     onAppSettings: () -> Unit,
     onLocationSettings: () -> Unit,
@@ -190,10 +260,13 @@ private fun SigMarkScreen(
     var showVisibleApps by rememberSaveable { mutableStateOf(false) }
     var showUpdate by remember { mutableStateOf(false) }
     var showTimeline by remember { mutableStateOf(false) }
+    var showMediaProbe by rememberSaveable { mutableStateOf(false) }
+    var showPlans by rememberSaveable { mutableStateOf(false) }
+    var showRouteExperiment by rememberSaveable { mutableStateOf(false) }
     var showSecurity by rememberSaveable { mutableStateOf(false) }
     var showRecheck by rememberSaveable { mutableStateOf(false) }
     var showTools by remember { mutableStateOf(false) }
-    var showPhoneExplanation by remember { mutableStateOf(false) }
+    var showPhoneExplanation by rememberSaveable { mutableStateOf(false) }
     val context = LocalContext.current
     var showUpload by rememberSaveable { mutableStateOf(false) }
     var showShelf by rememberSaveable { mutableStateOf(false) }
@@ -216,9 +289,17 @@ private fun SigMarkScreen(
             }.orEmpty()
     }
     val listState = rememberLazyListState()
-    val permissionMissing = snapshot?.sections?.any { it.key == "cellular" && it.items.any { row -> row.key == "cellDiagnostics" && row.reason == ReadReason.PERMISSION_REQUIRED } } == true
-    val phoneMissing = context.checkSelfPermission(Manifest.permission.READ_PHONE_STATE) != android.content.pm.PackageManager.PERMISSION_GRANTED &&
-        snapshot?.sections?.any { it.key == "cellular" && it.items.any { row -> row.key in setOf("slotService", "dataRat") && row.reason == ReadReason.PERMISSION_REQUIRED } } == true
+    val accessActions = snapshot?.sections.orEmpty().flatMap { section ->
+        section.items.mapNotNull { collectionAction(Build.VERSION.SDK_INT, section.key, it, access) }
+    }.toSet()
+    val openAccessAction: (AccessAction) -> Unit = {
+        when (it) {
+            AccessAction.PHONE -> showPhoneExplanation = true
+            AccessAction.FINE -> showCellExplanation = true
+            AccessAction.LOCATION -> onLocationSettings()
+            AccessAction.RECHECK -> showRecheck = true
+        }
+    }
 
     Scaffold(containerColor = Ink, topBar = { AppHeader(snapshot, busy, onRefresh, onExportRequest = { showExportConfirmation = true }) }) { padding ->
         LazyColumn(
@@ -234,21 +315,27 @@ private fun SigMarkScreen(
                     if (snapshot != null) {
                         val lanEnabled = BuildConfig.DEBUG && BuildConfig.LAN_ORIGIN.isNotEmpty()
                         Row(Modifier.fillMaxWidth().padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Button(enabled = !busy, onClick = onCollectAll, modifier = Modifier.weight(1f)) { Text("整体获取") }
+                            Button(enabled = !busy, onClick = { onCollectAll(CapturePlan.STANDARD) }, modifier = Modifier.weight(1f)) { Text("整体获取") }
                             if (lanEnabled) OutlinedButton(enabled = !busy, onClick = { showShelf = true }, modifier = Modifier.weight(1f)) {
                                 Text("上传报告")
                             }
                         }
                         Text(when (state.fullStage) {
-                            1 -> "1/2 · 正在采集设备参数"
-                            2 -> "2/2 · 正在进行指纹安全自测"
+                            1 -> "正在采集设备参数"
+                            2 -> "正在进行密钥保护自测"
+                            3 -> "正在验证固定样片首帧"
                             else -> if (!lanEnabled) "采集设备与安全信息，结果只在本机查看。"
                                 else saved.firstOrNull()?.let { "最近保存：" + networkLabel(it.network) + " · " +
                                     java.text.DateFormat.getTimeInstance().format(Date(it.time)) + "　待上传 " + saved.count { row -> !row.sent } + " 份" }
                                     ?: "先采集，再上传。换回 Wi-Fi 后也能上传之前的报告。"
                         }, color = Muted, fontSize = 12.sp)
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            OutlinedButton(enabled = !busy, onClick = { onCollectAll(CapturePlan.ROM) }, modifier = Modifier.weight(1f)) { Text("ROM 验收") }
+                            OutlinedButton(enabled = !busy, onClick = { showRouteExperiment = true }, modifier = Modifier.weight(1f)) { Text("网络切换实验") }
+                        }
+                        TextButton(enabled = !busy, onClick = { showPlans = true }) { Text("选择验收方案") }
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                            TextButton(enabled = !busy, onClick = { showRecheck = true }, modifier = Modifier.weight(1f)) { Text("复测准备") }
+                            TextButton(enabled = !busy, onClick = { showRecheck = true }, modifier = Modifier.weight(1f)) { Text("权限与复测") }
                             TextButton(onClick = { showSecurity = true }, modifier = Modifier.weight(1f)) { Text("指纹安全") }
                             Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
                                 TextButton(onClick = { showTools = true }) { Text("更多工具") }
@@ -257,12 +344,15 @@ private fun SigMarkScreen(
                                     if (lanEnabled) DropdownMenuItem(text = { Text("检查更新") }, onClick = { showTools = false; showUpdate = true })
                                     DropdownMenuItem(text = { Text("实时传感器") }, onClick = { showTools = false; showSensors = true })
                                     DropdownMenuItem(text = { Text("可见应用") }, onClick = { showTools = false; showVisibleApps = true })
+                                    DropdownMenuItem(text = { Text("视频解码实测") }, onClick = { showTools = false; showMediaProbe = true })
                                 }
                             }
                         }
                     }
-                    if (permissionMissing || phoneMissing) {
-                        Text("蜂窝诊断可在「复测准备」单独授权", color = Muted, fontSize = 11.sp, modifier = Modifier.padding(start = 2.dp))
+                    if (accessActions.any { it != AccessAction.RECHECK }) {
+                        OutlinedButton(enabled = !busy, onClick = { showRecheck = true }, modifier = Modifier.fillMaxWidth()) {
+                            Text("处理采集所需权限")
+                        }
                     }
                     Spacer(Modifier.height(12.dp))
                     SearchBox(query, onChange = { query = it })
@@ -275,7 +365,7 @@ private fun SigMarkScreen(
                                 color = if (issuesOnly) Color(0xFFF4C589) else CardColor,
                                 shape = RoundedCornerShape(9.dp),
                                 border = BorderStroke(1.dp, if (issuesOnly) Color(0xFFF4C589) else Stroke)) {
-                                Text(if (issuesOnly) "仅看异常 · $issueCount" else "待确认 · $issueCount",
+                                Text(if (issuesOnly) "仅看待确认 · $issueCount" else "待确认 · $issueCount",
                                     color = if (issuesOnly) Ink else Color(0xFFF4C589),
                                     fontSize = 12.sp, modifier = Modifier.padding(horizontal = 11.dp, vertical = 8.dp))
                             }
@@ -311,7 +401,7 @@ private fun SigMarkScreen(
                     Column(Modifier.padding(horizontal = 20.dp, vertical = 24.dp)) {
                         Text("没有匹配的采集项", color = Color.White, fontSize = 15.sp)
                         Spacer(Modifier.height(5.dp))
-                        Text("可清除搜索、关闭异常筛选或切换分类", color = Muted, fontSize = 12.sp)
+                        Text("可清除搜索、关闭待确认筛选或切换分类", color = Muted, fontSize = 12.sp)
                         TextButton(onClick = { query = ""; issuesOnly = false; selected = "all" }) {
                             Text("重置筛选", color = Teal)
                         }
@@ -321,7 +411,7 @@ private fun SigMarkScreen(
                 items(sections, key = { it.key }) { section ->
                     SectionCard(section, Modifier.padding(horizontal = 16.dp),
                         showAll = query.isNotBlank() || selected != "all" || issuesOnly,
-                        onCellPermission = { showCellExplanation = true }, onLocationSettings = onLocationSettings)
+                        access = access, busy = busy, onAccessAction = openAccessAction)
                 }
             }
             item {
@@ -352,9 +442,9 @@ private fun SigMarkScreen(
         title = { Text("查看小区无线参数") },
         text = { Column {
             Text("Android 将小区频段、信道号和信号视为位置相关信息，因此需要精确位置权限。印迹只读取系统的无线缓存，不读坐标、小区 ID 或邻区列表；授权本身不会上传。选择「暂不授权」仍可查看运营商及 Wi-Fi。")
-            TextButton(onClick = { showCellExplanation = false; onAppSettings() }) { Text("打开应用权限设置") }
+            TextButton(onClick = { showCellExplanation = false; showRecheck = true; onAppSettings() }) { Text("打开应用权限设置") }
         } },
-        confirmButton = { TextButton(onClick = { showCellExplanation = false; onCellPermission() }) { Text("请求授权") } },
+        confirmButton = { TextButton(onClick = { showCellExplanation = false; showRecheck = true; onCellPermission() }) { Text("继续授权精确位置") } },
         dismissButton = { TextButton(onClick = { showCellExplanation = false }) { Text("暂不授权") } },
     )
     if (showShelf && (!showUpload || (upload == null && !state.saving))) SavedReportsDialog(saved,
@@ -364,21 +454,38 @@ private fun SigMarkScreen(
     if (showShelf && showUpload && upload != null) LanReportDialog(upload, onAssociate, onFeedback, onSubmit) { showUpload = false }
     if (showSensors) SensorMonitor { showSensors = false }
     if (showTimeline) NetworkTimeline(onTimelineExport) { showTimeline = false }
-    if (showRecheck && snapshot != null) RecheckPanel(snapshot, state.refreshing, onRefresh,
+    if (showRecheck && !showCellExplanation && !showPhoneExplanation && snapshot != null)
+        RecheckPanel(snapshot, access, permissionFeedback, state.refreshing, onRefresh,
         close = { showRecheck = false },
-        requestCell = { showRecheck = false; showCellExplanation = true },
-        requestPhone = { showRecheck = false; showPhoneExplanation = true },
-        appSettings = { showRecheck = false; onAppSettings() },
-        locationSettings = { showRecheck = false; onLocationSettings() })
+        requestCell = { showCellExplanation = true }, requestPhone = { showPhoneExplanation = true },
+        appSettings = onAppSettings, locationSettings = onLocationSettings)
     if (showSecurity && snapshot != null) SecurityPanel(snapshot, state.testingKey, state.refreshing, onTestKey) { showSecurity = false }
     if (showPhoneExplanation) AlertDialog(
         onDismissRequest = { showPhoneExplanation = false },
-        title = { Text("查看各卡槽服务状态") },
-        text = { Text("需电话状态及精确位置权限，并开启系统位置。只记录逻辑卡槽和服务状态，不读取号码或 SIM 标识。只有你选择上传报告时，这些状态才会进入内网后台。") },
-        confirmButton = { TextButton(onClick = { showPhoneExplanation = false; onPhonePermission() }) { Text("请求电话状态权限") } },
+        title = { Text("授权电话状态") },
+        text = { Column {
+            Text("用于读取该 Android 版本可提供的蜂窝数据制式、逻辑卡槽和服务状态。不读取号码或 SIM 标识。小区频段的精确位置权限可单独选择。授权不会上传报告。")
+            TextButton(onClick = { showPhoneExplanation = false; showRecheck = true; onAppSettings() }) { Text("打开应用权限设置") }
+        } },
+        confirmButton = { TextButton(onClick = { showPhoneExplanation = false; showRecheck = true; onPhonePermission() }) { Text("继续授权电话状态") } },
         dismissButton = { TextButton(onClick = { showPhoneExplanation = false }) { Text("暂不授权") } },
     )
     if (showVisibleApps) VisibleApps { showVisibleApps = false }
+    if (showMediaProbe) MediaProbePanel { showMediaProbe = false }
+    if (showRouteExperiment) RouteExperimentPanel(busy = busy, onSave = { showRouteExperiment = false; onRoute(it) },
+        onClose = { showRouteExperiment = false })
+    if (showPlans) AlertDialog(
+        onDismissRequest = { showPlans = false },
+        title = { Text("选择验收方案") },
+        text = { Column(Modifier.verticalScroll(rememberScrollState())) {
+            Text("每次运行保存独立采样。选「上传报告」并确认后才发送。")
+            CapturePlan.entries.forEach { plan ->
+                TextButton(enabled = !busy, onClick = { showPlans = false; onCollectAll(plan) }) { Text(plan.title) }
+                Text(plan.description, style = MaterialTheme.typography.bodySmall)
+            }
+        } },
+        confirmButton = { TextButton(onClick = { showPlans = false }) { Text("关闭") } },
+    )
     if (showUpdate) AppUpdate(context) { showUpdate = false }
 }
 
@@ -515,7 +622,7 @@ private fun CategoryChip(key: String, title: String, selected: String, onSelect:
 
 @Composable
 private fun SectionCard(section: DeviceSection, modifier: Modifier = Modifier, showAll: Boolean,
-    onCellPermission: () -> Unit, onLocationSettings: () -> Unit) {
+    access: CollectionAccess, busy: Boolean, onAccessAction: (AccessAction) -> Unit) {
     var expanded by rememberSaveable(section.key) { mutableStateOf(false) }
     val visibleItems = if (showAll || expanded || section.items.size <= 5) section.items else
         (section.items.take(5) + section.items.filter { it.status != ValueStatus.AVAILABLE })
@@ -536,14 +643,9 @@ private fun SectionCard(section: DeviceSection, modifier: Modifier = Modifier, s
                 if (index > 0) HorizontalDivider(color = Stroke,
                     modifier = Modifier.padding(horizontal = 14.dp))
                 InfoRow(item)
-                if (section.key == "cellular" && item.key == "cellDiagnostics") {
-                    when (item.reason) {
-                        ReadReason.PERMISSION_REQUIRED -> TextButton(onClick = onCellPermission,
-                            modifier = Modifier.padding(horizontal = 5.dp)) { Text("授权查看小区参数") }
-                        ReadReason.LOCATION_DISABLED -> TextButton(onClick = onLocationSettings,
-                            modifier = Modifier.padding(horizontal = 5.dp)) { Text("打开系统位置设置") }
-                        else -> Unit
-                    }
+                collectionAction(Build.VERSION.SDK_INT, section.key, item, access)?.let { action ->
+                    TextButton(enabled = !busy, onClick = { onAccessAction(action) },
+                        modifier = Modifier.padding(horizontal = 5.dp)) { Text(action.title) }
                 }
             }
             if (!showAll && (section.items.size > visibleItems.size || expanded)) {
@@ -580,7 +682,7 @@ private fun InfoRow(item: DeviceInfoItem) {
             val value = when (item.status) {
                 ValueStatus.AVAILABLE -> item.value.orEmpty()
                 ValueStatus.UNAVAILABLE -> unavailableLabel(item.reason)
-                ValueStatus.RESTRICTED -> if (item.key == "selinux") "受限 · 模式未确认" else "访问受限"
+                ValueStatus.RESTRICTED -> restrictionLabel(item)
                 ValueStatus.ERROR -> "读取异常"
             }
             Text(value, color = when (item.status) {
@@ -596,6 +698,7 @@ private fun InfoRow(item: DeviceInfoItem) {
             Text(buildString {
                 append("来源：${item.source}")
                 if (item.note != null) append(" · ${item.note}")
+                if (item.reason == ReadReason.ACCESS_DENIED) append(" · 此项没有可在印迹内授予的权限。")
             }, color = Muted,
                 fontSize = 11.sp, lineHeight = 15.sp,
                 modifier = Modifier.padding(top = 5.dp))

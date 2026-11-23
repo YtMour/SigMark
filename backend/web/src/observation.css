@@ -1,0 +1,14 @@
+.evidence-observations { display: grid; gap: .75rem; min-inline-size: 0; }
+.evidence-observations h2, .evidence-observations p { margin: 0; }
+.evidence-file { display: grid; gap: .25rem; min-inline-size: 0; }
+.evidence-file input { max-inline-size: 100%; font: inherit; min-block-size: 3rem; }
+.evidence-file :focus-visible, .observation-scroll:focus-visible { outline: 2px solid var(--mint); outline-offset: 2px; }
+.observation-meta { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(100%,14rem),1fr)); gap: .5rem; margin: 0; }
+.observation-meta div { border-inline-start: 2px solid var(--border); padding-inline-start: .65rem; overflow-wrap: anywhere; }
+.observation-meta dt { color: var(--muted); }
+.observation-meta dd { margin: .125rem 0 0; }
+.observation-scroll { overflow: auto; max-inline-size: 100%; }
+.observation-scroll table { inline-size: 100%; min-inline-size: 38rem; border-collapse: separate; border-spacing: 0; }
+.observation-scroll :is(th,td) { text-align: start; padding: .6rem; vertical-align: top; }
+.observation-scroll tbody th { position: sticky; inset-inline-start: 0; background: var(--panel); }
+.observation-scroll small { display: block; color: var(--muted); overflow-wrap: anywhere; }

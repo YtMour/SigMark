@@ -20,6 +20,7 @@ import android.os.Debug
 import android.provider.Settings
 import com.sigmark.app.model.normalizeValue
 import com.sigmark.app.model.ReadReason
+import com.sigmark.app.model.ValueStatus
 import java.security.MessageDigest
 import java.time.Instant
 import java.time.ZoneId
@@ -68,6 +69,9 @@ internal object RuntimeCollector : DeviceCollector {
         observation("openGlEs", "声明的 OpenGL ES 版本", features.map { list ->
             list.firstOrNull { it.name == null && it.reqGlEsVersion > 0 }?.glEsVersion
         })
+        observation("vulkanVersion", "声明的 Vulkan 版本", features.map { list ->
+            list.firstOrNull { it.name == PM.FEATURE_VULKAN_HARDWARE_VERSION }?.let { vulkanVersion(it.version) }
+        }.let { it.copy(detail = it.detail ?: "系统公开的规范版本，未运行图形驱动探针。") })
         value("sharedLibraries", "系统共享库", "PackageManager.systemSharedLibraryNames",
             "系统向应用公开的共享库名称。") {
             pm.systemSharedLibraryNames?.distinct()?.sorted()?.joinToString("\n")?.ifEmpty { "无公开共享库" }
@@ -115,25 +119,32 @@ internal object MediaCollector : DeviceCollector {
         observation("cameraCount", "应用可见摄像头数", ids.map { it.size.toString() }.let {
             it.copy(detail = it.detail ?: "数量按 Android 暴露的逻辑摄像头统计。")
         })
-        ids.value?.forEachIndexed { index, id ->
-            value("camera_$index", "摄像头 ${index + 1}", "CameraManager.getCameraCharacteristics",
-                "只读取静态特性。分辨率为公开 JPEG 输出上限。") {
-                val characteristics = cameras?.getCameraCharacteristics(id) ?: return@value null
-                val facing = when (characteristics[CameraCharacteristics.LENS_FACING]) {
-                    CameraCharacteristics.LENS_FACING_FRONT -> "前置"
-                    CameraCharacteristics.LENS_FACING_BACK -> "后置"
-                    CameraCharacteristics.LENS_FACING_EXTERNAL -> "外接"
-                    else -> "方向未回报"
-                }
-                val flash = characteristics[CameraCharacteristics.FLASH_INFO_AVAILABLE]?.let {
+        val characteristics = ids.value?.map { id ->
+            SafeReader.read("CameraManager.getCameraCharacteristics") { cameras?.getCameraCharacteristics(id) }
+        }
+        characteristics?.forEachIndexed { index, reading ->
+            observation("camera_$index", "摄像头 ${index + 1}", reading.map { info ->
+                val flash = info[CameraCharacteristics.FLASH_INFO_AVAILABLE]?.let {
                     if (it) "有闪光灯" else "无闪光灯"
                 }
-                val size = characteristics[CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP]
+                val size = info[CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP]
                     ?.getOutputSizes(ImageFormat.JPEG)?.maxByOrNull { it.width.toLong() * it.height }
                     ?.let { "JPEG ${it.width}×${it.height} px" }
-                listOfNotNull(facing, flash, size).joinToString(" · ")
+                listOfNotNull(cameraFacing(info), flash, size).joinToString(" · ")
+            }.let { it.copy(detail = it.detail ?: "只读取静态特性，分辨率为公开 JPEG 输出上限。") })
+        }
+        val cameraSummary: ReadResult<String> = when {
+            characteristics == null -> ids.map { null }
+            characteristics.isNotEmpty() && characteristics.none { it.value != null } ->
+                (characteristics.firstOrNull { it.status == ValueStatus.RESTRICTED } ?: characteristics.first()).map { null }
+            else -> SafeReader.read("CameraManager.getCameraCharacteristics / Camera2",
+                "按镜头朝向与硬件等级分组，单位为应用可见逻辑摄像头数。") {
+                cameraCapabilitySummary(characteristics.map { reading ->
+                    reading.value?.let { cameraFacing(it) to cameraLevel(it) }
+                })
             }
         }
+        observation("cameraCapabilitySummary", "Camera2 镜头能力", cameraSummary)
         value("bluetoothCapabilities", "蓝牙能力", "PackageManager.hasSystemFeature") {
             "经典蓝牙 ${yesNo(pm.hasSystemFeature(PM.FEATURE_BLUETOOTH))} · BLE ${yesNo(pm.hasSystemFeature(PM.FEATURE_BLUETOOTH_LE))}"
         }
@@ -157,6 +168,22 @@ internal object MediaCollector : DeviceCollector {
                 .joinToString("\n") { (label, mime) -> "$label · 解码 ${yesNo(mime in decoders)} · 编码 ${yesNo(mime in encoders)}" }
         }
     }
+}
+
+private fun cameraFacing(info: CameraCharacteristics) = when (info[CameraCharacteristics.LENS_FACING]) {
+    CameraCharacteristics.LENS_FACING_FRONT -> "前置"
+    CameraCharacteristics.LENS_FACING_BACK -> "后置"
+    CameraCharacteristics.LENS_FACING_EXTERNAL -> "外接"
+    else -> "方向未回报"
+}
+
+private fun cameraLevel(info: CameraCharacteristics) = when (info[CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL]) {
+    CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL_LEGACY -> "LEGACY"
+    CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL_LIMITED -> "LIMITED"
+    CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL_FULL -> "FULL"
+    CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL_3 -> "LEVEL_3"
+    CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL_EXTERNAL -> "EXTERNAL"
+    else -> "等级未回报"
 }
 
 internal object EnvironmentCollector : DeviceCollector {

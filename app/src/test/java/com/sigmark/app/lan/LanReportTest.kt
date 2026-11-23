@@ -9,6 +9,18 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class LanReportTest {
+    @Test fun v8ProjectsPublicCapabilitySummariesInTheirOwnGroups() {
+        val keys = listOf("vulkanVersion","cameraCapabilitySummary","typeWakeupSummary","sensor_0","camera_0")
+        val snapshot = DeviceSnapshot(1,listOf("runtime","media","sensors").map { group ->
+            DeviceSection(group,group,keys.map { DeviceInfoItem(it,it,"value","test") })
+        })
+        assertEquals(setOf("runtime.vulkanVersion","media.cameraCapabilitySummary","sensors.typeWakeupSummary"),
+            lanParameters(snapshot).map { it.group+"."+it.key }.toSet())
+        val report = lanReport(snapshot,"0.20.0","")
+        assertEquals(10, report.fieldSetVersion)
+        assertEquals(7, report.copy(fieldSetVersion = 7).copy(feedback = "old draft").fieldSetVersion)
+    }
+
     @Test fun headerUsesInstalledVariantVersion() {
         val snap = DeviceSnapshot(1,listOf(DeviceSection("app","app",listOf(DeviceInfoItem("version","版本","0.18.42 (42)","PackageManager")))))
         assertEquals("0.18.42",lanReport(snap,"0.18.0","").appVersion)
@@ -30,7 +42,7 @@ class LanReportTest {
             DeviceInfoItem(key,key,value,"public Android API")
         })))
         assertEquals(setOf("keyguardSecure","storageEncryption"),lanParameters(snapshot).map { it.key }.toSet())
-        assertEquals(7,LanFieldSetVersion)
+        assertEquals(10,LanFieldSetVersion)
     }
     @Test fun assetIdentityIsScopedToTheBackendAddressAndPort() {
         fun scope(origin: String) = assetIdentityScope(requireNotNull(lanEndpoint(origin)))

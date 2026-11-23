@@ -1,4 +1,7 @@
 import {DeviceProfilePanel} from './device-profile';
+import {labLink} from './lab';
+import {AcceptanceComparison,AcceptancePanel} from './acceptance-panel';
+import {ObservationPanel} from './observation-panel';
 import {useEffect,useState} from 'react';
 import {errorMessage,request} from './console';
 import {compareSecurity,evaluateSecurity,releaseQuery,ruleVersion,type ReleaseReference,type Evidence} from './security-rules';
@@ -153,6 +156,7 @@ export function SecurityPage(){
           <code>{inspected.id}</code>
         </div>
           <div className="actions">
+            <a className="primary-link" href={labLink(inspected.id)} onClick={followReadLink}>打开验收工作台 →</a>
             {!retest&&<button type="button" onClick={()=>changeSelection({retest:true})}>与基线复测</button>}
             <button type="button" className="secondary" aria-expanded={showCurrentPicker} onClick={()=>setShowCurrentPicker(open=>!open)}>更换当前报告</button>
             <a className="subtle-link" onClick={followReadLink} href={goToArchive}>返回报告详情</a>
@@ -191,6 +195,7 @@ export function SecurityPage(){
                 <div><b>{result.verdicts.review}</b> 建议复核</div><div><b>{result.verdicts.insufficient}</b> 安全证据不足</div>
                 <div><b>{result.counts.lostValue}</b> 已归档字段失去读数</div><div><b>{result.counts.currentOnly}</b> 当前新增归档字段</div>
               </section>
+              <AcceptanceComparison result={result.acceptance}/>
               <div className="security-compare-note">
                 <p>{pair?'同一仓库设备的两次采样。':relation==='different'?'跨设备对照：两份报告属于不同设备，不代表同一台设备的变化。':'设备归属未确认：只做证据对照，不应视为某部手机的变化。'}</p>
                 {pair&&<label className="build-check"><input type="checkbox" checked={expectUnlock} onChange={e=>changeSelection({expectUnlock:e.target.checked})}/>本次实验 ROM 预期解锁</label>}
@@ -213,7 +218,9 @@ export function SecurityPage(){
               </div>
             </>}
         </section>}
-        <DeviceProfilePanel key={inspected.id} reportId={inspected.id} />
+        <DeviceProfilePanel key={'profile-'+inspected.id} reportId={inspected.id} />
+        <AcceptancePanel row={inspected}/>
+        <ObservationPanel key={'observation-'+inspected.id} report={inspected} />
         {evidencePanel}
         <div className="actions security-secondary"><button className="secondary" type="button" onClick={()=>setSaveOpen(true)}>保存当前为回归基线</button>
           <button className="text-button" type="button" onClick={()=>{setLibraryOpen(true);library.reload();window.scrollTo(0,0);}}>管理已保存的基线</button></div>

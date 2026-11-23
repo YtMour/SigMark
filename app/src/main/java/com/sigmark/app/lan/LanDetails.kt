@@ -38,6 +38,18 @@ private val diagnosticFields = mapOf(
     "app" to setOf("version", "appDebuggable", "debuggerConnected","package","certSha256","channel"),
 )
 
+private val capabilityFields = mapOf(
+    "runtime" to setOf("vulkanVersion"),
+    "media" to setOf("cameraCapabilitySummary"),
+    "sensors" to setOf("typeWakeupSummary"),
+)
+
+private val acceptanceFields = mapOf(
+    "network" to setOf("checkStartTransport","checkEndTransport","checkStartValidated","checkEndValidated","checkElapsed"),
+    "environment" to setOf("capturePlan","capturePhoneAccess","captureLocationAccess","captureLocationSwitch"),
+    "media" to setOf("avcFixture","avcFirstFrame","avcStage","avcDecoder","avcElapsed"),
+)
+
 internal data class LanCoverage(
     val group: String,
     val available: Int,
@@ -57,7 +69,8 @@ internal fun lanCoverage(snapshot: DeviceSnapshot): List<LanCoverage> =
 
 internal fun lanParameters(snapshot: DeviceSnapshot): List<LanParameter> =
     snapshot.sections.flatMap { section ->
-        val fields = legacyFields[section.key].orEmpty() + diagnosticFields[section.key].orEmpty()
+        val fields = legacyFields[section.key].orEmpty() + diagnosticFields[section.key].orEmpty() +
+            capabilityFields[section.key].orEmpty() + acceptanceFields[section.key].orEmpty()
         section.items.filter { it.key in fields || (section.key == "system" && partitionField(it.key)) }.mapNotNull { item ->
             val value = clean(item.value, 512)
             if (item.status == ValueStatus.AVAILABLE && value == null) return@mapNotNull null

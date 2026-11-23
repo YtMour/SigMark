@@ -91,7 +91,7 @@ internal fun SecurityPanel(snapshot: DeviceSnapshot, testing: Boolean, refreshin
                                 ValueStatus.RESTRICTED -> "受限 · 未确认"
                                 ValueStatus.ERROR -> "读取异常"
                                 ValueStatus.UNAVAILABLE -> unavailableLabel(field.reason)
-                                null -> if (key in listOf("system.systemSpl","system.vendorSpl") && android.os.Build.VERSION.SDK_INT < 35)
+                                null -> if (key == "system.systemSpl" && android.os.Build.VERSION.SDK_INT < 35)
                                     "此组件补丁接口从 API 35 开始提供" else "当前快照未记录"
                             })
                             if(field!=null) {

@@ -56,6 +56,7 @@ internal object SafeReader {
 
     enum class Property(val key: String) {
         SELINUX_BOOT("ro.boot.selinux"), SELINUX_BUILD("ro.build.selinux"),
+        VENDOR_PATCH("ro.vendor.build.security_patch"),
         HYPEROS("ro.mi.os.version.name"), MIUI("ro.miui.ui.version.name"),
         COLOR_OS("ro.build.version.opporom"), ONE_UI("ro.build.version.oneui"),
         COLOR_OS_ALT("ro.oplus.version.opporom"), VERIFIED_BOOT("ro.boot.verifiedbootstate"),

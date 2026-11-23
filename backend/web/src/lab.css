@@ -1,0 +1,20 @@
+.lab section { min-inline-size: 0; }
+.lab-hero { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(100%,21rem),1fr)); gap: 1rem; align-items: center; }
+.lab-hero h2, .lab-hero p { margin-block: .25rem; }
+.lab-hero form, .lab-filters > :is(label,div) { display: grid; gap: .25rem; min-inline-size: 0; }
+.lab-inline { display: flex; flex-wrap: wrap; gap: .5rem; align-items: end; }
+.lab-inline select { flex: 1 1 13rem; min-inline-size: 0; }
+.lab-kpis { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(100%,8rem),1fr)); gap: .6rem; }
+.lab-kpis div { display: grid; gap: .15rem; }
+.lab-kpis strong { color: var(--mint); font-size: clamp(1.3rem,3vw,2rem); }
+.lab-filters { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(100%,12rem),1fr)); gap: .55rem; align-items: end; }
+.lab :is(input,select) { min-inline-size: 0; max-inline-size: 100%; }
+.lab-table { overflow: auto; max-block-size: min(70vh,34rem); }
+.lab-table:focus-visible { outline: 2px solid var(--mint); }
+.lab-table table { inline-size: 100%; min-inline-size: 32rem; table-layout: fixed; border-collapse: separate; border-spacing: 0; }
+.lab-table thead, .lab-table tbody th { position: sticky; background: var(--panel); }
+.lab-table thead { inset-block-start: 0; z-index: 2; }
+.lab-table tbody th { inset-inline-start: 0; z-index: 1; }
+.lab-table :is(th,td) { padding: .55rem; text-align: start; vertical-align: top; overflow-wrap: anywhere; border-block-end: 1px solid var(--line-subtle); }
+.lab-table th:first-child { inline-size: 10.5rem; }
+.lab-table small { display: block; color: var(--muted); }

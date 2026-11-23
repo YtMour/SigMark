@@ -130,6 +130,54 @@ func synthetic() Report {
 		Metrics: []Metric{{Key: "system.selinux", Status: "RESTRICTED", Reason: "ACCESS_DENIED"}}}
 }
 
+func TestV8CapabilityFields(t *testing.T) {
+	r := synthetic()
+	r.SchemaVersion, r.FieldSetVersion, r.CollectorVersion = 4, 8, "0.20.0"
+	for _, field := range [][3]string{
+		{"runtime", "vulkanVersion", "1.1.0"},
+		{"media", "cameraCapabilitySummary", "rear/FULL x1"},
+		{"sensors", "typeWakeupSummary", "1:2/1"},
+	} {
+		value := field[2]
+		r.Parameters = append(r.Parameters, Parameter{Group: field[0], Key: field[1], Value: &value,
+			Label: field[1], Source: "fixture", Status: "AVAILABLE"})
+		r.Coverage = append(r.Coverage, Coverage{Group: field[0], Available: 1})
+	}
+	if !r.valid() {
+		t.Fatal("v8 capability summaries rejected")
+	}
+	r.FieldSetVersion = 7
+	if r.valid() {
+		t.Fatal("v7 accepted v8 fields")
+	}
+	r.FieldSetVersion = 8
+	r.Parameters[0].Group = "cpu"
+	if r.valid() {
+		t.Fatal("a capability key was accepted under a different group")
+	}
+}
+
+func TestV9AcceptanceValues(t *testing.T) {
+	for _, tc := range [][4]string{
+		{"environment", "capturePlan", "rom", "anything"},
+		{"environment", "captureLocationAccess", "approximate", "coordinates"},
+		{"media", "avcFixture", "sigmark-avc/1", "custom"},
+		{"media", "avcFirstFrame", "fail", "unknown"},
+		{"media", "avcStage", "decode", "unexpected"},
+		{"media", "avcDecoder", "c2.exynos.h264.decoder", "not a decoder name"},
+		{"media", "avcElapsed", "132 ms", "-10 ms"},
+	} {
+		p := Parameter{Group: tc[0], Key: tc[1], Value: &tc[2], Label: tc[1], Source: "fixture", Status: "AVAILABLE"}
+		if !p.valid(4, 9) || p.valid(4, 8) {
+			t.Fatalf("field set gate failed for %s", tc[1])
+		}
+		p.Value = &tc[3]
+		if p.valid(4, 9) {
+			t.Fatalf("bad value accepted for %s", tc[1])
+		}
+	}
+}
+
 func TestParametersAndPaginationContract(t *testing.T) {
 	p := synthetic()
 	p.SchemaVersion = 2

@@ -53,6 +53,27 @@ async function main(){
     }
     assert.equal(await panel.locator('details[open]').count(),3);
     assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'horizontal overflow');
+    if(process.env.SIGMARK_QA_ADB_FILE){
+      const comparison=page.getByRole('region',{name:'证据来源对照'});
+      const input=comparison.getByLabel('打开 ADB 观察 JSON');
+      let mutationRequests=0;
+      page.on('request',req=>{if(req.method()!=='GET')mutationRequests++;});
+      await input.setInputFiles({name:'broken.json',mimeType:'application/json',buffer:Buffer.from('{')});
+      await comparison.getByRole('alert').getByText('文件内容不是有效的 JSON。').waitFor();
+      await input.setInputFiles(process.env.SIGMARK_QA_ADB_FILE);
+      const selinux=comparison.getByRole('row').filter({hasText:'SELinux 实时模式'});
+      await selinux.getByRole('cell',{name:/^Enforcing/}).waitFor();
+      await selinux.getByRole('cell').getByText(/受限 · errno=13/).waitFor();
+      await selinux.getByRole('cell',{name:'缺少一方读数'}).waitFor();
+      const scroller=comparison.getByRole('region',{name:/可横向滚动/});
+      await scroller.focus();await page.keyboard.press('ArrowRight');
+      await page.waitForFunction(()=>document.querySelector('.observation-scroll').scrollLeft>0);
+      assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'observation overflow');
+      await comparison.getByRole('button',{name:'移除观察文件'}).click();
+      assert.equal(await comparison.getByRole('table').count(),0);
+      assert.equal(mutationRequests,0);
+      console.log('PASS observation: actual ADB file, restricted App field, validation, keyboard overflow, removal, GET-only.');
+    }
     if(!archive){
       await panel.getByText('系统限制读取（errno=13）',{exact:false}).waitFor();
       await panel.getByText('这份报告未保存该字段').waitFor();

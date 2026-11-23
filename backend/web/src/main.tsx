@@ -10,6 +10,8 @@ import { reportWorkspaceLink, type ReportFilters } from './facets';
 import { ReportFiltersBar } from './asset-filters';
 import {hashParams,reportScope} from './workspace-route';
 import {ReaderParameters} from './reader-parameters';
+import {AcceptancePanel} from './acceptance-panel';
+import {LabPage,labLink} from './lab';
 import {listPages,openFromList,navigateReader,returnFromReader,returnLabel,useRestoreList,followReadLink} from './reader-history';
 import { caption, date, shortDate, groups, saveJson, type Report, type Page, type CoverageGroup } from './reports';
 import {EmptyState,PageHead,WorkspaceNav,workspaces,type Section} from './workspace-ui';
@@ -75,7 +77,7 @@ function App(){
     {session==='active'&&error&&<p className="workspace error" role="alert">{error}</p>}
     {section==='downloads'?<Downloads/>:session==='active'?
       section==='settings'?<SettingsPage/>:section==='builds'?<BuildPage/>:
-        section==='assets'?<AssetsWorkspace/>:section==='security'?<SecurityPage/>:<Archive/>:
+        section==='assets'?<AssetsWorkspace/>:section==='security'?<SecurityPage/>:section==='lab'?<LabPage/>:<Archive/>:
       <main className="workspace"><PageHead section={section} description="通过管理员令牌访问内网工作台。"/><section className="login"><h2>管理员登录</h2>
       {session==='checking'?<p className="muted" role="status">正在检查登录状态…</p>:
         session==='unavailable'?<>
@@ -233,6 +235,7 @@ function Details({row,filters,pin,isBaseline,hasBaseline,startCompare}:{row:Repo
   const fields=row.report.parameters??[];
   return <>
     <div className="reading-actions actions">
+      <a className="button-link secondary" onClick={followReadLink} href={labLink(row.id)}>打开验收工作台</a>
       <a className="primary-link" onClick={followReadLink} href={reportWorkspaceLink('security',filters,{report:row.id,retest:true})}>与基线复测 →</a>
       <a className="subtle-link" onClick={followReadLink} href={reportWorkspaceLink('security',filters,{report:row.id})}>单份安全分析</a>
       <details className="report-options"><summary>更多报告操作</summary><div className="actions">
@@ -245,6 +248,7 @@ function Details({row,filters,pin,isBaseline,hasBaseline,startCompare}:{row:Repo
     </div>
     {savedId&&<p className="inset" role="status">已保存回归基线。 <a className="subtle-link" href={reportWorkspaceLink('security',filters,{baseline:row.id,saved:savedId,retest:true})}>用这条基线复测 →</a></p>}
     {row.report.feedback&&<p className="feedback"><b>测试反馈：</b>{row.report.feedback}</p>}
+    {(row.report.fieldSetVersion??0)>=9&&<AcceptancePanel row={row}/>}
     <section className="panel reading-panel">
       <div className="inspector-tabs" role="group" aria-label="报告视图">
         <button aria-pressed={panel==='fields'} onClick={()=>setPanel('fields')}>归档参数 · {fields.length} 项</button>

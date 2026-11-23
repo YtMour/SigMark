@@ -21,6 +21,8 @@
 
 ## AX / 证据导出
 
+字段集 9 增加 `acceptance`。仅在资产相同、基线更早、两次样片相同且都有明确结果时输出首帧回归/恢复。授权不同仅作为测试条件提示；时间和解码器名称不会触发回归。接口约定见 [1.0 验收手册](ACCEPTANCE-1.0.md)。
+
 对比导出格式为 `kind=sigmark.regression`、`schemaVersion=1`，含 `baseline` / `current`（报告 ID、批次、采样时间、App 采集器和字段集）、`savedBaseline`（可空的 ID、名称）、`context`、`counts`、`verdicts` 和 `checks`。不附原报告正文、任意测试反馈、资产 UUID 或安装标记。
 
 - `checks[]` 以 `group.key` 标识，含 `verdict`（`review/expected/insufficient/changed/unchanged`）、说明、两侧 `{value,status,source,reason,errno}`；未归档侧为 null。自动流程不靠中文措辞判断。

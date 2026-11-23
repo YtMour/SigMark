@@ -14,8 +14,9 @@ android {
         applicationId = "com.sigmark.app"
         minSdk = 26
         targetSdk = 34
-        versionCode = 23
-        versionName = "0.19.0"
+        versionCode = 27
+        versionName = "1.1.0"
+        testInstrumentationRunner = "com.sigmark.app.CapabilitySmoke"
     }
 
     buildTypes {

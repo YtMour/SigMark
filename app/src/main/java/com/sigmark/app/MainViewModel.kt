@@ -5,6 +5,11 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.sigmark.app.collector.DeviceRepository
 import com.sigmark.app.collector.SecurityObservations
+import com.sigmark.app.collector.CapturePlan
+import com.sigmark.app.collector.acceptanceEvidence
+import com.sigmark.app.collector.probeMediaDecode
+import com.sigmark.app.collector.RouteCheck
+import com.sigmark.app.collector.routeEvidence
 import com.sigmark.app.model.DeviceSnapshot
 import com.sigmark.app.model.DeviceInfoItem
 import com.sigmark.app.model.ValueStatus
@@ -38,8 +43,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     internal val saved = mutableSaved.asStateFlow()
     private var currentId: String? = null
     private val shelfIO = Dispatchers.IO.limitedParallelism(1)
+    private var accessRefresh: kotlinx.coroutines.Job? = null
 
     private fun busy() = mutableState.value.let { it.refreshing || it.testingKey || it.saving } || mutableUpload.value?.sending == true
+
+    fun refreshForAccessChange() {
+        accessRefresh?.cancel()
+        accessRefresh = viewModelScope.launch {
+            // Settings may return while an earlier capture is still completing.
+            while (busy()) kotlinx.coroutines.delay(100)
+            refresh()
+        }
+    }
 
     init {
         viewModelScope.launch {
@@ -113,14 +128,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         })
     }
 
-    fun collectAll(decorate: (DeviceSnapshot) -> DeviceSnapshot) {
+    internal fun collectAll(decorate: (DeviceSnapshot) -> DeviceSnapshot, plan: CapturePlan = CapturePlan.STANDARD, route: RouteCheck? = null) {
         if (busy()) return
         mutableState.value = mutableState.value.copy(refreshing = true, fullStage = 1, error = null)
         viewModelScope.launch {
             try {
                 val fresh = withContext(Dispatchers.IO) { repository.collect(refreshRadio = true) }
-                mutableState.value = mutableState.value.copy(fullStage = 2)
-                val complete = decorate(withKey(fresh))
+                if (plan != CapturePlan.NETWORK) mutableState.value = mutableState.value.copy(fullStage = 2)
+                val tested = if (plan == CapturePlan.NETWORK) fresh else withKey(fresh)
+                val decode = if (plan == CapturePlan.ROM) {
+                    mutableState.value = mutableState.value.copy(fullStage = 3)
+                    withContext(Dispatchers.IO) { probeMediaDecode(getApplication()) }
+                } else null
+                val result = acceptanceEvidence(tested, plan, decode)
+                val complete = decorate(if (route == null) result else routeEvidence(result, route))
                 saveSample(complete)
                 mutableState.value = MainUiState(snapshot = complete)
             } catch (e: CancellationException) { throw e }

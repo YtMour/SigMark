@@ -357,6 +357,10 @@ private object SensorsCollector : DeviceCollector {
     override fun collect(context: Context) = section(key, title) {
         val sensors = context.getSystemService(SensorManager::class.java)?.getSensorList(Sensor.TYPE_ALL)
         value("count", "传感器数量", "SensorManager.getSensorList") { sensors?.size?.toString() }
+        value("typeWakeupSummary", "传感器类型与唤醒能力", "SensorManager.getSensorList / Sensor.isWakeUpSensor",
+            "格式为 Android 类型编号:公开条目数/可唤醒条目数，最多列出 24 类。") {
+            sensors?.map { it.type to it.isWakeUpSensor }?.let(::sensorTypeWakeupSummary)
+        }
         sensors?.forEachIndexed { index, sensor ->
             value("sensor_$index", sensor.name, "SensorManager.getSensorList(TYPE_ALL)",
                 "最小延迟为采样能力；0 µs 可能表示按变化触发。量程和分辨率单位依传感器类型。") {
@@ -374,11 +378,16 @@ class DeviceRepository(private val context: Context) {
         RuntimeCollector, MediaCollector, EnvironmentCollector, AppCollector,
     )
 
-    suspend fun collect(refreshRadio: Boolean = false): DeviceSnapshot = DeviceSnapshot(System.currentTimeMillis(), collectors.map { collector ->
+    suspend fun collect(refreshRadio: Boolean = false): DeviceSnapshot {
+        val capturedAt = System.currentTimeMillis()
+        val access = collectionContext(com.sigmark.app.CollectionAccess.read(context))
+        return DeviceSnapshot(capturedAt, collectors.map { collector ->
         try {
             if (collector === CellularCollector && refreshRadio)
                 CellularCollector.collect(context, CellularCollector.requestUpdate(context))
-            else collector.collect(context)
+            else collector.collect(context).let { section ->
+                if (section.key == "environment") section.copy(items = section.items + access) else section
+            }
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -388,5 +397,6 @@ class DeviceRepository(private val context: Context) {
                 e.javaClass.simpleName,
             )))
         }
-    })
+        })
+    }
 }

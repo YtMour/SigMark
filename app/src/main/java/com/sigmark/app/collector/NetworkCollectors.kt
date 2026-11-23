@@ -24,6 +24,9 @@ import android.telephony.CellSignalStrengthNr
 import android.telephony.SubscriptionManager
 import android.telephony.ServiceState
 import android.telephony.TelephonyManager as Phone
+import com.sigmark.app.CollectionAccess
+import com.sigmark.app.AccessAction
+import com.sigmark.app.networkAccessNeeds
 import com.sigmark.app.model.DeviceInfoItem
 import com.sigmark.app.model.DeviceSection
 import com.sigmark.app.model.ReadReason
@@ -333,8 +336,12 @@ internal object CellularCollector : DeviceCollector {
     @SuppressLint("MissingPermission")
     private fun addSubscriptionStates(context: Context, phone: Phone, fields: NetworkFields, dataId: Int) {
         val slotSource = "SubscriptionManager.getSlotIndex / activeSubscriptionInfoList"
-        val serviceSource = "SubscriptionManager.activeSubscriptionInfoList → TelephonyManager.serviceState"
-        val permitted = context.checkSelfPermission(Manifest.permission.READ_PHONE_STATE) == PackageManager.PERMISSION_GRANTED
+        val api = Build.VERSION.SDK_INT
+        val serviceSource = if (api >= 33)
+            "SubscriptionManager.activeSubscriptionInfoList → TelephonyManager.getServiceState(INCLUDE_LOCATION_DATA_NONE)"
+        else "SubscriptionManager.activeSubscriptionInfoList → TelephonyManager.serviceState"
+        val access = CollectionAccess.read(context)
+        val permitted = access.phone
         val subscriptions = if (permitted) SafeReader.read("SubscriptionManager.activeSubscriptionInfoList") {
             context.getSystemService(SubscriptionManager::class.java)?.activeSubscriptionInfoList
         } else null
@@ -356,30 +363,47 @@ internal object CellularCollector : DeviceCollector {
                 "该接口需要 Android 9（API 28）或更高版本。")
             return
         }
-        if (!permitted || !locationEnabled(context) || !hasFine(context)) {
-            val reason = if (!permitted || !hasFine(context)) ReadReason.PERMISSION_REQUIRED else ReadReason.LOCATION_DISABLED
-            fields.missing("slotService", "各卡槽服务状态", serviceSource, reason,
-                "此项需要电话状态权限、精确位置权限和位置开关；不读取号码、SIM 标识或运营商。")
+        val next = networkAccessNeeds(api, "cellular", "slotService")?.next(access)
+        if (next == AccessAction.PHONE || next == AccessAction.FINE || next == AccessAction.LOCATION) {
+            val reason = if (next == AccessAction.LOCATION) ReadReason.LOCATION_DISABLED else ReadReason.PERMISSION_REQUIRED
+            fields.missing("slotService", "各卡槽服务状态", serviceSource, reason, when (next) {
+                AccessAction.PHONE -> if (api >= 33) "此项需要电话状态权限，不请求位置数据。"
+                    else "此项先需电话状态权限；旧版 Android 还需精确位置及系统位置开关。"
+                AccessAction.FINE -> "此 Android 版本的服务状态接口需要精确位置权限。"
+                else -> "此 Android 版本需开启系统位置后才能查询服务状态。"
+            })
             return
         }
-        val states = subscriptions?.map { active ->
-            val eligible = active.filter { it.simSlotIndex >= 0 }.sortedBy { it.simSlotIndex }.take(8)
-            if (eligible.isEmpty()) return@map "系统未列出可见活动订阅"
-            eligible.joinToString(" / ") { sub ->
+        val eligible = subscriptions?.value?.filter { it.simSlotIndex >= 0 }?.sortedBy { it.simSlotIndex }?.take(8)
+        if (eligible.isNullOrEmpty()) {
+            val result: ReadResult<String> = if (eligible != null || subscriptions == null)
+                SafeReader.missing(serviceSource, ReadReason.NOT_REPORTED, "系统未列出可见活动订阅。")
+            else subscriptions.map { null }
+            fields.observation("slotService", "各卡槽服务状态", result)
+            return
+        }
+        val readings = eligible.map { sub ->
                 val result = SafeReader.read(serviceSource) {
-                    phone.createForSubscriptionId(sub.subscriptionId).serviceState?.state?.let(::subscriptionServiceLabel)
+                    val line = phone.createForSubscriptionId(sub.subscriptionId)
+                    val service = if (Build.VERSION.SDK_INT >= 33) line.getServiceState(Phone.INCLUDE_LOCATION_DATA_NONE) else line.serviceState
+                    service?.state?.let(::subscriptionServiceLabel)
                 }
+                sub.simSlotIndex to result
+        }
+        val states = if (readings.none { it.second.status == ValueStatus.AVAILABLE }) {
+            (readings.firstOrNull { it.second.status == ValueStatus.RESTRICTED }
+                ?: readings.firstOrNull { it.second.status == ValueStatus.ERROR } ?: readings.first()).second
+        } else SafeReader.read(serviceSource, "反映各可见活动订阅的服务状态，不代表移动数据已连通。") {
+            readings.joinToString(" / ") { (slot, result) ->
                 val label = result.value ?: when (result.status) {
                     ValueStatus.RESTRICTED -> "系统拒绝读取"
                     ValueStatus.ERROR -> "读取异常"
                     else -> "状态未上报"
                 }
-                "卡槽 ${sub.simSlotIndex + 1}：$label"
+                "卡槽 ${slot + 1}：$label"
             }
-        }?.let { it.copy(source = serviceSource, detail = it.detail ?: "反映各可见活动订阅的服务状态，不代表移动数据已连通。") }
-        if (states == null) {
-            fields.missing("slotService", "各卡槽服务状态", serviceSource, ReadReason.NOT_REPORTED, "系统未提供活动订阅。")
-        } else fields.observation("slotService", "各卡槽服务状态", states)
+        }
+        fields.observation("slotService", "各卡槽服务状态", states)
     }
 
     @SuppressLint("MissingPermission") // Checked before accessing getAllCellInfo().

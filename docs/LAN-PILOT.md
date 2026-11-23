@@ -92,6 +92,15 @@ python -u backend/scripts/build_worker.py work --origin http://<LAN_BIND>:<LAN_P
 
 0.12 会先用现代签名接口读取证书，在部分 ROM 无结果时尝试旧接口。若两个接口仍未返回证书，包名、版本与文件完整性检查通过后，交由 Android 安装器验证签名。明确读到签名不同则直接提示。若旧版检查更新仍出现通用错误，从下载页获取同签名 APK 覆盖安装一次；若系统也报告签名冲突，则核对原安装签名。保留原签名优先；确需换签时请先导出本地资料再处理迁移。
 
+### 设备风险画像读取契约
+
+`GET /api/admin/reports/{id}/device-profile` 使用同源管理会话或管理 Bearer 令牌。无认证 401，无效标识 400，不存在或已在回收站 404。读库错误 503；失败不是「未见风险」，页面支持单独重试。可通过「指纹安全 → 选择报告 → 设备风险画像」检查或导出同结构 JSON。
+
+- 顶层：`reportId, ruleVersion, capturedAtEpochMs, linked, historyDays, historyLimit, historySamples, historyLimited, labels`。采样时间是手机上报的 Unix 毫秒，不是接收时间或受信时间戳。
+- 时间窗：所选报告采样时间前 30×24 小时（左闭右开）；仅使用当前同一资产、未入回收站、且接收时间不晚于所选报告的样本。同一采样毫秒不互为历史；按采样时间降序，数量超过 50 时只算最近 50 份，并标记截断。这不限制入库或保留数量。未归组只评估当前报告。
+- 每项：`code`、`state=hit|not_observed|insufficient`、逐字段 `evidence`（`key/status` 与可用的 `value/source/reason/errno`）。`NOT_ARCHIVED` 意味着这份报告没有该字段，并不推断手机不支持。历史命中数是 `historyHits`，分母是本项可判断的历史样本 `historyEvaluable`；不足项不算零。若命中历史，则有 `lastHistoricalHit.id/capturedAtEpochMs` 指向在库原件。
+- 复现：从仓库根目录运行 `docker build -t sigmark-qa:device-profile backend`、`python -B backend/scripts/qa_device_profile.py --browser`。浏览器需 Node 可解析 Playwright，使用本机 Chrome 时设置 `SIGMARK_QA_BROWSER=chrome`。不带 `--browser` 仅跑 SQL/API。测试启动独立临时 PostgreSQL 与 API，不向配置的仓库上传。对明确指定的真实归档仅 GET：按工作台文档设置 QA 地址和本地令牌，执行 `node backend/web/qa/device-profile.cjs --archive <报告UUID>`。
+
 ## 服务器部署前
 
 服务器部署需配置 HTTPS、强令牌和 `COOKIE_SECURE=true`。当前 App 连接器仍为私有 IPv4 的 HTTP Debug 试验通道，远程部署还需补上 APP 的 HTTPS 地址配置和独立上报鉴权。扩大部署范围前验证构建隔离、签名、跨设备兼容性、备份恢复、审计和监控。

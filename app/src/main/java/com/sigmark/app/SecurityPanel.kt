@@ -11,7 +11,11 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.*
-import com.sigmark.app.collector.bootEvidence
+import com.sigmark.app.security.*
+import androidx.compose.ui.platform.LocalContext
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.sigmark.app.model.DeviceSnapshot
@@ -32,30 +36,40 @@ private val securityGroups = listOf(
 internal fun SecurityPanel(snapshot: DeviceSnapshot, testing: Boolean, refreshing: Boolean, testKey: () -> Unit, close: () -> Unit) {
     val fields = snapshot.sections.flatMap { section -> section.items.map { "${section.key}.${it.key}" to it } }.toMap()
     var open by remember { mutableStateOf<String?>(null) }
-    fun boot(key: String) = fields["environment.$key"]?.takeIf { it.status == ValueStatus.AVAILABLE }?.value
-    val interpretation = when (bootEvidence(boot("verifiedBoot"),boot("vbmetaState"),boot("flashLock"))) {
-        "red" -> "启动检查：系统报告启动验证异常，请核对所装系统。"
-        "conflict" -> "启动检查：系统给出的锁定信息不一致，建议和刷机前的报告对照。"
-        "unlocked" -> "启动检查：系统显示已解锁。如果你主动刷了 ROM，这可能符合预期。"
-        "custom" -> "启动检查：系统使用了自定义信任根，请核对是不是你安装的 ROM。"
-        "locked" -> "启动检查：系统报告已锁定，启动状态与此一致。"
-        else -> "启动检查：现有信息不足，还没有结论。"
-    }
+    val posture = remember(snapshot) { devicePosture(fields,snapshot.collectedAt) }
+    val app = LocalContext.current.applicationContext
+    val scope = rememberCoroutineScope()
+    var permissions by remember { mutableStateOf<List<PostureRow>?>(null) }
+    var checkedAt by remember { mutableStateOf<Long?>(null) }
+    var scanning by remember { mutableStateOf(false) }
+    var showChecks by remember { mutableStateOf(false) }
     val keyProbe = fields["environment.keyProtection"]
     AlertDialog(onDismissRequest = close, title = { Text("指纹安全") },
         text = {
             LazyColumn(Modifier.heightIn(max = 500.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 item {
                     Text("本机安全检查", style = MaterialTheme.typography.titleMedium)
-                    Text("这里的“指纹”是设备配置特征，不读取手指指纹。")
-                    Text(interpretation)
-                    if (fields["environment.keyguardSecure"]?.value == "否" || fields["environment.storageEncryption"]?.value == "系统报告未启用")
-                        Text("需复核 · 系统报告锁屏凭证未设置或存储加密未启用；请核对实验设置。")
-                    if (fields["system.selinux"]?.status != ValueStatus.AVAILABLE)
-                        Text("系统没有公开所有保护状态；缺少读数不等于保护已关闭。")
-                    Text("独立验证：未进行。本机结果不是整机真伪证明。")
-                    Text("采样：${DateFormat.getDateTimeInstance().format(Date(snapshot.collectedAt))}")
+                    Text("设备真实性：未独立验证。真实手机也可以刷入自定义 ROM；型号、配置指纹和密钥自测都不是原厂系统证明。")
+                    Text("系统保护 · 优先处理 " + posture.count { it.state == Finding.PRIORITY } + " 项，待核对 " + posture.count { it.state == Finding.REVIEW } + " 项，未确认 " + posture.count { it.state == Finding.UNKNOWN } + " 项。")
+                    Text("采样：" + DateFormat.getDateTimeInstance().format(Date(snapshot.collectedAt)),style=MaterialTheme.typography.bodySmall)
                 }
+                items(posture.filter { it.state == Finding.PRIORITY },key = { "urgent:" + it.id }) { PostureEvidence(it) }
+                item { TextButton(onClick = { showChecks = !showChecks }) { Text(if (showChecks) "收起其他系统检查" else "查看其他系统检查") } }
+                if (showChecks) items(posture.filter { it.state != Finding.PRIORITY },key = { "check:" + it.id }) { PostureEvidence(it) }
+                item {
+                    HorizontalDivider()
+                    Text("特殊授权",style=MaterialTheme.typography.titleMedium)
+                    Text("只在本机查看无障碍能力、设备管理员数量和印迹的安装授权。不读取屏幕、不记录应用名单，也不上传结果。")
+                    TextButton(enabled=!scanning,onClick={
+                        scanning=true
+                        scope.launch {
+                            try { permissions = withContext(Dispatchers.IO) { specialAccess(app) }; checkedAt=System.currentTimeMillis() }
+                            finally { scanning=false }
+                        }
+                    }) { Text(if (scanning) "正在检查…" else if (permissions==null) "检查特殊授权" else "重新检查特殊授权") }
+                    checkedAt?.let { Text("本机检查：" + DateFormat.getTimeInstance().format(Date(it)),style=MaterialTheme.typography.bodySmall) }
+                }
+                items(permissions.orEmpty(),key={ "access:" + it.id }) { PostureEvidence(it) }
                 item {
                     Text("密钥保护：" + keyProtectionExplanation(keyProbe?.value), style = MaterialTheme.typography.titleSmall)
                     if (keyProbe != null && keyProbe.value == null) Text(keyProbe.note ?: "本次未取得读数。")
@@ -100,4 +114,13 @@ internal fun keyProtectionExplanation(value: String?) = when (value) {
     "硬件保护（类型未细分）" -> "系统报告使用硬件保护，未区分硬件类型。"
     "Software" -> "系统报告，这把测试密钥由软件保护。"
     else -> "尚未确认。可在本机运行测试，无需上传。"
+}
+
+@Composable
+private fun PostureEvidence(row: PostureRow) {
+    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+        Text(row.name + " · " + row.state.label,style=MaterialTheme.typography.titleSmall)
+        Text(row.message)
+        Text("依据：" + row.source,style=MaterialTheme.typography.bodySmall)
+    }
 }

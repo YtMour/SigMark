@@ -1,3 +1,4 @@
+import {DeviceProfilePanel} from './device-profile';
 import {useEffect,useState} from 'react';
 import {errorMessage,request} from './console';
 import {compareSecurity,evaluateSecurity,releaseQuery,ruleVersion,type ReleaseReference,type Evidence} from './security-rules';
@@ -212,6 +213,7 @@ export function SecurityPage(){
               </div>
             </>}
         </section>}
+        <DeviceProfilePanel key={inspected.id} reportId={inspected.id} />
         {evidencePanel}
         <div className="actions security-secondary"><button className="secondary" type="button" onClick={()=>setSaveOpen(true)}>保存当前为回归基线</button>
           <button className="text-button" type="button" onClick={()=>{setLibraryOpen(true);library.reload();window.scrollTo(0,0);}}>管理已保存的基线</button></div>

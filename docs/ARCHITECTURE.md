@@ -4,6 +4,8 @@ SigMark 当前采用单模块 Kotlin / Compose 结构，目标是让每一项信
 
 ## 数据流
 
+- 管理端设备画像由 Go 按当前规则从原报告只读计算，React 只渲染返回值。上传字段集、移动端权限和库表均不变；导出的派生结果以稳定的规则代码、字段键及规则版本为准，不解析界面中文文案。详见[读取契约](LAN-PILOT.md#设备风险画像读取契约)。
+
 `DeviceCollector` → `DeviceRepository` → `MainViewModel (StateFlow)` → Compose 页面 → 系统文档选择器导出 JSON。
 
 Debug 内网试验分支：冻结当前本地快照 → `lan/LanReport.kt` 按白名单投影 → 用户确认上传 → 内置局域网地址的 Go API → PostgreSQL。浏览器用管理会话读取，同源脚本联调也可使用独立 Bearer 令牌。上传与完整 JSON 导出各自走独立流程。详细契约和运行说明见 [内网试验手册](LAN-PILOT.md)。

@@ -141,6 +141,7 @@ func (s server) routes() http.Handler {
 				admin.Post("/reports/export", s.exportReports)
 				admin.Post("/reports/manage", s.manageReports)
 				admin.Get("/reports/{id}", s.reportDetail)
+				admin.Get("/reports/{id}/device-profile", s.deviceProfile)
 				admin.Get("/summary", s.summary)
 			})
 		})

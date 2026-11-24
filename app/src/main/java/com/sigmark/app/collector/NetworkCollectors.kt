@@ -319,18 +319,57 @@ internal object CellularCollector : DeviceCollector {
                 else missing("dataRat", "蜂窝数据制式", "TelephonyManager.dataNetworkType", ReadReason.PERMISSION_REQUIRED,
                     "此版本 Android 需电话状态权限才能读取默认数据卡制式。设备看到的小区类型在小区无线参数单独展示。")
                 if (Build.VERSION.SDK_INT >= 28) read("modemSignalLevel", "调制解调器信号等级", "TelephonyManager.signalStrength.level", "系统综合等级，不是 dBm。") { data.signalStrength?.level?.takeIf { it in 0..4 }?.let { "$it / 4" } }
-                if (Build.VERSION.SDK_INT >= 28 && hasFine(context) && locationEnabled(context)) {
-                    val widths = SafeReader.read("TelephonyManager.serviceState.cellBandwidths",
-                        "默认数据订阅的载波带宽列表。可能包含多载波，与单个 LTE 小区带宽分开展示。") {
-                        data.serviceState?.cellBandwidths?.filter { it in 1..400_000 }?.takeIf { it.isNotEmpty() }
-                            ?.joinToString(" / ") { "$it kHz" }
-                    }
-                    if (widths.value != null) observation("carrierBandwidths", "订阅载波带宽（补充）", widths)
-                }
             }
         }
+        addDefaultSubscriptionEvidence(context, phone, fields, subId)
         addRegisteredCells(context, phone, fields, update)
         return DeviceSection(key, title, fields.items)
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun addDefaultSubscriptionEvidence(context: Context, phone: Phone, fields: NetworkFields, dataId: Int) {
+        val api = Build.VERSION.SDK_INT
+        val source = if (api >= 33) "TelephonyManager.getServiceState(INCLUDE_LOCATION_DATA_NONE)"
+            else "TelephonyManager.serviceState"
+        val bandwidthSource = "$source.cellBandwidths"
+        val statusLabel = "默认数据卡服务状态"
+        val bandwidthLabel = "订阅载波带宽（补充）"
+        fun missing(reason: ReadReason, note: String) {
+            fields.missing("dataSubscriptionService", statusLabel, source, reason, note)
+            fields.missing("carrierBandwidths", bandwidthLabel, bandwidthSource, reason, note)
+        }
+        if (Build.VERSION.SDK_INT < 28) {
+            missing(ReadReason.INTERFACE_UNSUPPORTED, "此采集路径需要 API 28 或更新版本。")
+            return
+        }
+        if (dataId < 0 || dataId == Int.MAX_VALUE) {
+            missing(ReadReason.NOT_REPORTED, "未设置默认数据订阅；未改读其他 SIM。")
+            return
+        }
+        val next = networkAccessNeeds(api, "cellular", "dataSubscriptionService")?.next(CollectionAccess.read(context))
+        when (next) {
+            AccessAction.PHONE -> return missing(ReadReason.PERMISSION_REQUIRED, "默认数据卡的服务状态需电话状态权限。")
+            AccessAction.FINE -> return missing(ReadReason.PERMISSION_REQUIRED, "API 28–32 的服务状态路径需精确位置权限。")
+            AccessAction.LOCATION -> return missing(ReadReason.LOCATION_DISABLED, "API 28–32 的服务状态路径需打开系统位置。")
+            else -> Unit
+        }
+        val service = SafeReader.read(source) {
+            val line = phone.createForSubscriptionId(dataId)
+            if (Build.VERSION.SDK_INT >= 33) line.getServiceState(Phone.INCLUDE_LOCATION_DATA_NONE) else line.serviceState
+        }
+        if (service.value == null) {
+            val state = ReadResult<String>(null, service.status, source, service.detail, service.reason)
+            fields.observation("dataSubscriptionService", statusLabel, state)
+            fields.observation("carrierBandwidths", bandwidthLabel, state.copy(source = bandwidthSource))
+            return
+        }
+        fields.read("dataSubscriptionService", statusLabel, source,
+            "默认数据订阅的服务状态；不是实际联网状态，也不依赖可见订阅列表。") { subscriptionServiceLabel(service.value.state) }
+        val widths = formatCarrierBandwidths(service.value.cellBandwidths)
+        if (widths == null) fields.missing("carrierBandwidths", bandwidthLabel, bandwidthSource,
+            ReadReason.MODEM_NOT_REPORTED, "服务状态已返回，未收到有效的载波带宽列表。")
+        else fields.read("carrierBandwidths", bandwidthLabel, bandwidthSource,
+            "默认数据订阅的载波带宽列表，单位 kHz；与单个 LTE 小区带宽分开。") { widths }
     }
 
     @SuppressLint("MissingPermission")
@@ -542,6 +581,10 @@ internal fun subscriptionServiceLabel(state: Int): String? = when (state) {
     ServiceState.STATE_POWER_OFF -> "无线电关闭"
     else -> null
 }
+
+internal fun formatCarrierBandwidths(widths: IntArray?): String? =
+    widths?.asSequence()?.filter { it in 1..400_000 }?.take(16)?.toList()
+        ?.takeIf { it.isNotEmpty() }?.joinToString(" / ") { "$it kHz" }
 
 @Suppress("DEPRECATION") // Recognize older CDMA reports without assuming modern support.
 private fun cellTechnology(cell: CellInfo): String = when {

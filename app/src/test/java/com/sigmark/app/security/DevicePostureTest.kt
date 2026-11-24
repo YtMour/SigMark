@@ -38,6 +38,43 @@ class DevicePostureTest {
         assertEquals(AccessCounts(2,1,1,1),accessibilityCounts(listOf(r or g,0)))
         assertEquals(AccessCounts(0,0,0,0),accessibilityCounts(emptyList()))
     }
+    @Test fun selinuxInferenceIsObservedWithItsBasisNotSilent() {
+        val k="system.selinux"
+        assertEquals(Finding.OBSERVED,row(k to "Enforcing（强制模式）").getValue(k).state)
+        val inferred=row(k to "Enforcing（强制模式，推断）").getValue(k)
+        assertEquals(Finding.OBSERVED,inferred.state)
+        assertTrue(inferred.message.contains("推断"))
+        assertEquals(Finding.PRIORITY,row(k to "Permissive（宽容模式，推断）").getValue(k).state)
+        assertEquals(Finding.UNKNOWN,row(k to "不认识的读数").getValue(k).state)
+    }
+    @Test fun injectionRuntimeSignalsAreReviewNotProof() {
+        assertEquals(Finding.REVIEW,row("environment.hookSignals" to "frida").getValue("environment.hookSignals").state)
+        assertEquals(Finding.OBSERVED,row("environment.hookSignals" to "none","environment.rootMountHints" to "none",
+            "environment.rootManagerVisible" to "none").getValue("environment.hookSignals").state)
+        assertEquals(Finding.UNKNOWN,row("environment.hookSignals" to "none").getValue("environment.hookSignals").state)
+        assertEquals(Finding.REVIEW,row("environment.tracerPid" to "1234").getValue("environment.tracerPid").state)
+        assertEquals(Finding.OBSERVED,row("environment.tracerPid" to "0").getValue("environment.tracerPid").state)
+        assertEquals(Finding.OBSERVED,row("environment.userProfile" to "owner").getValue("environment.userProfile").state)
+        for(v in listOf("secondary","managed")) assertEquals(Finding.REVIEW,row("environment.userProfile" to v).getValue("environment.userProfile").state)
+        assertEquals(Finding.REVIEW,row("environment.verityMode" to "disabled").getValue("environment.verityMode").state)
+        assertEquals(Finding.REVIEW,row("environment.buildDebuggable" to "开启").getValue("environment.verityMode").state)
+        assertEquals(Finding.OBSERVED,row("environment.verityMode" to "enforcing").getValue("environment.verityMode").state)
+        assertEquals(Finding.UNKNOWN,row("system.patch" to "2026-11-01").getValue("environment.verityMode").state)
+    }
+    @Test fun identityDeclarationsAreComparedInsideOneObserver() {
+        val conflict=row("system.board" to "mt6985","system.boardPlatform" to "gs101").getValue("system.board")
+        assertEquals(Finding.REVIEW,conflict.state)
+        assertTrue(conflict.message.contains("mt6985"))
+        assertTrue(conflict.message.contains("gs101"))
+        val consistent=row("system.board" to "mt6985","system.boardPlatform" to "MT6985",
+            "cpu.hardware" to "mtk","system.bootHardware" to "mtk",
+            "system.sku" to "23078PND5G","system.hardwareSku" to "23078PND5G").getValue("system.board")
+        assertEquals(Finding.OBSERVED,consistent.state)
+        assertTrue(consistent.message.contains("3 对"))
+        assertEquals(Finding.OBSERVED,row("cpu.hardware" to "mtk","system.bootHardware" to "mtk").getValue("system.board").state)
+        assertEquals(Finding.UNKNOWN,row("system.board" to "mt6985").getValue("system.board").state)
+        assertEquals(Finding.UNKNOWN,row("system.patch" to "2026-11-01").getValue("system.board").state)
+    }
     @Test fun localAccessReviewIsNotALanField() {
         val fields=listOf("accessibility","admins","selfInstaller").map { DeviceInfoItem(it,it,"sensitive","test") }
         assertTrue(lanParameters(DeviceSnapshot(epoch,listOf(DeviceSection("environment","env",fields)))).isEmpty())

@@ -10,6 +10,12 @@ import com.sigmark.app.collector.acceptanceEvidence
 import com.sigmark.app.collector.probeMediaDecode
 import com.sigmark.app.collector.RouteCheck
 import com.sigmark.app.collector.routeEvidence
+import com.sigmark.app.collector.UsbCheck
+import com.sigmark.app.collector.GnssCheck
+import com.sigmark.app.collector.gnssEvidence
+import com.sigmark.app.collector.usbEvidence
+import com.sigmark.app.collector.withExperimentFields
+import com.sigmark.app.collector.clockEvidence
 import com.sigmark.app.model.DeviceSnapshot
 import com.sigmark.app.model.DeviceInfoItem
 import com.sigmark.app.model.ValueStatus
@@ -128,20 +134,40 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         })
     }
 
-    internal fun collectAll(decorate: (DeviceSnapshot) -> DeviceSnapshot, plan: CapturePlan = CapturePlan.STANDARD, route: RouteCheck? = null) {
+    internal fun collectAll(decorate: (DeviceSnapshot) -> DeviceSnapshot, plan: CapturePlan = CapturePlan.STANDARD, route: RouteCheck? = null, usb: UsbCheck? = null, gnss: GnssCheck? = null) {
+        if (plan == CapturePlan.GNSS && gnss == null) return
         if (busy()) return
         mutableState.value = mutableState.value.copy(refreshing = true, fullStage = 1, error = null)
         viewModelScope.launch {
             try {
                 val fresh = withContext(Dispatchers.IO) { repository.collect(refreshRadio = true) }
-                if (plan != CapturePlan.NETWORK) mutableState.value = mutableState.value.copy(fullStage = 2)
-                val tested = if (plan == CapturePlan.NETWORK) fresh else withKey(fresh)
+                val needsKey = plan == CapturePlan.STANDARD || plan == CapturePlan.ROM
+                if (needsKey) mutableState.value = mutableState.value.copy(fullStage = 2)
+                val tested = if (needsKey) withKey(fresh) else fresh
+                val avcStart = System.currentTimeMillis()
                 val decode = if (plan == CapturePlan.ROM) {
                     mutableState.value = mutableState.value.copy(fullStage = 3)
                     withContext(Dispatchers.IO) { probeMediaDecode(getApplication()) }
                 } else null
-                val result = acceptanceEvidence(tested, plan, decode)
-                val complete = decorate(if (route == null) result else routeEvidence(result, route))
+                val avcEnd = System.currentTimeMillis()
+                val evidence = acceptanceEvidence(tested, plan, decode).let {
+                    if(decode==null) it else withExperimentFields(it,"media",listOf(clockEvidence("avcStartAt","AVC 实验起点时间",avcStart),
+                        clockEvidence("avcEndAt","AVC 实验结束时间",avcEnd)))
+                }
+                val result = if (plan == CapturePlan.ROM) {
+                    mutableState.value = mutableState.value.copy(fullStage = 4)
+                    val start = System.currentTimeMillis()
+                    val graphic = withContext(Dispatchers.IO) { com.sigmark.app.collector.probeGraphics() }
+                    val end = System.currentTimeMillis()
+                    withExperimentFields(com.sigmark.app.collector.graphicsEvidence(evidence, graphic),"runtime",
+                        listOf(clockEvidence("glesStartAt","GLES 实验起点时间",start),clockEvidence("glesEndAt","GLES 实验结束时间",end)))
+                } else evidence
+                val complete = decorate(when {
+                    gnss != null -> gnssEvidence(result,gnss)
+                    usb != null -> usbEvidence(result,usb)
+                    route != null -> routeEvidence(result,route)
+                    else -> result
+                })
                 saveSample(complete)
                 mutableState.value = MainUiState(snapshot = complete)
             } catch (e: CancellationException) { throw e }

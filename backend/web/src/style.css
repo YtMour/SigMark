@@ -286,3 +286,12 @@ button.danger{background:#512b30;border-color:#a16066;color:#fff0ed}
  .asset-table tbody td:nth-child(3){grid-column:2}
  .asset-table tbody td[data-label]::before{content:attr(data-label) " · ";color:var(--muted);font-size:11px}
 }
+
+.identity-list{margin:0;padding-left:16px;display:grid;gap:2px}
+.identity-list code{word-break:break-all}
+
+.identity-notice{border:1px solid var(--amber);border-radius:8px;padding:10px 12px}
+.identity-notice h2{margin:0 0 6px;font-size:15px;color:var(--amber)}
+.identity-notice ul{margin:6px 0 8px;padding-left:18px;display:grid;gap:3px}
+.identity-notice code{word-break:break-all}
+p.identity-notice{margin:8px 0}

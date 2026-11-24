@@ -35,6 +35,17 @@ class CollectionAccessTest {
         assertNull(collectionAction(29,"cellular", row("cellLTEBandwidth",ReadReason.INTERFACE_UNSUPPORTED,ValueStatus.UNAVAILABLE), denied))
     }
 
+    @Test fun defaultSubscriptionSourcesUseVersionAppropriatePermissions() {
+        for (key in listOf("dataSubscriptionService", "carrierBandwidths")) {
+            val blocked = row(key,ReadReason.PERMISSION_REQUIRED)
+            assertNull(collectionAction(27,"cellular",blocked,denied))
+            assertEquals(AccessAction.PHONE,collectionAction(28,"cellular",blocked,denied))
+            assertEquals(AccessAction.FINE,collectionAction(32,"cellular",blocked,denied.copy(phone=true)))
+            assertEquals(AccessAction.LOCATION,collectionAction(32,"cellular",blocked,denied.copy(phone=true,fine=true)))
+            assertEquals(AccessAction.RECHECK,collectionAction(33,"cellular",blocked,denied.copy(phone=true)))
+        }
+    }
+
     @Test fun requestAndSettingsPathsRespectPriorUserChoice() {
         assertEquals(PermissionRoute.REQUEST, permissionRoute(false,false,false,false))
         assertEquals(PermissionRoute.REQUEST, permissionRoute(false,true,true,false))

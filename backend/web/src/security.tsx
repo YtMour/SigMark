@@ -1,10 +1,12 @@
 import {DeviceProfilePanel} from './device-profile';
+import {RiskPanel} from './risk-panel';
+import {assessRisk,registeredUnlock} from './risk-assessment';
 import {labLink} from './lab';
 import {AcceptanceComparison,AcceptancePanel} from './acceptance-panel';
 import {ObservationPanel} from './observation-panel';
 import {useEffect,useState} from 'react';
 import {errorMessage,request} from './console';
-import {compareSecurity,evaluateSecurity,releaseQuery,ruleVersion,type ReleaseReference,type Evidence} from './security-rules';
+import {compareSecurity,compareSummary,evaluateSecurity,releaseQuery,ruleVersion,type ReleaseReference,type Evidence} from './security-rules';
 import {caption,date,saveDownload,type Report} from './reports';
 import {parameterKey} from './compare';
 import {BaselineDialog,BaselineLibrary,useBaselines,type Baseline} from './baselines';
@@ -111,11 +113,19 @@ export function SecurityPage(){
   const evidence=new Map(inspected?.report.parameters?.map(row=>[parameterKey(row),row]));
   const legacy=new Map(inspected?.report.schemaVersion===1?inspected.report.metrics.map(row=>[row.key,row]):[]);
   const priority={review:0,unknown:1,observed:2,context:3};
-  const checks=inspected?evaluateSecurity(inspected.report,query?(publication?.query===query?publication.result:{state:'loading'}):undefined)
+  const signerReference:ReleaseReference|undefined=query?(publication?.query===query?publication.result:{state:'loading'}):undefined;
+  const assessment=inspected?assessRisk(inspected,signerReference,registeredUnlock(inspected,left,profile,selection.expectUnlock)):undefined;
+  const checks=inspected?evaluateSecurity(inspected.report,signerReference)
+    .map(check=>check.id==='boot'&&assessment?.rules.find(rule=>rule.code==='BOOT_STATE')?.state==='expected'?
+      {...check,state:'context' as const,finding:'本次观察到解锁，符合已选同资产实验基线的登记预期。'}:check)
     .sort((a,b)=>priority[a.state]-priority[b.state]):[];
   const changes=left&&inspected?compareSecurity(left.report.parameters??[],inspected.report.parameters??[],expectUnlock&&pair):[];
   const result=left&&inspected?regressionResult(left,inspected,changes,{sameAsset:pair,expectUnlock,
     baseline:profile?{id:profile.id,name:profile.name}:undefined,expectedNetwork:profile?.expectedNetwork}):undefined;
+  const summary=compareSummary(changes);
+  const reviewRows=changes.filter(row=>row.verdict==='review').length;
+  const categoryOutline=Object.entries(summary.byCategory).map(([category,counts])=>
+    `${changeCategories[category]} 一致 ${counts.unchanged} / 变化 ${counts.changed} / 受限 ${counts.restricted} / 未归档 ${counts.notArchived} / 证据不足 ${counts.insufficient}`).join('；');
   const evidencePanel=<section className="security-results" aria-label="安全检查结果">
     <div className="pane-title"><div><h2>当前样本证据</h2>
       <p className="muted">{checks.filter(c=>c.state==='review').length} 项建议复核 · {checks.filter(c=>c.state==='unknown').length} 项证据不足 · 未进行硬件证明 · {ruleVersion}</p></div></div>
@@ -164,6 +174,7 @@ export function SecurityPage(){
           {showCurrentPicker&&<ReportPicker label="分析样本" value={id} select={chooseCurrent} exclude={baseline}
             fallback={inspected.report.model}/>}
         </section>
+        {assessment&&<RiskPanel key={inspected.id} data={assessment}/>}
         {notice&&<p className="panel inset" role="status">{notice}</p>}
         {retest&&<section className="panel security-change" aria-label="安全变化对比">
           <div className="pane-title"><div><h2>{baseline?'安全变化对比':'选择复测基线'}</h2>
@@ -175,6 +186,9 @@ export function SecurityPage(){
               `SigMark-regression-${id.slice(0,8)}.json`)}>导出对比 JSON</button>}
             <button className="text-button" type="button" onClick={()=>changeSelection({baseline:'',saved:'',expectUnlock:undefined,retest:false})}>退出复测</button>
             </div></div>
+          {left&&!referenceError&&<p className="muted comparison-summary" aria-label="安全对照汇总" title={categoryOutline}>
+            共 {summary.total} 项对照 · 一致 {summary.unchanged} · 变化 {summary.changed} · 建议复核 {reviewRows} · 受限 {summary.restricted} · 一侧未归档 {summary.notArchived} · 证据不足 {summary.insufficient}
+          </p>}
           {!baseline&&<div className="baseline-picker">
             <h3>同设备的已保存基线</h3>
             {library.loading?<p className="muted" role="status">正在读取已保存基线…</p>:
@@ -211,7 +225,7 @@ export function SecurityPage(){
               <div className="stats-table-scroll" role="region" aria-label="安全证据对照表，可横向滚动" tabIndex={0}>
                 <table className="security-compare-table"><thead><tr><th>证据</th><th>基线读数</th><th>当前读数</th><th>结果</th></tr></thead>
                   <tbody>{changes.map(row=>
-                    <tr key={row.key}><th scope="row">{row.title}<small><code>{row.key}</code></small></th>
+                    <tr key={row.key}><th scope="row">{row.title}<small><code>{row.key}</code> · {changeCategories[row.category]}</small></th>
                       <td><CompareEvidence evidence={row.baseline}/></td><td><CompareEvidence evidence={row.current}/></td>
                       <td><b className={row.verdict==='review'?'security-review':undefined}>{changeLabels[row.verdict]}</b><small>{row.note}</small></td>
                     </tr>)}</tbody></table>
@@ -230,7 +244,9 @@ export function SecurityPage(){
   </main>;
 }
 
-const changeLabels={unchanged:'读数一致',changed:'读数变化',review:'建议复核',expected:'预期变化',insufficient:'证据不足'};
+const changeLabels={unchanged:'读数一致',changed:'读数变化',review:'建议复核',expected:'预期变化',context:'读取依据变化',
+  insufficient:'证据不足',not_archived:'一侧未归档',restricted:'受限'};
+const changeCategories:Record<string,string>={boot:'启动链',rom:'ROM 与系统',runtime:'运行时',protection:'保护状态',identity:'身份声明'};
 function CompareEvidence({evidence}:{evidence?:Evidence}){
   if(!evidence)return <small>未归档</small>;
   return <><span>{evidence.value??caption(evidence.status)}</span>

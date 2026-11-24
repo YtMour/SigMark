@@ -216,6 +216,8 @@ class MainActivity : ComponentActivity() {
                 SigMarkScreen(screenState, upload, saved, { viewModel.collectAll(decorate, it) }, viewModel::selectReport, viewModel::removeReport, viewModel::setAssociation,
                     viewModel::setFeedback, viewModel::submitUpload, onTestKey = { viewModel.testKey(decorate) }, onRefresh = { viewModel.refresh(refreshRadio = true, decorate = decorate) },
                     onRoute = { viewModel.collectAll(decorate, CapturePlan.NETWORK, it) },
+                    onUsb = { viewModel.collectAll(decorate, CapturePlan.USB, usb=it) },
+                    onGnss = { viewModel.collectAll(decorate, CapturePlan.GNSS, gnss=it) },
                     access = access, permissionFeedback = permissionFeedback, onCellPermission = {
                     requestNetworkPermission(Manifest.permission.ACCESS_FINE_LOCATION)
                 }, onAppSettings = ::openAppSettings, onLocationSettings = {
@@ -242,6 +244,8 @@ private fun SigMarkScreen(
     onTestKey: () -> Unit,
     onRefresh: () -> Unit,
     onRoute: (RouteCheck) -> Unit,
+    onUsb: (com.sigmark.app.collector.UsbCheck) -> Unit,
+    onGnss: (com.sigmark.app.collector.GnssCheck) -> Unit,
     access: CollectionAccess,
     permissionFeedback: String?,
     onCellPermission: () -> Unit,
@@ -254,6 +258,7 @@ private fun SigMarkScreen(
     var query by rememberSaveable { mutableStateOf("") }
     var selected by rememberSaveable { mutableStateOf("all") }
     var issuesOnly by rememberSaveable { mutableStateOf(false) }
+    var hardwareOnly by rememberSaveable { mutableStateOf(false) }
     var showExportConfirmation by rememberSaveable { mutableStateOf(false) }
     var showCellExplanation by rememberSaveable { mutableStateOf(false) }
     var showSensors by rememberSaveable { mutableStateOf(false) }
@@ -263,6 +268,9 @@ private fun SigMarkScreen(
     var showMediaProbe by rememberSaveable { mutableStateOf(false) }
     var showPlans by rememberSaveable { mutableStateOf(false) }
     var showRouteExperiment by rememberSaveable { mutableStateOf(false) }
+    var showUsbExperiment by rememberSaveable { mutableStateOf(false) }
+    var showGnssCheck by rememberSaveable { mutableStateOf(false) }
+    var showConfigurationEvidence by rememberSaveable { mutableStateOf(false) }
     var showSecurity by rememberSaveable { mutableStateOf(false) }
     var showRecheck by rememberSaveable { mutableStateOf(false) }
     var showTools by remember { mutableStateOf(false) }
@@ -272,13 +280,20 @@ private fun SigMarkScreen(
     var showShelf by rememberSaveable { mutableStateOf(false) }
     val snapshot = state.snapshot
     val busy = state.refreshing || state.testingKey || state.saving || upload?.sending == true
+    val lanEnabled = BuildConfig.DEBUG && BuildConfig.LAN_ORIGIN.isNotEmpty()
     val issueCount = snapshot?.sections?.sumOf { section ->
         section.items.count { it.status != ValueStatus.AVAILABLE }
     } ?: 0
-    val sections = remember(snapshot, query, selected, issuesOnly) {
+    val hardware = remember(snapshot) {
+        snapshot?.sections.orEmpty().flatMap { section -> section.items.filter {
+            "${section.key}.${it.key}" in com.sigmark.app.collector.expandedHardwareKeys
+        } }
+    }
+    val sections = remember(snapshot, query, selected, issuesOnly, hardwareOnly) {
         snapshot?.sections?.filter { selected == "all" || it.key == selected }
                     ?.mapNotNull { section ->
                 val matches = section.items.filter { item ->
+                    (!hardwareOnly || "${section.key}.${item.key}" in com.sigmark.app.collector.expandedHardwareKeys) &&
                     (!issuesOnly || item.status != ValueStatus.AVAILABLE) &&
                     (query.isBlank() || listOf(section.title, item.label, item.value.orEmpty(),
                         item.source, item.note.orEmpty(), item.status.name, item.key)
@@ -313,7 +328,6 @@ private fun SigMarkScreen(
                     OverviewCard(snapshot)
                     if (snapshot == null && saved.isNotEmpty()) OutlinedButton(onClick = { showShelf = true }) { Text("上传报告") }
                     if (snapshot != null) {
-                        val lanEnabled = BuildConfig.DEBUG && BuildConfig.LAN_ORIGIN.isNotEmpty()
                         Row(Modifier.fillMaxWidth().padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Button(enabled = !busy, onClick = { onCollectAll(CapturePlan.STANDARD) }, modifier = Modifier.weight(1f)) { Text("整体获取") }
                             if (lanEnabled) OutlinedButton(enabled = !busy, onClick = { showShelf = true }, modifier = Modifier.weight(1f)) {
@@ -324,6 +338,7 @@ private fun SigMarkScreen(
                             1 -> "正在采集设备参数"
                             2 -> "正在进行密钥保护自测"
                             3 -> "正在验证固定样片首帧"
+                            4 -> "正在进行图形离屏回读实测"
                             else -> if (!lanEnabled) "采集设备与安全信息，结果只在本机查看。"
                                 else saved.firstOrNull()?.let { "最近保存：" + networkLabel(it.network) + " · " +
                                     java.text.DateFormat.getTimeInstance().format(Date(it.time)) + "　待上传 " + saved.count { row -> !row.sent } + " 份" }
@@ -332,6 +347,14 @@ private fun SigMarkScreen(
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             OutlinedButton(enabled = !busy, onClick = { onCollectAll(CapturePlan.ROM) }, modifier = Modifier.weight(1f)) { Text("ROM 验收") }
                             OutlinedButton(enabled = !busy, onClick = { showRouteExperiment = true }, modifier = Modifier.weight(1f)) { Text("网络切换实验") }
+                        }
+                        if (hardware.isNotEmpty()) {
+                            OutlinedButton(onClick = { hardwareOnly = !hardwareOnly; query = ""; issuesOnly = false; selected = "all" },
+                                modifier = Modifier.fillMaxWidth()) {
+                                Text(if (hardwareOnly) "返回全部采集项" else "查看扩展采集 · ${hardware.size} 项")
+                            }
+                            Text("扩展采集：${hardware.count { it.status == ValueStatus.AVAILABLE }} 项有值 / ${hardware.size} 项已记录；图形实测随 ROM 验收保存。",
+                                color = Muted, fontSize = 12.sp)
                         }
                         TextButton(enabled = !busy, onClick = { showPlans = true }) { Text("选择验收方案") }
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -345,6 +368,9 @@ private fun SigMarkScreen(
                                     DropdownMenuItem(text = { Text("实时传感器") }, onClick = { showTools = false; showSensors = true })
                                     DropdownMenuItem(text = { Text("可见应用") }, onClick = { showTools = false; showVisibleApps = true })
                                     DropdownMenuItem(text = { Text("视频解码实测") }, onClick = { showTools = false; showMediaProbe = true })
+                                    DropdownMenuItem(text = { Text("USB 插拔实验") }, onClick = { showTools = false; showUsbExperiment = true })
+                                    DropdownMenuItem(text = { Text("GNSS 读数核对") }, onClick = { showTools = false; showGnssCheck = true })
+                                    DropdownMenuItem(text = { Text("机器码与节点证据") }, onClick = { showTools = false; showConfigurationEvidence = true })
                                 }
                             }
                         }
@@ -402,7 +428,7 @@ private fun SigMarkScreen(
                         Text("没有匹配的采集项", color = Color.White, fontSize = 15.sp)
                         Spacer(Modifier.height(5.dp))
                         Text("可清除搜索、关闭待确认筛选或切换分类", color = Muted, fontSize = 12.sp)
-                        TextButton(onClick = { query = ""; issuesOnly = false; selected = "all" }) {
+                        TextButton(onClick = { query = ""; issuesOnly = false; hardwareOnly = false; selected = "all" }) {
                             Text("重置筛选", color = Teal)
                         }
                     }
@@ -410,8 +436,9 @@ private fun SigMarkScreen(
             } else {
                 items(sections, key = { it.key }) { section ->
                     SectionCard(section, Modifier.padding(horizontal = 16.dp),
-                        showAll = query.isNotBlank() || selected != "all" || issuesOnly,
-                        access = access, busy = busy, onAccessAction = openAccessAction)
+                        showAll = query.isNotBlank() || selected != "all" || issuesOnly || hardwareOnly,
+                        access = access, busy = busy, onAccessAction = openAccessAction,
+                        onGnssCheck = { showGnssCheck = true })
                 }
             }
             item {
@@ -474,13 +501,26 @@ private fun SigMarkScreen(
     if (showMediaProbe) MediaProbePanel { showMediaProbe = false }
     if (showRouteExperiment) RouteExperimentPanel(busy = busy, onSave = { showRouteExperiment = false; onRoute(it) },
         onClose = { showRouteExperiment = false })
+    if (showUsbExperiment) UsbExperimentPanel(busy, onSave={showUsbExperiment=false;onUsb(it)},onClose={showUsbExperiment=false})
+    if (showGnssCheck) GnssCheckPanel(snapshot?.sections?.firstOrNull { it.key == "system" }?.items.orEmpty(),
+        access, busy, lanEnabled, onCellPermission, onLocationSettings,
+        onSave={showGnssCheck=false;onGnss(it)},onClose={showGnssCheck=false})
+    if (showConfigurationEvidence) ConfigurationEvidencePanel(snapshot,busy,state.error,lanEnabled,onRefresh) { showConfigurationEvidence=false }
     if (showPlans) AlertDialog(
         onDismissRequest = { showPlans = false },
         title = { Text("选择验收方案") },
         text = { Column(Modifier.verticalScroll(rememberScrollState())) {
             Text("每次运行保存独立采样。选「上传报告」并确认后才发送。")
             CapturePlan.entries.forEach { plan ->
-                TextButton(enabled = !busy, onClick = { showPlans = false; onCollectAll(plan) }) { Text(plan.title) }
+                TextButton(enabled = !busy, onClick = {
+                    showPlans=false
+                    when(plan) {
+                        CapturePlan.USB -> showUsbExperiment=true
+                        CapturePlan.GNSS -> showGnssCheck=true
+                        CapturePlan.NETWORK -> showRouteExperiment=true
+                        else -> onCollectAll(plan)
+                    }
+                }) { Text(plan.title) }
                 Text(plan.description, style = MaterialTheme.typography.bodySmall)
             }
         } },
@@ -622,7 +662,7 @@ private fun CategoryChip(key: String, title: String, selected: String, onSelect:
 
 @Composable
 private fun SectionCard(section: DeviceSection, modifier: Modifier = Modifier, showAll: Boolean,
-    access: CollectionAccess, busy: Boolean, onAccessAction: (AccessAction) -> Unit) {
+    access: CollectionAccess, busy: Boolean, onAccessAction: (AccessAction) -> Unit, onGnssCheck: () -> Unit) {
     var expanded by rememberSaveable(section.key) { mutableStateOf(false) }
     val visibleItems = if (showAll || expanded || section.items.size <= 5) section.items else
         (section.items.take(5) + section.items.filter { it.status != ValueStatus.AVAILABLE })
@@ -642,7 +682,7 @@ private fun SectionCard(section: DeviceSection, modifier: Modifier = Modifier, s
             visibleItems.forEachIndexed { index, item ->
                 if (index > 0) HorizontalDivider(color = Stroke,
                     modifier = Modifier.padding(horizontal = 14.dp))
-                InfoRow(item)
+                InfoRow(item, onGnssCheck.takeIf { section.key == "system" && item.key == "gnssHardwareYear" && !busy })
                 collectionAction(Build.VERSION.SDK_INT, section.key, item, access)?.let { action ->
                     TextButton(enabled = !busy, onClick = { onAccessAction(action) },
                         modifier = Modifier.padding(horizontal = 5.dp)) { Text(action.title) }
@@ -662,7 +702,7 @@ private fun SectionCard(section: DeviceSection, modifier: Modifier = Modifier, s
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun InfoRow(item: DeviceInfoItem) {
+private fun InfoRow(item: DeviceInfoItem, onReview: (() -> Unit)? = null) {
     var expanded by rememberSaveable(item.key) { mutableStateOf(false) }
     val context = LocalContext.current
     val clipboard = context.getSystemService(ClipboardManager::class.java)
@@ -703,5 +743,6 @@ private fun InfoRow(item: DeviceInfoItem) {
                 fontSize = 11.sp, lineHeight = 15.sp,
                 modifier = Modifier.padding(top = 5.dp))
         }
+        if (expanded && onReview != null) TextButton(onClick = onReview) { Text("核对 GNSS 读数") }
     }
 }

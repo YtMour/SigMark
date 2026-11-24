@@ -52,8 +52,21 @@ internal fun LanReportDialog(upload: SampleUpload, onAssociate: (Boolean) -> Uni
                         Text("发送到：" + BuildConfig.LAN_ORIGIN + "（内网，传输未加密）")
                         Text("包含设备型号、系统、网络及安全检查结果，共 " + data.parameters.size + " 项明细。不发送密钥、应用清单或手机号码。")
                         if (data.fieldSetVersion >= 9) Text("含采集时的授权状态；仅在运行 ROM 验收后包含样片结果、解码器名称和耗时，不发送视频或位置。")
+                        if (data.fieldSetVersion >= 11) Text("包含 App 进程位宽、可见内核架构、接口声明和外接输入类别；不发送外设名称、标识或输入内容。")
+                        if (data.fieldSetVersion >= 12) {
+                            val expanded = data.parameters.count { "${it.group}.${it.key}" in com.sigmark.app.collector.expandedHardwareKeys }
+                            Text("扩展采集已记录 $expanded 项：GNSS 硬件能力、输入和 Camera2 声明、传感器汇总；ROM 验收另含图形实测。无坐标、图像或原始传感器样本。")
+                        }
                         if (data.parameters.any { it.group == "network" && it.key == "checkStartTransport" })
                             Text("此报告另含切换实验的起点、终点默认网络、验证结果和观测间隔。不含 IP、SSID 或位置。")
+                        if (data.fieldSetVersion >= 13) Text("主动实验可含墙钟起止时间。USB 实验只含数量、观测间隔和结果，不含外设名称、标识或内容。")
+                        if (data.fieldSetVersion >= 14) Text("GNSS 归档包含系统型号年、接口声明；主动实测仅包含回调有无、授权条件与时间。不上传型号名称、坐标、卫星标识或原始测量。")
+                        if (data.fieldSetVersion >= 15) Text("归档可含三个固定只读节点的技术读数或拒绝原因。机器码不在上传正文中；后台可按已归档的商品和 ROM 字段计算同版配置码。")
+                        if (data.fieldSetVersion >= 16) Text("可包含电池存在状态、循环次数、默认数据订阅的服务状态与载波带宽状态。不包含 SIM 编号、小区标识或位置。")
+                        if (data.fieldSetVersion >= 17) Text("可包含本进程映射的 Hook/注入线索、内核 TracerPid、系统分区挂载线索、可见的 Root 管理应用、运行用户环境、DRM 保护级别、dm-verity 与可调试声明、分区构建日期和 SELinux 读取依据。均为本应用自身的状态观察，不含其他进程、应用清单或 ANDROID_ID。")
+                        if (data.fieldSetVersion >= 18) Text("可包含设备初始 API 级别；Android 8/9 的分区构建指纹来自只读属性。")
+                        if (data.fieldSetVersion >= 19) Text("可包含平台代号、启动硬件与硬件 SKU 三项只读声明；它们与 Build 字段分列上传，用于发现同一设备内部的声明不一致。")
+                        if (data.fieldSetVersion >= 20) Text("可包含系统开机次数与媒体性能等级声明；开机次数会随冷启动递增并在清数据后重置。")
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Checkbox(checked = upload.associate, enabled = !upload.attempted, onCheckedChange = onAssociate)
                             Text("关联到同一设备资产")

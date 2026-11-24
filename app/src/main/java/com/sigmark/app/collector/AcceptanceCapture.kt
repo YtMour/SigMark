@@ -8,8 +8,10 @@ import com.sigmark.app.model.ReadReason
 
 internal enum class CapturePlan(val code: String, val title: String, val description: String) {
     STANDARD("standard", "标准采集", "采集设备参数和临时密钥保护结果，不运行视频实测。"),
-    ROM("rom", "ROM 验收", "采集设备参数、密钥保护和固定 H.264 样片首帧结果。"),
-    NETWORK("network", "网络复测", "保存一次当前链路的采样及采集时授权状态；不会自动切换网络。")
+    ROM("rom", "ROM 验收", "采集设备参数、密钥保护、H.264 首帧及 GLES 离屏回读实测。"),
+    NETWORK("network", "网络复测", "保存一次当前链路的采样及采集时授权状态；不会自动切换网络。"),
+    USB("usb", "USB 插拔实验", "手动记录插拔前后两次 USB 主机可见设备数量。"),
+    GNSS("gnss", "GNSS 读数核对", "核对系统型号年并主动观察 GNSS 回调。不保存坐标或原始测量。")
 }
 
 internal fun collectionContext(access: CollectionAccess): List<DeviceInfoItem> {

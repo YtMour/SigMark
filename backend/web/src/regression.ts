@@ -35,7 +35,7 @@ export function regressionResult(reference:Report,current:Report,changes:Change[
     }else if(left)counts.baselineOnly++;
     else counts.currentOnly++;
   }
-  const verdicts={review:0,expected:0,insufficient:0,changed:0,unchanged:0};
+  const verdicts={review:0,expected:0,insufficient:0,changed:0,unchanged:0,context:0,not_archived:0,restricted:0};
   for(const item of changes)verdicts[item.verdict]++;
   return {schemaVersion:1,ruleVersion,kind:'sigmark.regression',baseline:describe(reference),current:describe(current),
     savedBaseline:options.baseline??null,

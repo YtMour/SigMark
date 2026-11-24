@@ -43,3 +43,24 @@ CREATE TABLE IF NOT EXISTS regression_baselines (
 CREATE UNIQUE INDEX IF NOT EXISTS regression_baseline_name ON regression_baselines (lower(name));
 ALTER TABLE regression_baselines ADD COLUMN IF NOT EXISTS expected_network varchar(12) NOT NULL DEFAULT ''
   CHECK (expected_network IN ('','wifi','cellular','ethernet','vpn','none'));
+
+-- IDs/digests needed for the bounded undo window, separate from public audit.
+CREATE TABLE IF NOT EXISTS asset_merge_operations (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  source_id uuid NOT NULL,
+  target_id uuid NOT NULL,
+  source_label varchar(60) NOT NULL,
+  source_created_at timestamptz NOT NULL,
+  source_title text NOT NULL,
+  target_title text NOT NULL,
+  active_moved bigint NOT NULL,
+  trash_moved bigint NOT NULL,
+  baselines_moved bigint NOT NULL,
+  installs_moved bigint NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  undone_at timestamptz,
+  target_guard text NOT NULL,
+  report_ids text[] NOT NULL,
+  install_digests text[] NOT NULL
+);
+CREATE INDEX IF NOT EXISTS asset_merge_operations_recent ON asset_merge_operations(created_at DESC,id DESC);

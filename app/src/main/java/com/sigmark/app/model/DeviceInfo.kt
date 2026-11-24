@@ -17,6 +17,7 @@ fun unavailableLabel(reason: ReadReason?): String = when (reason) {
     ReadReason.INTERFACE_UNSUPPORTED -> "当前接口不提供"
     ReadReason.MODEM_NOT_REPORTED -> "调制解调器未上报"
     ReadReason.NO_REGISTERED_LTE -> "无已注册 LTE 小区"
+    ReadReason.NOT_REPORTED -> "系统未上报"
     else -> "暂无数据"
 }
 

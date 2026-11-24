@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 )
 
 const labHistoryLimit = 12
@@ -35,7 +36,26 @@ type labReportSheet struct {
 	History       []storedReport `json:"history"`
 	HistoryLimit  int            `json:"historyLimit"`
 	HasEarlier    bool           `json:"hasEarlier"`
+	Registered    []labBaseline  `json:"registeredBaselines"`
+	Selected      *storedReport  `json:"registeredReport,omitempty"`
 }
+
+type labBaseline struct {
+	ID              string `json:"id"`
+	Name            string `json:"name"`
+	ReportID        string `json:"reportId"`
+	ExpectUnlock    bool   `json:"expectUnlock"`
+	ExpectedNetwork string `json:"expectedNetwork"`
+	State           string `json:"state"`
+}
+
+// Registered baselines need not be within the 12 most recent samples. The
+// relationship and eligibility come from the archive, never model strings or URL flags.
+const labBaselineSQL = `SELECT b.id,b.name,b.report_id,b.expect_unlock,b.expected_network
+ FROM regression_baselines b JOIN reports r ON r.id=b.report_id
+ WHERE r.asset_id=$1 AND r.trashed_at IS NULL AND
+ (r.body->>'capturedAtEpochMs')::bigint<$2 AND r.received_at<=$3
+ ORDER BY b.created_at DESC,b.id DESC`
 
 func (s server) labReport(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
@@ -43,15 +63,26 @@ func (s server) labReport(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "invalid_report_id")
 		return
 	}
+	saved := r.URL.Query().Get("saved")
+	if saved != "" && !requestPattern.MatchString(saved) {
+		fail(w, 400, "invalid_baseline")
+		return
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), 4*time.Second)
 	defer cancel()
-	rows, err := s.db.Query(ctx, labReportSQL, id, labHistoryLimit+1)
+	tx, err := s.db.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
+	if err != nil {
+		fail(w, 503, "storage_unavailable")
+		return
+	}
+	defer tx.Rollback(ctx)
+	rows, err := tx.Query(ctx, labReportSQL, id, labHistoryLimit+1)
 	if err != nil {
 		fail(w, 503, "storage_unavailable")
 		return
 	}
 	defer rows.Close()
-	out := labReportSheet{SchemaVersion: 1, HistoryLimit: labHistoryLimit, History: []storedReport{}}
+	out := labReportSheet{SchemaVersion: 1, HistoryLimit: labHistoryLimit, History: []storedReport{}, Registered: []labBaseline{}}
 	for rows.Next() {
 		var anchor bool
 		var p storedReport
@@ -73,6 +104,13 @@ func (s server) labReport(w http.ResponseWriter, r *http.Request) {
 		fail(w, 404, "report_not_found")
 		return
 	}
+	rows.Close()
+	if out.Current.AssetID != nil {
+		if err := loadLabBaselines(ctx, tx, &out, saved); err != nil {
+			fail(w, 503, "storage_unavailable")
+			return
+		}
+	}
 	// The UNION does not promise result order. Put newest capture first, with
 	// deterministic receipt and report identifiers for ties.
 	sort.Slice(out.History, func(i, j int) bool {
@@ -90,4 +128,34 @@ func (s server) labReport(w http.ResponseWriter, r *http.Request) {
 		out.History = out.History[:labHistoryLimit]
 	}
 	send(w, 200, out)
+}
+
+func loadLabBaselines(ctx context.Context, tx pgx.Tx, out *labReportSheet, saved string) error {
+	rows, err := tx.Query(ctx, labBaselineSQL, *out.Current.AssetID, out.Current.Report.CapturedAt, out.Current.Received)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	selectedID := ""
+	for rows.Next() {
+		b := labBaseline{State: "ready"}
+		if err := rows.Scan(&b.ID, &b.Name, &b.ReportID, &b.ExpectUnlock, &b.ExpectedNetwork); err != nil {
+			return err
+		}
+		out.Registered = append(out.Registered, b)
+		if b.ID == saved {
+			selectedID = b.ReportID
+		}
+	}
+	if err = rows.Err(); err != nil || selectedID == "" {
+		return err
+	}
+	rows.Close()
+	p := new(storedReport)
+	if err = tx.QueryRow(ctx, `SELECT id,batch,received_at,body,asset_id FROM reports WHERE id=$1`, selectedID).
+		Scan(&p.ID, &p.Batch, &p.Received, &p.Report, &p.AssetID); err != nil {
+		return err
+	}
+	out.Selected = p
+	return nil
 }

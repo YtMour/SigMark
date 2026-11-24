@@ -2,19 +2,48 @@ package com.sigmark.app.collector
 
 import com.sigmark.app.model.DeviceInfoItem
 import com.sigmark.app.model.ReadReason
+import com.sigmark.app.model.ValueStatus
 import java.util.Locale
+
+// Linux mode bits used for the DAC check. The values are fixed by the ABI and
+// are declared here so JVM unit tests never depend on the Android stubs.
+private const val otherExecute = 0x001 // S_IXOTH
+private const val otherRead = 0x004    // S_IROTH
+private const val eaccesErrno = 13
+private const val enoentErrno = 2
+private const val directoryPath = "/sys/fs/selinux"
+private const val enforcePath = "/sys/fs/selinux/enforce"
+
+// Read result plus the evidence code written to system.selinuxEvidence.
+internal data class SelinuxVerdict(val mode: ReadResult<String>, val evidence: ReadResult<String>)
 
 internal object SelinuxProbe {
     fun collect(): List<DeviceInfoItem> {
-        val result = modeResult(SafeReader.node(SafeReader.Node.SELINUX_ENFORCE))
+        val verdict = probe()
         val policy = SafeReader.node(SafeReader.Node.SELINUX_POLICY)
         return listOf(
-            result.item("selinux", "SELinux 实时模式"),
-            policy.copy(detail = listOfNotNull(policy.detail, "仅探测节点可打开性。读取二进制策略内容还需要独立的 security:read_policy 授权。").joinToString(" "))
-                .item("selinuxPolicy", "SELinux 策略节点"),
+            verdict.mode.item("selinux", "SELinux 实时模式"),
+            verdict.evidence.item("selinuxEvidence", "SELinux 读取依据"),
+            policy.copy(detail = listOfNotNull(policy.detail,
+                "仅探测节点可打开性。读取二进制策略内容还需要独立的 security:read_policy 授权。",
+                "AOSP 对普通应用固定拒绝 selinuxfs 的打开与读取（neverallow），印迹内没有可授予的权限；" +
+                    "要精确读取或读取策略内容只能用 root 或 Shizuku（shell 域）。")
+                .joinToString(" ")).item("selinuxPolicy", "SELinux 策略节点"),
             property("selinuxBootHint", "SELinux 启动属性（参考）", SafeReader.Property.SELINUX_BOOT),
             property("selinuxBuildHint", "SELinux 构建属性（参考）", SafeReader.Property.SELINUX_BUILD),
         )
+    }
+
+    internal fun probe(): SelinuxVerdict {
+        val enforce = SafeReader.node(SafeReader.Node.SELINUX_ENFORCE)
+        if (enforce.value != null) return selinuxVerdict(enforce, null, null)
+        // EACCES only proves a MAC denial when DAC would have allowed the read.
+        if (enforce.errno == eaccesErrno) {
+            val directory = SafeReader.statMode(directoryPath).value
+            val file = SafeReader.statMode(enforcePath).value
+            return selinuxVerdict(enforce, directory, file)
+        }
+        return selinuxVerdict(enforce, null, null)
     }
 
     internal fun modeResult(mode: ReadResult<String>): ReadResult<String> {
@@ -53,3 +82,54 @@ internal object SelinuxProbe {
         else -> null
     }
 }
+
+// Pure DAC decision: a directory needs other search (x) and enforce needs
+// other read (r) for an EACCES to be attributable to MAC rather than DAC.
+internal fun dacAllowsOtherRead(directoryMode: Int?, fileMode: Int?): Boolean =
+    directoryMode != null && fileMode != null &&
+        (directoryMode and otherExecute) != 0 && (fileMode and otherRead) != 0
+
+internal fun selinuxVerdict(open: ReadResult<String>, directoryMode: Int?, fileMode: Int?): SelinuxVerdict {
+    val raw = open.value?.trim()
+    if (raw != null) {
+        val decoded = SelinuxProbe.decodeMode(raw)
+        if (decoded != null) return SelinuxVerdict(
+            open.copy(value = decoded.first, detail = decoded.second),
+            evidence("exact", "已直接读取 enforce 节点，值为 $raw；这是直接读数。"),
+        )
+        return SelinuxVerdict(
+            SafeReader.missing(open.source, ReadReason.INVALID_VALUE,
+                "节点可读，但没有返回标准 0/1。实时模式未确认。"),
+            unconfirmedEvidence("节点内容不是标准 0/1，无法确认读取依据。"),
+        )
+    }
+    if (open.errno == eaccesErrno) {
+        if (dacAllowsOtherRead(directoryMode, fileMode)) return SelinuxVerdict(
+            ReadResult("Enforcing（强制模式，推断）", ValueStatus.AVAILABLE, open.source,
+                "EACCES 但 DAC 允许读取，permissive 下本应可读，因此只可能被 SELinux 策略拒绝。" +
+                    "selinuxfs 目录与 enforce 的 stat 显示 other 有搜索／读权限；这是推断，不是直接读数。"),
+            evidence("inferred_mac", "未直接读到 enforce；EACCES 与 DAC 元数据共同指向 SELinux 策略拒绝，属推断值。"),
+        )
+        return SelinuxVerdict(
+            open.copy(detail = listOfNotNull(open.detail,
+                "DAC 未证明 other 可读，无法把 EACCES 归因于 SELinux 策略。本机实时模式未确认。").joinToString(" ")),
+            unconfirmedEvidence("DAC 本身不允许读取或无法取得元数据，不能断定是 SELinux 策略拒绝。"),
+        )
+    }
+    if (open.errno == enoentErrno) return SelinuxVerdict(
+        ReadResult("未启用（推断）", ValueStatus.AVAILABLE, open.source,
+            "enforce 节点返回 ENOENT（节点不存在），推断内核未启用 SELinux 或未挂载 selinuxfs。这是推断，不是直接读数。"),
+        evidence("inferred_disabled", "enforce 节点不存在，推断为未启用；这是推断值。"),
+    )
+    return SelinuxVerdict(
+        open.copy(detail = listOfNotNull(open.detail,
+            "只有 EACCES 且 DAC 允许读取、或 ENOENT 才支持推断。本机实时模式未确认。").joinToString(" ")),
+        unconfirmedEvidence("当前 errno 或状态不足以推断 SELinux 模式，读取依据未确认。"),
+    )
+}
+
+private fun evidence(code: String, detail: String): ReadResult<String> =
+    ReadResult(code, ValueStatus.AVAILABLE, enforcePath, detail)
+
+private fun unconfirmedEvidence(detail: String): ReadResult<String> =
+    SafeReader.missing(enforcePath, ReadReason.INVALID_VALUE, detail)

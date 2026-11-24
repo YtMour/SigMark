@@ -10,7 +10,20 @@
 .report-options summary { color: var(--mint); }
 .report-options .actions { padding-block: .6rem; }
 .report-options small { flex-basis: 100%; overflow-wrap: anywhere; }
+.report-recovered { border-inline-start: 2px solid var(--border); padding-inline-start: .8rem; display: grid; gap: .45rem; overflow-wrap: anywhere; }
+.report-recovered p { margin: .25rem 0; }
+.report-recovered summary { cursor: pointer; }
+.report-recovered dl { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(100%,15rem),1fr)); gap: .55rem; }
+.report-recovered dd { margin-inline-start: 0; }
+.report-recovered dd small { display: block; color: var(--muted); }
 .reading-panel > .inspector-tabs { margin: 0; padding-inline: .8rem; }
+.capture-extension { display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: start;
+  gap: .45rem .8rem; padding: .75rem 1rem; border-block-end: 1px solid var(--line-subtle); overflow-wrap: anywhere; }
+.capture-extension h2,.capture-extension p { margin: 0; }
+.capture-extension h2 { font-size: 1.05rem; }
+.capture-extension :is(details,small) { grid-column: 1/-1; }
+.capture-extension summary { cursor: pointer; color: var(--mint); }
+.capture-extension button[aria-pressed=true] { color: var(--mint); border-color: var(--mint); }
 .reader-controls { display: grid; gap: .65rem; padding: .85rem 1rem; }
 .reader-search { display: grid; grid-template-columns: minmax(0,1fr) minmax(10rem,18rem); gap: .7rem; align-items: end; }
 .reader-states { display: flex; align-items: center; gap: .35rem; flex-wrap: wrap; }
@@ -40,11 +53,16 @@
 .field-evidence dl { margin: 0 1rem; padding: .55rem 0 .85rem; border-block-start: 1px dashed var(--border); display: grid; grid-template-columns: auto minmax(0,1fr); gap: .3rem .8rem; }
 .field-evidence dt { color: var(--muted); }
 .field-evidence dd { margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+.gnss-audit { margin: 0 1rem .8rem; padding-block: .55rem; border-block-start: 1px solid var(--border); overflow-wrap: anywhere; }
+.gnss-audit > p { margin: .5rem 0; }
+.gnss-audit > ul > li { padding-block: .4rem; }
+.gnss-audit dl { margin: .5rem 0 0; grid-template-columns: repeat(auto-fit,minmax(min(100%,13rem),1fr)); }
 .reading-workspace :is(summary,h2):focus-visible { outline: 2px solid var(--mint); outline-offset: -2px; }
 .reading-workspace .table-wrap { max-height: none; }
 @container reading (max-width: 42rem) {
   .reading-identity { margin-inline-start: 0; text-align: start; }
   .reader-search { grid-template-columns: minmax(0,1fr); }
+  .capture-extension { grid-template-columns: minmax(0,1fr); }
   .reader-states small { flex-basis: 100%; margin: 0; }
   .field-evidence summary { grid-template-columns: minmax(0,1fr) auto auto; grid-template-areas: "label status cue" "reading reading reading"; }
 }

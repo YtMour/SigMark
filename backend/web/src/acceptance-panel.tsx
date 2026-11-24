@@ -4,7 +4,7 @@ import {acceptance,acceptanceComparison} from './acceptance';
 
 const titles={plan:'采样方案',phone:'电话状态权限',location:'位置权限',locationSwitch:'系统位置开关',
   fixture:'样片版本',output:'首帧结果',stage:'测试阶段',decoder:'解码器',elapsed:'本次耗时'};
-const labels:Record<string,string>={standard:'标准采集',rom:'ROM 验收',network:'网络复测',granted:'已授权',not_granted:'未授权',
+const labels:Record<string,string>={standard:'标准采集',rom:'ROM 验收',network:'网络复测',usb:'USB 插拔实验',gnss:'GNSS 读数核对',granted:'已授权',not_granted:'未授权',
   precise:'精确',approximate:'仅大致',enabled:'开启',disabled:'关闭',pass:'通过',fail:'未通过',
   source:'读取样片',configure:'初始化解码器',decode:'等待首帧',done:'首帧已输出'};
 type View = ReturnType<typeof acceptance>;
@@ -15,10 +15,12 @@ export function AcceptancePanel({row}:{row:Report}) {
   const id=useId(), data=acceptance(row);
   const archived=keys.some(k=>data[k].status!=='NOT_ARCHIVED');
   const media=data.output.value?' · 视频首帧'+display(data.output):'';
+  const graphics=row.report.parameters?.find(p=>p.group==='runtime'&&p.key==='glesProbeResult'&&p.status==='AVAILABLE')?.value;
+  const graphicsLabel=graphics==='pass'?'通过':graphics==='fail'?'未通过，建议复测':graphics==='not_completed'?'未完成':null;
   return <section className="panel security-card" aria-labelledby={id}>
     <h2 id={id}>验收证据</h2>
     {!archived?<p className="muted">这份报告未归档验收方案、采集时授权或固定样片结果。</p>:<>
-      <p>{data.plan.value?display(data.plan):'未记录验收方案'}{media}</p>
+      <p>{data.plan.value?display(data.plan):'未记录验收方案'}{media}{graphicsLabel&&' · 图形回读'+graphicsLabel}</p>
       <details className="security-readings">
         <summary>查看验收读数与来源</summary>
         <dl>{keys.map(k=><div key={k}><dt>{titles[k]}</dt><dd><span>{display(data[k])}</span>

@@ -27,6 +27,7 @@ var assets embed.FS
 type server struct {
 	db            *pgxpool.Pool
 	token         string
+	readerToken   string
 	batch         string
 	secureCookies bool
 	builds        *buildCenter
@@ -36,8 +37,12 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	token, batch := os.Getenv("ADMIN_TOKEN"), os.Getenv("LAN_BATCH")
+	readerToken := os.Getenv("REPOSITORY_READ_TOKEN")
 	if strings.TrimSpace(token) != token || token == "" || strings.ContainsAny(token, "\r\n\t ") || !batchPattern.MatchString(batch) {
 		log.Fatal("configure ADMIN_TOKEN and a valid LAN_BATCH")
+	}
+	if readerToken != "" && (len(readerToken) < 24 || readerToken == token || strings.TrimSpace(readerToken) != readerToken || strings.ContainsAny(readerToken, "\r\n\t ")) {
+		log.Fatal("REPOSITORY_READ_TOKEN must be a distinct token of at least 24 characters")
 	}
 	db, err := pgxpool.New(ctx, os.Getenv("DATABASE_URL"))
 	if err != nil {
@@ -51,7 +56,7 @@ func main() {
 	if err != nil {
 		log.Fatal("database schema initialization failed")
 	}
-	s := server{db: db, token: token, batch: batch, secureCookies: os.Getenv("COOKIE_SECURE") == "true",
+	s := server{db: db, token: token, readerToken: readerToken, batch: batch, secureCookies: os.Getenv("COOKIE_SECURE") == "true",
 		builds: &buildCenter{root: os.Getenv("BUILD_DATA"), catalog: os.Getenv("BUILD_CATALOG")}}
 	srv := listener(":8080", s.routes())
 	go func() {
@@ -116,9 +121,26 @@ func (s server) routes() http.Handler {
 	r.Route("/api", func(api chi.Router) {
 		api.Post("/v1/reports", limit(rate.NewLimiter(2, 8))(http.HandlerFunc(s.submit)).ServeHTTP)
 		api.Route("/admin", func(admin chi.Router) {
+			admin.Use(limit(rate.NewLimiter(6, 20)))
 			admin.With(limit(rate.NewLimiter(1, 5))).Post("/login", s.login)
+			admin.Group(func(read chi.Router) {
+				read.Use(s.requireRepositoryRead)
+				read.Get("/reports", s.reports)
+				read.Get("/report-count", s.reportCount)
+				read.Get("/report-facets", s.reportFacets)
+				read.Get("/field-dictionary", s.fieldDictionary)
+				read.Get("/repository-stats", s.repositoryStats)
+				read.Get("/identity-summary", s.identitySummary)
+				read.Get("/regression-baselines", s.listBaselines)
+				read.Get("/device-assets", s.deviceAssets)
+				read.Get("/device-assets/{id}/dossier", s.deviceDossier)
+				read.Get("/reports/{id}", s.reportDetail)
+				read.Get("/reports/{id}/device-profile", s.deviceProfile)
+				read.Get("/reports/{id}/lab", s.labReport)
+				read.Get("/summary", s.summary)
+			})
 			admin.Group(func(admin chi.Router) {
-				admin.Use(limit(rate.NewLimiter(6, 20)), s.requireAdmin)
+				admin.Use(s.requireAdmin)
 				admin.Get("/session", func(w http.ResponseWriter, _ *http.Request) { send(w, 200, map[string]bool{"ok": true}) })
 				admin.Post("/logout", s.logout)
 				admin.Get("/settings", s.getSettings)
@@ -128,23 +150,15 @@ func (s server) routes() http.Handler {
 				admin.Get("/builds/{id}/apk", s.downloadBuild)
 				admin.Post("/builds", s.requestBuild)
 				admin.Post("/builds/{id}/publish", s.publishBuild)
-				admin.Get("/reports", s.reports)
-				admin.Get("/report-count", s.reportCount)
-				admin.Get("/report-facets", s.reportFacets)
-				admin.Get("/field-dictionary", s.fieldDictionary)
-				admin.Get("/repository-stats", s.repositoryStats)
-				admin.Get("/regression-baselines", s.listBaselines)
 				admin.Post("/regression-baselines", s.createBaseline)
 				admin.Delete("/regression-baselines/{id}", s.deleteBaseline)
-				admin.Get("/device-assets", s.deviceAssets)
 				admin.Post("/device-assets/assign", s.assignDeviceAsset)
+				admin.Get("/device-assets/merge-preview", s.previewAssetMerge)
+				admin.Get("/device-assets/merges", s.listAssetMerges)
 				admin.Post("/device-assets/merge", s.mergeDeviceAsset)
+				admin.Post("/device-assets/merges/{id}/undo", s.undoAssetMerge)
 				admin.Post("/reports/export", s.exportReports)
 				admin.Post("/reports/manage", s.manageReports)
-				admin.Get("/reports/{id}", s.reportDetail)
-				admin.Get("/reports/{id}/device-profile", s.deviceProfile)
-				admin.Get("/reports/{id}/lab", s.labReport)
-				admin.Get("/summary", s.summary)
 			})
 		})
 	})

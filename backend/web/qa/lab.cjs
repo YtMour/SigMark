@@ -23,6 +23,10 @@ async function run(){
     await page.getByRole('link',{name:'打开验收工作台',exact:true}).click();
     await page.getByRole('heading',{name:'验收工作台',exact:true}).waitFor();
     assert.equal(await page.getByLabel('同一资产的基线').inputValue(),baseline);
+    const avc=page.getByRole('region',{name:'实验步骤与归档结果'}).locator('details').filter({hasText:'AVC 首帧'});
+    await avc.locator('summary').click();
+    await avc.getByText(/由通过变为未达到/).waitFor();
+    await avc.getByText(/基线 pass/).waitFor();
     await page.getByRole('region',{name:'网络切换实验'}).getByText(/Wi-Fi → 移动网络/).waitFor();
     await page.getByLabel('显示').selectOption('blocked');
     await page.getByRole('button',{name:'应用筛选'}).click();
@@ -40,11 +44,34 @@ async function run(){
     assert.equal(doc.transition.after,'cellular');
     assert.equal(doc.restricted.policy,1);
     assert(!('feedback' in doc));
+    const named=process.env.SIGMARK_QA_REGISTERED_BASELINE;
+    assert(named);
+    await page.getByLabel('验收目标').selectOption('network');
+    await page.getByLabel('同一资产的基线').selectOption('saved:'+named);
+    await page.getByRole('button',{name:'应用基线'}).click();
+    const workbench=page.getByRole('region',{name:'设备证据与风险验收'});
+    await workbench.getByText(/登记基线：ROM baseline/).waitFor();
+    const experiments=workbench.getByRole('region',{name:'实验步骤与归档结果'});
+    assert.equal(await experiments.locator('details').count(),1);
+    await experiments.locator('summary').focus();await page.keyboard.press('Enter');
+    await experiments.getByText(/起止墙钟未记录/).waitFor();
+    const packetDownload=page.waitForEvent('download');
+    await workbench.getByRole('button',{name:'导出验收证据包 JSON'}).click();
+    const packet=JSON.parse(await readFile(await (await packetDownload).path(),'utf8'));
+    assert.equal(packet.policy.id,named);
+    assert.equal(packet.source.baseline.reportId,baseline);
+    assert.equal(packet.source.current.reportId,current);
+    assert.equal(packet.catalogVersion,'sigmark-lan-fields/10');
+    assert.equal(packet.objective,'network');
+    assert.equal(packet.experiments[0].current.state,'incomplete');
+    assert.equal(packet.strength.independentVerification,'not_performed');
+    assert(!JSON.stringify(packet).includes('assetId'));
+    assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
     await page.getByLabel('同一资产的基线').selectOption('');
     await page.getByRole('button',{name:'应用基线'}).click();
     await page.getByRole('region',{name:'当前受限原因'}).waitFor();
     assert.deepEqual(errors,[]);
-    console.log('PASS lab browser: report link, automatic same-asset baseline, route check, denial filter, keyboard scroll, export and 390 px.');
+    console.log('PASS lab browser: automatic/registered same-asset baseline, target selector, experiments, weakness provenance, combined export and 390 px.');
   }finally{await browser.close();}
 }
 run().catch(err=>{console.error(err);process.exitCode=1;});

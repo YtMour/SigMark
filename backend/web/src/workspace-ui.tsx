@@ -3,6 +3,7 @@ import {useEffect,useId,useRef,useState,type ReactNode} from 'react';
 export const workspaces=[
   {id:'reports',label:'报告档案',icon:'archive',group:'collection'},
   {id:'assets',label:'资产管理',icon:'devices',group:'collection'},
+  {id:'identity',label:'身份分布',icon:'identity',group:'collection'},
   {id:'security',label:'指纹安全',icon:'shield',group:'collection'},
   {id:'lab',label:'验收工作台',icon:'lab',group:'collection'},
   {id:'builds',label:'构建中心',icon:'build',group:'tools'},
@@ -19,6 +20,7 @@ const iconPaths:Record<IconName,string>={
   build:'M8 8l-4 4 4 4 M16 8l4 4-4 4 M14 5l-4 14',
   download:'M12 3v12 M8 11l4 4 4-4 M4 16v4h16v-4',
   settings:'M4 6h16 M4 12h16 M4 18h16 M8 3v6 M15 9v6 M10 15v6',
+  identity:'M12 4a8 8 0 018 8 M12 4a8 8 0 00-8 8 M12 8a4 4 0 014 4v4 M12 8a4 4 0 00-4 4v5 M10 21c1.6-3 2-5.4 2-8',
   lock:'M5 10h14v11H5z M8 10V7a4 4 0 018 0v3 M12 14v3',
   menu:'M4 6h16 M4 12h16 M4 18h16',
   arrow:'M5 12h14 M13 6l6 6-6 6',

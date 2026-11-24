@@ -14,13 +14,15 @@ android {
         applicationId = "com.sigmark.app"
         minSdk = 26
         targetSdk = 34
-        versionCode = 27
-        versionName = "1.1.0"
+        versionCode = 38
+        versionName = "1.11.0"
         testInstrumentationRunner = "com.sigmark.app.CapabilitySmoke"
     }
 
     buildTypes {
         debug {
+            // Keep instrumented phone trials separate from the user's installation and report shelf.
+            if (providers.gradleProperty("SIGMARK_QA_ISOLATED").orNull == "true") applicationIdSuffix = ".qa"
             // SIGMARK_BUILD_PROFILE_V1: the build worker detects this version override contract.
             val customName = providers.gradleProperty("SIGMARK_VERSION_NAME").orNull
             val customCode = providers.gradleProperty("SIGMARK_VERSION_CODE").orNull

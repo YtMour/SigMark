@@ -9,15 +9,16 @@ import com.sigmark.app.model.DeviceSnapshot
 import com.sigmark.app.model.ReadReason
 import com.sigmark.app.model.ValueStatus
 
-internal data class RoutePoint(val timeMs: Long, val transport: String?, val validated: Boolean?)
+internal data class RoutePoint(val timeMs: Long, val transport: String?, val validated: Boolean?, val wallTimeMs: Long? = null)
 
 internal fun readRoutePoint(context: Context): RoutePoint {
     val at = SystemClock.elapsedRealtime()
+    val wall = System.currentTimeMillis()
     return runCatching {
         val manager = context.getSystemService(ConnectivityManager::class.java)
-            ?: return@runCatching RoutePoint(at, null, null)
-        val active = manager.activeNetwork ?: return@runCatching RoutePoint(at, "none", null)
-        val caps = manager.getNetworkCapabilities(active) ?: return@runCatching RoutePoint(at, null, null)
+            ?: return@runCatching RoutePoint(at, null, null, wall)
+        val active = manager.activeNetwork ?: return@runCatching RoutePoint(at, "none", null, wall)
+        val caps = manager.getNetworkCapabilities(active) ?: return@runCatching RoutePoint(at, null, null, wall)
         val transport = when {
             caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN) -> "vpn"
             caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> "wifi"
@@ -25,8 +26,8 @@ internal fun readRoutePoint(context: Context): RoutePoint {
             caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) -> "ethernet"
             else -> "other"
         }
-        RoutePoint(at, transport, caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED))
-    }.getOrElse { RoutePoint(at, null, null) }
+        RoutePoint(at, transport, caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED), wall)
+    }.getOrElse { RoutePoint(at, null, null, wall) }
 }
 
 internal data class RouteCheck(val start: RoutePoint, val end: RoutePoint)
@@ -42,6 +43,8 @@ internal fun routeEvidence(snapshot: DeviceSnapshot, check: RouteCheck): DeviceS
         item("checkEndValidated", "实验终点联网验证", check.end.validated?.let { if (it) "yes" else "no" }),
         item("checkElapsed", "两次观测间隔", (check.end.timeMs-check.start.timeMs).takeIf { it in 0..600_000 }?.let { "$it ms" },
             "SystemClock.elapsedRealtime", "两次手动观测的间隔，不是断网时长。"),
+        clockEvidence("checkStartAt", "网络实验起点时间", check.start.wallTimeMs),
+        clockEvidence("checkEndAt", "网络实验终点时间", check.end.wallTimeMs),
     )
     return snapshot.copy(sections = snapshot.sections.map {
         if(it.key=="network") it.copy(items=it.items.filterNot { p->extra.any { e->e.key==p.key } }+extra) else it

@@ -36,9 +36,23 @@ internal fun ReadResult<String>.item(key: String, label: String) =
 internal fun <T> ReadResult<T>.explainMissing(reason: ReadReason, note: String): ReadResult<T> =
     if (this.reason == ReadReason.NOT_REPORTED) copy(reason = reason, detail = note) else this
 
+// Append an explanation without touching the status, reason or errno.
+internal fun <T> ReadResult<T>.withNote(note: String): ReadResult<T> =
+    copy(detail = listOfNotNull(detail, note).joinToString(" "))
+
+// Decode a readable value; leave an unset property as NOT_REPORTED and only a
+// readable but unexpected value as INVALID_VALUE.
+internal fun ReadResult<String>.decodeProperty(decode: (String) -> String?, invalidNote: String): ReadResult<String> {
+    val raw = value ?: return this
+    val decoded = decode(raw) ?: return SafeReader.missing(source, ReadReason.INVALID_VALUE, invalidNote)
+    return copy(value = decoded)
+}
+
 internal object SafeReader {
     private const val fileTimeoutMs = 400L
     private const val propertyTimeoutMs = 350L
+    internal const val propertySnapshotMaxBytes = 96 * 1024
+    private const val propertySnapshotTimeoutMs = 800L
     private val workers = ThreadPoolExecutor(2, 2, 20, TimeUnit.SECONDS, ArrayBlockingQueue(2)) { work ->
         Thread(work, "sigmark-reader").apply { isDaemon = true }
     }.apply { allowCoreThreadTimeOut(true) }
@@ -49,18 +63,28 @@ internal object SafeReader {
         MEM_INFO("/proc/meminfo", 16 * 1024),
         CPU0_MAX("/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq", 64),
         CPU_POLICY0_MAX("/sys/devices/system/cpu/cpufreq/policy0/cpuinfo_max_freq", 64),
+        CPU_POSSIBLE("/sys/devices/system/cpu/possible", 128),
+        CPU_ONLINE("/sys/devices/system/cpu/online", 128),
+        BATTERY_TEMP("/sys/class/power_supply/battery/temp", 32),
+        BATTERY_TEMP_BMS("/sys/class/power_supply/bms/temp", 32),
         SELINUX_ENFORCE("/sys/fs/selinux/enforce", 16),
         SELINUX_POLICY("/sys/fs/selinux/policy"),
         SELF_CONTEXT("/proc/self/attr/current", 256),
+        PROCESS_MAPS("/proc/self/maps", 512 * 1024),
+        PROCESS_STATUS("/proc/self/status", 16 * 1024),
+        PROCESS_MOUNTINFO("/proc/self/mountinfo", 96 * 1024),
     }
 
     enum class Property(val key: String) {
         SELINUX_BOOT("ro.boot.selinux"), SELINUX_BUILD("ro.build.selinux"),
+        FIRST_API_LEVEL("ro.product.first_api_level"),
         VENDOR_PATCH("ro.vendor.build.security_patch"),
         HYPEROS("ro.mi.os.version.name"), MIUI("ro.miui.ui.version.name"),
         COLOR_OS("ro.build.version.opporom"), ONE_UI("ro.build.version.oneui"),
         COLOR_OS_ALT("ro.oplus.version.opporom"), VERIFIED_BOOT("ro.boot.verifiedbootstate"),
         VBMETA_STATE("ro.boot.vbmeta.device_state"), FLASH_LOCKED("ro.boot.flash.locked"),
+        BOOTLOADER("ro.bootloader"), BASE_OS("ro.build.version.base_os"),
+        VERITY_MODE("ro.boot.veritymode"), DEBUGGABLE("ro.debuggable"), CRYPTO_STATE("ro.crypto.state"),
     }
 
     // Lazy suppliers let a successful candidate skip the remaining reads.
@@ -183,22 +207,61 @@ internal object SafeReader {
         }
     }
 
-    fun property(property: Property): ReadResult<String> {
-        val source = "getprop ${property.key}"
+    fun property(property: Property): ReadResult<String> = property(property.key)
+
+    // Exact key entry point for keys outside the enum (for example partition build dates).
+    fun property(key: String): ReadResult<String> {
+        val source = "getprop $key"
+        PropertySnapshot.record(key)?.let { cached -> return readPropertyValue(source) { cached } }
+        // A complete dump already listed every property this app can read; retrying
+        // the key one by one would spawn a process only to get the same empty answer.
+        if (PropertySnapshot.authoritative()) return missing(source, ReadReason.NOT_REPORTED,
+            "属性未设置或对当前应用不可见。")
         return bounded(source, propertyTimeoutMs + 50) {
-            readPropertyValue(source) {
-                val p = ProcessBuilder("/system/bin/getprop", property.key).redirectErrorStream(true).start()
+            readPropertyValue(source) { singleProperty(key) }
+        }
+    }
+
+    private fun singleProperty(key: String): String {
+        val p = ProcessBuilder("/system/bin/getprop", key).redirectErrorStream(true).start()
+        try {
+            if (!p.waitFor(propertyTimeoutMs, TimeUnit.MILLISECONDS)) throw TimeoutException()
+            check(p.exitValue() == 0)
+            return p.inputStream.use {
+                val bytes = ByteArray(128)
+                val count = it.read(bytes)
+                String(bytes, 0, count.coerceAtLeast(0), Charsets.UTF_8).trim()
+            }
+        } finally { p.destroyForcibly() }
+    }
+
+    // One getprop call for the whole collection. Fixed byte and wait limits;
+    // a failed snapshot only disables the shortcut.
+    fun propertySnapshot(): ReadResult<String> {
+        val source = "/system/bin/getprop"
+        return bounded(source, propertySnapshotTimeoutMs) {
+            read(source) {
+                val p = ProcessBuilder("/system/bin/getprop").redirectErrorStream(true).start()
                 try {
-                    if (!p.waitFor(propertyTimeoutMs, TimeUnit.MILLISECONDS)) throw TimeoutException()
-                    check(p.exitValue() == 0)
-                    p.inputStream.use {
-                        val bytes = ByteArray(128)
-                        val count = it.read(bytes)
-                        String(bytes, 0, count.coerceAtLeast(0), Charsets.UTF_8).trim()
+                    val out = ByteArrayOutputStream()
+                    val buffer = ByteArray(8192)
+                    val stream = p.inputStream
+                    while (out.size() < propertySnapshotMaxBytes) {
+                        val count = stream.read(buffer, 0, minOf(buffer.size, propertySnapshotMaxBytes - out.size()))
+                        if (count <= 0) break
+                        out.write(buffer, 0, count)
                     }
+                    if (!p.waitFor(propertySnapshotTimeoutMs, TimeUnit.MILLISECONDS)) throw TimeoutException()
+                    check(p.exitValue() == 0)
+                    out.toString(Charsets.UTF_8.name())
                 } finally { p.destroyForcibly() }
             }
         }
+    }
+
+    // stat only, without opening the node. Used to separate DAC from MAC denial.
+    fun statMode(path: String): ReadResult<Int> = bounded(path, fileTimeoutMs) {
+        read(path) { Os.stat(path).st_mode }
     }
 
     internal fun readPropertyValue(source: String, block: () -> String): ReadResult<String> =

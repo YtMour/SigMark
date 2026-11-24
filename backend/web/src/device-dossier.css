@@ -1,0 +1,30 @@
+.dossier { margin-block: 0 1.5rem; padding-block: .85rem 1rem; border-block: 1px solid var(--line-subtle); overflow-wrap: anywhere; }
+.dossier h3,.dossier h4,.dossier h5 { margin: 0; }
+.dossier p { margin-block: .25rem; }
+.dossier-meta,.dossier-totals { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(100%,10rem),1fr)); gap: .5rem; padding: 0; margin-block: .9rem; }
+.dossier-meta > div,.dossier-totals > li { border: 1px solid var(--line-subtle); border-radius: .65rem; padding: .55rem .7rem; min-width: 0; }
+.dossier-meta dt,.dossier-meta small,.dossier-totals span,.dossier-evidence small { color: var(--muted); }
+.dossier-meta dd { margin: .25rem 0 0; }
+.dossier-meta small,.dossier-totals span,.dossier-evidence small,.dossier-evidence code { display: block; }
+.dossier-totals { list-style: none; grid-template-columns: repeat(auto-fit,minmax(min(100%,7rem),1fr)); }
+.dossier-totals strong { display: block; font-size: 1.35rem; font-variant-numeric: tabular-nums; }
+.dossier-tools { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .6rem; margin-block: .65rem; }
+.dossier-categories { margin-block-start: 1rem; }
+.dossier-group { border-block-end: 1px solid var(--line-subtle); }
+.dossier-group summary { padding: .6rem .2rem; cursor: pointer; }
+.dossier-summary { display: inline-flex; flex-wrap: wrap; gap: .2rem .7rem; margin-inline-start: .65rem; font-size: .83rem; color: var(--muted); }
+.dossier-group-body { padding: .15rem .2rem .7rem; }
+.dossier-bucket { margin-block-start: .7rem; }
+.dossier-bucket ul { padding: 0; margin: .25rem 0 0; list-style: none; }
+.dossier-evidence { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,2fr); gap: .35rem 1rem; padding: .55rem; border-block-start: 1px solid var(--line-subtle); }
+.dossier-state { display: inline-block; border: 1px solid var(--border); padding: .05rem .35rem; border-radius: .35rem; font-size: .8rem; }
+.dossier-state[data-state="MISSING"] { color: var(--muted); }
+.dossier-state[data-state="AVAILABLE"] { color: var(--mint); }
+@media (max-width: 600px) {
+  .dossier-summary { display: flex; margin: .3rem 0 0; }
+  .dossier-evidence { grid-template-columns: minmax(0,1fr); }
+}
+.configuration-evidence { display: grid; gap: .5rem; margin-block: .7rem; overflow-wrap: anywhere; }
+.configuration-evidence > details { border: 1px solid var(--border); border-radius: .65rem; padding: .65rem .8rem; min-inline-size: 0; }
+.configuration-evidence summary { cursor: pointer; }
+.configuration-evidence dd small { display: block; }

@@ -28,8 +28,24 @@ import java.security.MessageDigest
 internal const val MaxUpdateBytes = 128L * 1024 * 1024
 
 internal data class UpdateRelease(val name: String, val code: Long, val size: Long, val sha256: String) {
-    fun isValid() = name.matches(Regex("[0-9.]{1,32}")) && code > 0 &&
+    fun isValid() = name.matches(Regex("""[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}""")) && code in 1..2_100_000_000L &&
         size in 1..MaxUpdateBytes && sha256.matches(Regex("[a-f0-9]{64}"))
+}
+
+internal data class InstalledUpdateVersion(val name:String,val code:Long)
+internal enum class UpdateAvailability { AVAILABLE, CURRENT, AHEAD }
+internal fun updateAvailability(installed:InstalledUpdateVersion, published:UpdateRelease) = when {
+    published.code>installed.code -> UpdateAvailability.AVAILABLE
+    published.code==installed.code -> UpdateAvailability.CURRENT
+    else -> UpdateAvailability.AHEAD
+}
+
+@Suppress("DEPRECATION")
+private fun packageCode(info:PackageInfo) = if (Build.VERSION.SDK_INT >= 28) info.longVersionCode else info.versionCode.toLong()
+
+private fun installedUpdateVersion(context:Context):InstalledUpdateVersion {
+    val pkg=context.packageManager.getPackageInfo(context.packageName,0)
+    return InstalledUpdateVersion(pkg.versionName ?: BuildConfig.VERSION_NAME, packageCode(pkg))
 }
 
 private suspend fun <T> get(origin: URI, path: String, read: suspend (java.io.InputStream) -> T): T {
@@ -81,10 +97,9 @@ private fun verifyArchive(context: Context, file: File, release: UpdateRelease):
     val pm = context.packageManager
     val installed = pm.getPackageInfo(context.packageName, 0)
     val candidate = pm.getPackageArchiveInfo(file.path, 0) ?: throw LanFailure("Android 未能解析下载的 APK。")
-    fun code(info: PackageInfo) = if (Build.VERSION.SDK_INT >= 28) info.longVersionCode else info.versionCode.toLong()
     if (candidate.packageName != installed.packageName) throw LanFailure("APK 包名与当前安装不同。请从印迹下载页获取对应的安装包。")
-    if (code(candidate) != release.code || candidate.versionName != release.name) throw LanFailure("APK 内的版本与发布记录不一致，请联系管理员重新发布。")
-    if (code(candidate) <= code(installed)) throw LanFailure("APK 版本号未高于当前安装版本。")
+    if (packageCode(candidate) != release.code || candidate.versionName != release.name) throw LanFailure("APK 内的版本与发布记录不一致，请联系管理员重新发布。")
+    if (packageCode(candidate) <= packageCode(installed)) throw LanFailure("APK 版本号未高于当前安装版本。")
     fun signers(read: (Int) -> PackageInfo?): Set<String> {
         val modern = if (Build.VERSION.SDK_INT >= 28) runCatching {
             read(PackageManager.GET_SIGNING_CERTIFICATES)?.signingInfo?.apkContentsSigners?.map { it.toCharsString() }?.toSet()
@@ -99,7 +114,7 @@ private fun verifyArchive(context: Context, file: File, release: UpdateRelease):
     return verdict
 }
 
-private suspend fun download(context: Context, origin: URI, release: UpdateRelease, progress: (Int) -> Unit): DownloadedUpdate {
+private suspend fun download(context: Context, origin: URI, release: UpdateRelease, progress: suspend (Int) -> Unit): DownloadedUpdate {
     val directory = File(context.cacheDir, "updates").apply { mkdirs() }
     val pending = File.createTempFile("update-", ".apk", directory)
     var complete = false
@@ -147,11 +162,15 @@ internal fun AppUpdate(context: Context, onClose: () -> Unit) {
 
     LaunchedEffect(origin) {
         try {
-            val latest = withContext(Dispatchers.IO) { checkRelease(origin ?: throw LanFailure("此安装包未设置内网地址。")) }
-            if (latest.code > BuildConfig.VERSION_CODE) {
-                release = latest
-                message = "当前 ${BuildConfig.VERSION_NAME}，可更新至 ${latest.name}。"
-            } else message = "当前版本已是最新发布版或更新的版本。"
+            val (installed,latest) = withContext(Dispatchers.IO) {
+                installedUpdateVersion(context) to checkRelease(origin ?: throw LanFailure("此安装包未设置内网地址。"))
+            }
+            val prefix="已安装 ${installed.name}（${installed.code}），内网发布 ${latest.name}（${latest.code}）。"
+            message = when(updateAvailability(installed,latest)) {
+                UpdateAvailability.AVAILABLE -> { release=latest; prefix+"可以下载并更新。" }
+                UpdateAvailability.CURRENT -> prefix+"当前版本已是最新。"
+                UpdateAvailability.AHEAD -> prefix+"本机安装版本更高，保留现有版本。"
+            }
         } catch (error: CancellationException) {
             throw error
         } catch (error: Exception) {
@@ -197,7 +216,9 @@ internal fun AppUpdate(context: Context, onClose: () -> Unit) {
                                 File(context.cacheDir, "updates").listFiles()?.filter {
                                     System.currentTimeMillis() - it.lastModified() > 86_400_000
                                 }?.forEach { it.delete() }
-                                download(context, origin, next) { percent -> message = "正在下载更新 $percent%" }
+                                download(context, origin, next) { percent ->
+                                    withContext(Dispatchers.Main) { message = "正在下载更新 $percent%" }
+                                }
                             }
                             message = if (apk?.signerCheck == UpdateSigners.MATCH) "已核对 APK 校验值和签名。"
                             else "已核对 APK 内容和版本。当前 ROM 未提供 APK 证书给应用，签名交由 Android 安装器核验。"

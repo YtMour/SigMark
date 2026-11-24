@@ -211,6 +211,317 @@ func TestParametersAndPaginationContract(t *testing.T) {
 	}
 }
 
+func TestFieldSet11EnvironmentObservations(t *testing.T) {
+	for _, c := range []struct{ group, key, value, invalid string }{
+		{"cpu", "processBitness", "64", "64 bit"},
+		{"cpu", "kernelMachine", "aarch64", "unknown"},
+		{"system", "interfaceCapabilities", "nfc / gnss / usb_accessory", "nfc / private_device_id"},
+		{"runtime", "externalInputTypes", "keyboard / gamepad", "keyboard / keyboard"},
+		{"runtime", "externalInputTypes", "none", "none / pointer"},
+	} {
+		p := Parameter{Group: c.group, Key: c.key, Label: c.key, Value: &c.value, Source: "fixture", Status: "AVAILABLE"}
+		if !p.valid(4, 11) || p.valid(4, 10) || p.valid(3, 0) {
+			t.Errorf("unexpected schema/field set acceptance for %s", c.key)
+		}
+		p.Value = &c.invalid
+		if p.valid(4, 11) {
+			t.Errorf("accepted invalid observation for %s", c.key)
+		}
+	}
+	errno := 13
+	missing := Parameter{Group: "cpu", Key: "kernelMachine", Label: "Kernel", Source: "Os.uname",
+		Status: "RESTRICTED", Reason: "ACCESS_DENIED", Errno: &errno}
+	if !missing.valid(4, 11) || missing.valid(4, 10) {
+		t.Fatal("missing architecture must retain its source and errno in v11 only")
+	}
+}
+
+func TestFieldSet12Hardware(t *testing.T) {
+	for _, c := range []struct{ group, key, value, invalid string }{
+		{"system", "gnssHardwareYear", "2019", "0"},
+		{"system", "gnssCapabilities", "measurements / antenna_info", "gpsCoordinates"},
+		{"runtime", "declaredInput", "touchscreen / jazzhand", "gamepad / touchscreen"},
+		{"sensors", "reportingModes", "5/11/2/1/0", "5/11/-1/1/0"},
+		{"sensors", "fifoCount", "5", "05"},
+		{"sensors", "directChannelTypes", "none", "memory_file / none"},
+		{"media", "cameraModes", "raw / depth / high_speed_video", "depth / $jpeg"},
+		{"runtime", "glesProbeResult", "pass", "unknown"},
+		{"runtime", "glesProbeStage", "timeout", "vendor-private"},
+		{"runtime", "glesProbeVersion", "3.2", "3.2 driver"},
+	} {
+		p := Parameter{Group: c.group, Key: c.key, Label: c.key, Value: &c.value, Source: "fixture", Status: "AVAILABLE"}
+		if !p.valid(4, 12) || p.valid(4, 11) || p.valid(3, 0) {
+			t.Errorf("unexpected version handling for %s", c.key)
+		}
+		p.Value = &c.invalid
+		if p.valid(4, 12) {
+			t.Errorf("accepted invalid reading for %s", c.key)
+		}
+	}
+}
+
+func TestTimedUSBOnlyWithPlanAndConsistentOutcome(t *testing.T) {
+	f := func(group, key, value string) Parameter {
+		return Parameter{Group: group, Key: key, Value: &value, Label: key, Source: "fixture", Status: "AVAILABLE"}
+	}
+	rows := []Parameter{f("environment", "capturePlan", "usb"), f("runtime", "usbStartCount", "0"), f("runtime", "usbEndCount", "1"),
+		f("runtime", "usbStartAt", "1700000000000"), f("runtime", "usbEndAt", "1700000001000"), f("runtime", "usbElapsed", "1000 ms"), f("runtime", "usbOutcome", "increase")}
+	for _, p := range rows {
+		if !p.valid(4, 13) || p.valid(4, 12) {
+			t.Errorf("bad version gate for %s", p.Key)
+		}
+	}
+	if !validTimedExperiment(rows) {
+		t.Fatal("valid USB outcome rejected")
+	}
+	if validTimedExperiment(rows[1:]) || validTimedExperiment(rows[:6]) {
+		t.Fatal("missing plan or outcome accepted")
+	}
+	rows[6] = f("runtime", "usbOutcome", "no_change")
+	if validTimedExperiment(rows) {
+		t.Fatal("wrong USB outcome accepted")
+	}
+	if f("runtime", "usbElapsed", "120001 ms").valid(4, 13) || f("runtime", "usbStartAt", "0").valid(4, 13) {
+		t.Fatal("invalid duration/date accepted")
+	}
+}
+
+func TestFieldSet14GNSS(t *testing.T) {
+	f := func(group, key, value string) Parameter {
+		return Parameter{Group: group, Key: key, Value: &value, Label: key, Source: "fixture", Status: "AVAILABLE"}
+	}
+	for _, raw := range []string{"0", "2016", "2015", "2104", "-1"} {
+		p := f("system", "gnssHardwareYear", raw)
+		if !p.valid(4, 14) {
+			t.Fatalf("SDK raw int %s rejected", raw)
+		}
+	}
+	for _, raw := range []string{"0", "-1", "2104"} {
+		if f("system", "gnssHardwareYear", raw).valid(4, 13) {
+			t.Fatalf("legacy year gate drifted: %s", raw)
+		}
+	}
+	for _, raw := range []string{"01", "+1", "some string", "2147483648", " 0"} {
+		if f("system", "gnssHardwareYear", raw).valid(4, 14) {
+			t.Fatalf("accepted non-SDK encoding %q", raw)
+		}
+	}
+	plan := f("environment", "capturePlan", "gnss")
+	rows := []Parameter{plan, f("system", "gnssCheckPrerequisite", "ready"), f("system", "gnssCheckStatus", "observed"),
+		f("system", "gnssCheckMeasurements", "not_seen"), f("system", "gnssCheckStartAt", "1700000000000"),
+		f("system", "gnssCheckEndAt", "1700000000010"), f("system", "gnssCheckElapsed", "10 ms")}
+	for _, p := range rows {
+		if p.valid(4, 13) || !p.valid(4, 14) {
+			t.Errorf("mis-versioned field %s", p.Key)
+		}
+	}
+	if !validTimedExperiment(rows) || validTimedExperiment(rows[:6]) || validTimedExperiment(rows[1:]) {
+		t.Fatal("GNSS experiment presence constraints failed")
+	}
+	rows[1] = f("system", "gnssCheckPrerequisite", "permission_required")
+	if validTimedExperiment(rows) {
+		t.Fatal("blocked prerequisite cannot claim callback results")
+	}
+	for _, i := range []int{2, 3} {
+		rows[i].Value, rows[i].Status, rows[i].Reason = nil, "RESTRICTED", "PERMISSION_REQUIRED"
+	}
+	if !validTimedExperiment(rows) || !rows[2].valid(4, 14) {
+		t.Fatal("legitimate restricted result rejected")
+	}
+	if f("system", "gnssHardwareModel", "OEM text").valid(4, 14) ||
+		f("system", "gnssCheckMeasurements", "individual measurement").valid(4, 14) ||
+		f("system", "gnssCoordinates", "0,0").valid(4, 14) {
+		t.Fatal("accepted prohibited raw GNSS fields")
+	}
+}
+
+func TestFieldSet17ProcessEvidence(t *testing.T) {
+	for _, c := range []struct{ group, key, value, invalid string }{
+		{"environment", "hookSignals", "frida / gadget / zygisk / memfd_exec", "zygisk / frida"},
+		{"environment", "tracerPid", "0", "0100"},
+		{"environment", "rootMountHints", "overlay_system / tmpfs_sbin / magisk_path", "tmpfs_sbin / overlay_system"},
+		{"environment", "rootManagerVisible", "none", "magisk / none"},
+		{"environment", "userProfile", "managed", "guest"},
+		{"environment", "drmSecurityLevel", "L2", "L0"},
+		{"environment", "verityMode", "enforcing", "Enforcing"},
+		{"environment", "buildDebuggable", "关闭", "false"},
+		{"system", "partitionBuildDates", "system 2024-01-05 · vendor 2023-12-11", "vendor 2023-12-11 · system 2024-01-05"},
+		{"system", "selinuxEvidence", "inferred_mac", "inferred"},
+		{"cpu", "coresConfigured", "1024", "1025"},
+	} {
+		p := Parameter{Group: c.group, Key: c.key, Label: c.key, Value: &c.value, Source: "fixture", Status: "AVAILABLE"}
+		if !p.valid(4, 17) || p.valid(4, 16) || p.valid(3, 0) {
+			t.Errorf("unexpected version handling for %s.%s", c.group, c.key)
+		}
+		p.Value = &c.invalid
+		if p.valid(4, 17) {
+			t.Errorf("accepted invalid reading for %s.%s", c.group, c.key)
+		}
+	}
+	for _, raw := range []string{"4194304", "1"} {
+		value := raw
+		p := Parameter{Group: "environment", Key: "tracerPid", Label: "TracerPid", Value: &value, Source: "fixture", Status: "AVAILABLE"}
+		if !p.valid(4, 17) {
+			t.Errorf("tracer pid %s rejected", raw)
+		}
+	}
+	over := "4194305"
+	tooLarge := Parameter{Group: "environment", Key: "tracerPid", Label: "TracerPid", Value: &over,
+		Source: "fixture", Status: "AVAILABLE"}
+	if tooLarge.valid(4, 17) {
+		t.Fatal("out-of-range tracer pid accepted")
+	}
+	for _, raw := range []string{"1", "64"} {
+		value := raw
+		p := Parameter{Group: "cpu", Key: "coresConfigured", Label: "Cores", Value: &value, Source: "fixture", Status: "AVAILABLE"}
+		if !p.valid(4, 17) {
+			t.Errorf("configured cores %s rejected", raw)
+		}
+	}
+	all := "system 2024-01-05 · vendor 2023-12-11 · product 2023-12-09 · odm 2023-12-08 · system_ext 2023-12-07 · bootimage 2023-12-06"
+	complete := Parameter{Group: "system", Key: "partitionBuildDates", Label: "dates", Value: &all,
+		Source: "fixture", Status: "AVAILABLE"}
+	if !complete.valid(4, 17) {
+		t.Fatal("full ordered partition date list rejected")
+	}
+	for _, raw := range []string{
+		"system",
+		"system 2024-13-05",
+		"cache 2024-01-05",
+		"system 2024-01-05 · system 2024-01-06",
+		"system 2024-01-05 · ",
+		"system 2024-01-05·vendor 2023-12-11",
+	} {
+		value := raw
+		bad := Parameter{Group: "system", Key: "partitionBuildDates", Label: "dates", Value: &value,
+			Source: "fixture", Status: "AVAILABLE"}
+		if bad.valid(4, 17) {
+			t.Errorf("accepted partition date text %q", raw)
+		}
+	}
+	if partitionDatesText("") || !partitionDatesText("bootimage 2023-12-06") {
+		t.Fatal("partition date text helper disagrees with the wire rule")
+	}
+	missing := Parameter{Group: "environment", Key: "tracerPid", Label: "TracerPid", Source: "/proc/self/status",
+		Status: "RESTRICTED", Reason: "ACCESS_DENIED"}
+	if !missing.valid(4, 17) || missing.valid(4, 16) {
+		t.Fatal("restricted tracer pid must stay version gated")
+	}
+}
+
+func TestFieldSet17To18DictionaryMetadata(t *testing.T) {
+	meta := map[string]dictionaryField{}
+	for _, entry := range dictionary() {
+		meta[entry.Key] = entry
+	}
+	// maxFields for field set 20 is 248: these 224 static keys plus 24 partition rows.
+	if len(meta) != 224 {
+		t.Fatalf("static registry = %d keys, want 224", len(meta))
+	}
+	if got := meta["system.initialSdk"]; got.SinceFieldSet != 18 || got.ValueKind != "integer_text" ||
+		got.Unit != "api_level" || got.MinSchema != 4 || got.Scope != "lan_projection" {
+		t.Errorf("initialSdk metadata = %+v", got)
+	}
+	for _, want := range []struct{ key, unit string }{
+		{"system.bootCount", "boot_count"}, {"system.mediaPerformanceClass", "media_performance_class"},
+	} {
+		got := meta[want.key]
+		if got.SinceFieldSet != 20 || got.ValueKind != "integer_text" || got.Unit != want.unit ||
+			got.MinSchema != 4 || got.Scope != "lan_projection" {
+			t.Errorf("%s metadata = %+v", want.key, got)
+		}
+	}
+	bootValue := "86"
+	boot := Parameter{Group: "system", Key: "bootCount", Label: "x", Source: "s", Status: "AVAILABLE", Value: &bootValue}
+	if !boot.valid(4, 20) {
+		t.Error("bootCount rejected at field set 20")
+	}
+	if boot.valid(4, 19) {
+		t.Error("bootCount accepted at field set 19")
+	}
+	for _, want := range []struct{ key, kind, unit, temporal string }{
+		{"environment.hookSignals", "enum_text", "code_list", "snapshot"},
+		{"environment.tracerPid", "integer_text", "pid", "snapshot"},
+		{"environment.rootMountHints", "enum_text", "code_list", "snapshot"},
+		{"environment.rootManagerVisible", "enum_text", "code_list", "snapshot"},
+		{"environment.userProfile", "enum_text", "", "snapshot"},
+		{"environment.drmSecurityLevel", "enum_text", "", "configuration"},
+		{"environment.verityMode", "enum_text", "", "configuration"},
+		{"environment.buildDebuggable", "enum_text", "", "configuration"},
+		{"system.partitionBuildDates", "display_text", "partition_date_list", "configuration"},
+		{"system.selinuxEvidence", "enum_text", "", "snapshot"},
+		{"cpu.coresConfigured", "integer_text", "count", "configuration"},
+	} {
+		got, ok := meta[want.key]
+		if !ok {
+			t.Errorf("missing dictionary entry %s", want.key)
+			continue
+		}
+		if got.ValueKind != want.kind || got.Unit != want.unit || got.Temporal != want.temporal ||
+			got.SinceFieldSet != 17 || got.MinSchema != 4 || got.Scope != "lan_projection" {
+			t.Errorf("%s metadata drift: %+v", want.key, got)
+		}
+	}
+	if meta["environment.hookSignals"].Sensitivity != "operational_context" {
+		t.Fatal("environment sensitivity must stay operational_context")
+	}
+}
+
+func TestFieldSet19IdentityDeclarationCodes(t *testing.T) {
+	meta := map[string]dictionaryField{}
+	for _, entry := range dictionary() {
+		meta[entry.Key] = entry
+	}
+	for _, want := range []struct{ key, unit string }{
+		{"system.boardPlatform", "platform_code"},
+		{"system.bootHardware", "platform_code"},
+		{"system.hardwareSku", "sku_code"},
+	} {
+		got, ok := meta[want.key]
+		if !ok {
+			t.Errorf("missing dictionary entry %s", want.key)
+			continue
+		}
+		if got.ValueKind != "enum_text" || got.Unit != want.unit || got.Temporal != "configuration" ||
+			got.SinceFieldSet != 19 || got.MinSchema != 4 || got.Scope != "lan_projection" {
+			t.Errorf("%s metadata drift: %+v", want.key, got)
+		}
+	}
+	for _, tc := range []struct {
+		key, value string
+		ok         bool
+	}{
+		{"boardPlatform", "mt6985", true},
+		{"boardPlatform", "sdm845", true},
+		{"boardPlatform", "gs101", true},
+		{"boardPlatform", "MT6985", false},
+		{"boardPlatform", "bad value", false},
+		{"bootHardware", "mtk", true},
+		{"bootHardware", "qcom", true},
+		{"bootHardware", "oriole", true},
+		{"bootHardware", "QCOM", false},
+		{"hardwareSku", "GR1YH", true},
+		{"hardwareSku", "23078PND5G", true},
+		{"hardwareSku", "GR1YH!", false},
+	} {
+		value := tc.value
+		field := Parameter{Group: "system", Key: tc.key, Label: tc.key, Value: &value,
+			Source: "getprop", Status: "AVAILABLE"}
+		if got := field.valid(4, 19); got != tc.ok {
+			t.Errorf("%s=%q accepted=%v, want %v", tc.key, tc.value, got, tc.ok)
+		}
+	}
+	value := "mt6985"
+	identity := Parameter{Group: "system", Key: "boardPlatform", Label: "board", Value: &value,
+		Source: "getprop", Status: "AVAILABLE"}
+	if identity.valid(4, 18) {
+		t.Fatal("identity declarations must stay field set 19 gated")
+	}
+	if !identity.valid(4, 19) {
+		t.Fatal("identity declaration rejected at field set 19")
+	}
+}
+
 func TestReportSchemaRejectsExcessData(t *testing.T) {
 	r := synthetic()
 	if !r.valid() {

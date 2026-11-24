@@ -21,6 +21,25 @@
 - 用 `docker compose ps` 查看状态，`docker compose stop` 停机并保留报告。升级保留现有 PostgreSQL 卷及原 DB 密码，避免 `docker compose down -v`。使用 `go test ./...`、`go vet ./...`（`backend/`）及 `npm ci`、`npm test`、`npm run build`（`backend/web/`）复测。
 - 仓库统计的数据库集成测试：为测试 PostgreSQL 17 实例设置 `SIGMARK_TEST_DATABASE_URL`，在 `backend/` 执行 `go test -run '^TestRepositoryStatsPostgres$' -count=1 ./cmd/sigmark`。测试只使用该连接的临时表；未配置时跳过。优先使用独立测试实例。
 
+### 设备档案读取契约
+
+字段集 20 的 224 个静态上传键以共享测试清单 `app/src/test/resources/lan-projection-v20.txt` 锁定。Kotlin 测实际投影表，Go 测归档字典，用同一组 `group.key` 做双向一致性校验；动态分区另由正则和数量上限控制。清单并不要求每台手机实际上传所有字段。旧字段集 13–19 的清单仍保留在仓库中。
+
+`GET /api/admin/device-assets/{id}/dossier` 需要管理会话或 Bearer 令牌。只读取该资产最新的在库报告，按手机采样时间选择、接收时间和报告 ID 破平；时间缺失的旧记录排在有效时间之后。资产没有在库采样时返回 404。它不修订报告，也不从其他 ROM 或同型号设备补值。
+
+- `schemaVersion: 1`、`ruleVersion: "sigmark-dossier/5"` 为派生诊断版本，与上传协议、App 版本和字段集独立。可选 `latestGnssReportId` 引用同资产最近一份在库 GNSS 核对，即使有更新的标准采样也不覆盖这个入口。页面的诊断 JSON 与此接口同形；原始报告仍走原接口。
+
+### 资产合并与撤销
+
+「资产管理 → 设备档案 → 合并到另一设备」先展示在库、回收站、基线引用和后续上传关联影响，再确认同一部手机。报告正文及报告 ID 保持不变，目标保留别名；合并之后，原安装标记后续投稿也落到目标。
+
+- `GET /api/admin/device-assets/merge-preview?source=...&target=...` 返回影响和快照 `previewToken`。提交 `POST /api/admin/device-assets/merge` 时附 `source,target,confirmed,previewToken`。预览后归属、回收站或基线变化会要求重新预览。
+- `GET /api/admin/device-assets/merges?before=...` 分页查看新版记录；`POST /api/admin/device-assets/merges/{id}/undo` 携带 `{"confirmed":true}`。24 小时内若目标没有新增、删除或变更归属的报告/安装，可恢复原资产；之后仅保留日志。撤销时保持回收站状态和基线引用。试验环境使用共享凭据，日志不识别个人操作者。
+- 安装摘要及原始归属只保存在撤销快照，不在接口中返回；撤销立即清理快照，过期快照在后续合并时清理。当前策略保守拒绝归属已变化的撤销，不猜测合并后新报告来自哪一侧。
+- 如需给自动化只读仓库权限，可在 Compose 环境设置与 `ADMIN_TOKEN` 不同的 `REPOSITORY_READ_TOKEN`（至少 24 字符）。该令牌仅用于 Bearer 读取报告、档案、工作台、基线列表和字段统计；不创建浏览器会话，不读取构建、后台设置或合并审计，不进行批量导出或任何写操作。默认未启用，仍只用于内网；不替代 HTTPS 或独立上报身份。
+- `categories[].fields[]` 按 `group + key` 保留归档的状态、值、来源、原因、备注和可选 errno；`kind` 区分配置与能力、采样状态与实测。时间为报告采样时间，并非每个 Android API 的实际读时间。
+- `counts` 只计完整归档字段。有限的诊断清单不是上传白名单：`checklistSaved` 包含归档了无值状态的字段；`checklistScope` 再含条件适用但缺行的代表字段。旧协议/API 不适用、另有采样方案、授权不满足或历史条件未知均独立展示，不进入分母。`gaps[].code` 表示缺行解释而非设备读数；旧状态摘要单独标为 `legacyStatusOnly`，不能当完整证据。
+
 ## 构建中心
 
 0.18.2：采集后首页显示最近保存时间和待上传份数。可以连续采多份再选一份上传。已上传报告在列表底部，可确认后删除本机副本，不影响后台。仅在本机清除应用数据或卸载会丢失所有本机报告；旧版尚未提交的内存报告不会被迁移。无后台地址的离线构建仍可手动导出本地 JSON。

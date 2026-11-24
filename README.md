@@ -1,10 +1,32 @@
 # SigMark / 印迹
 
+**1.11.0** · 字段集 20 采集系统冷启动次数（`Settings.Global.BOOT_COUNT`）与媒体性能等级（API 31+），两者都只作世代/生命周期对照。外部观察新增 opt-in 的 `sigmark-adb-evidence/5`（`observer=ROOT`）：在 v4 字段之外给出 SELinux 策略摘要，需已 root 的测试机；面板把 App、ADB shell、root 三个来源分列，互不填充。浏览器 QA 新增身份分布页用例，报告详情对身份声明不一致的样本置顶提示。详见 [字段集 20](docs/FRAMEWORK-DIAGNOSTICS.md#字段集-20开机次数与媒体性能等级)、[syscall 边界](docs/SYSCALL-BOUNDARIES.md) 与 [设备验证记录](docs/DEVICE-VALIDATION.md)。
+
+**1.10.0** · 字段集 19 新增三条身份声明（`ro.board.platform`、`ro.boot.hardware`、`ro.boot.hardware.sku`），与 `Build.BOARD / HARDWARE / SKU` 做同一观察者内部的三对一致性检查；安全规则升到 `rom-evidence/4`，设备风险画像升到 `sigmark-profile/3`（第 9 个标签 `identity_conflict`），ADB 观察文件升到 v4 并并列比较这三项；设备风险画像新增同资产「历史身份声明」；报告详情对身份声明不一致的样本置顶提示；后台新增「身份分布」页，汇总多身份资产、跨资产同一声明与内部冲突报告。真机实测：小米序列上 App 读到 `mt6985 / mtk / 23078PND5G`，ADB shell 读到 `gs101 / oriole / GR1YH`，三对全部冲突；另一台 MI 8 两侧一致。详见 [字段集 19](docs/FRAMEWORK-DIAGNOSTICS.md#字段集-19身份字段与内部一致性)、[设备验证记录](docs/DEVICE-VALIDATION.md) 与 [安全证据](docs/SECURITY-EVIDENCE.md)。
+
+**1.9.0** · 机器码升级为三个独立分量（商品 `P2-`、硬件 `H2-`、ROM `R2-`），字段集 18 新增设备初始 API 级别；Android 8/9 的分区构建指纹改由只读属性补齐。真机实测发现同一属性在不同上下文可读到不同值：同一台设备上 App 读到小米 `23078PND5G / corot / mt6985`，ADB shell 读到 `Pixel 6 / oriole / gs101`，初始 API 级别也分别是 33 与 31。因此机器码只编码 App 归档视角，跨来源对照保留两套值。字段集 17 的 SELinux 推断、进程内安全线索与安全比对 `rom-evidence/3` 继续有效。详见 [机器码与节点](docs/CONFIGURATION-EVIDENCE.md)、[字段集 17](docs/FRAMEWORK-DIAGNOSTICS.md#字段集-17进程内安全线索与读取回退)、[字段集 18](docs/FRAMEWORK-DIAGNOSTICS.md#字段集-18设备世代与分区分支) 与 [设备验证记录](docs/DEVICE-VALIDATION.md)。
+
+**1.8.0** · 字段集 17 新增进程内安全线索，并给固定受限项补上可推断或可回退的读取路径。SELinux 实时模式在节点被策略拒绝时给出带依据的「推断」值（`system.selinuxEvidence` 标注依据），不再只有「系统拒绝访问」；属性改为每份快照一次 `getprop`，`Build` 为空的 Bootloader、基础系统版本与存储加密状态回退只读属性，电池温度节点增加 `bms/temp` 候选。新增 Hook/注入映射线索、内核 TracerPid、系统分区挂载线索、可见的 Root 管理应用、运行用户环境、DRM 保护级别、dm-verity 与可调试声明、分区构建日期。安全比对升到 `rom-evidence/3`：按启动／ROM／运行时／保护／身份分组，区分「受限」「未归档」「变化」，不再把 SELinux 的推断值当成变化。设备风险画像升到 `sigmark-profile/2`，新增五类标签并统计历史受限份数。已在 Pixel 6 / Android 14 与 MI 8 / Android 10 的隔离包上实测：两台都得到「推断为强制模式」，首轮 `memfd_exec` 误报（ART JIT）已排除，受限项只剩 SELinux 策略节点与电池驱动温度。详见 [设备验证记录](docs/DEVICE-VALIDATION.md)、[字段集 17](docs/FRAMEWORK-DIAGNOSTICS.md#字段集-17进程内安全线索与读取回退) 与 [安全证据](docs/SECURITY-EVIDENCE.md)。
+
+**1.7.0** · 通用 Android APK 扩充电池与蜂窝采集。字段集 16 新增电池存在状态、电池循环次数和默认数据卡服务状态。Android 13 及以上读取默认数据卡服务状态仅需电话状态权限。
+
+**补充证据入口**：报告详情新增「缺项与补充证据」，列出当前非可用项、来源及复测建议；可在浏览器本地并列观察固定清单 ADB 读数，不回填 App 原报告。
+
+**1.6.0**：新增「机器码与节点证据」。商品与 ROM 分量分别计算，设备档案展示输入、缺项和同机变化；字段集 15 增加三个固定 `/sys` 读数。见 [机器码与系统节点](docs/CONFIGURATION-EVIDENCE.md)。
+
+**1.5.0**：手机新增「GNSS 读数核对」，报告保留 Android 原始型号年与前台回调证据；在资产档案可直接找回最近一次 GNSS 核对。字段集 14、手动上传方式不变。见 [GNSS 读数质量与复测](docs/GNSS-QUALITY.md)。
+
+**1.4.1**：更新页以系统安装信息核对版本，并区分「可更新／当前最新／本机更新」。验收工作台展示可比的 ROM 实验回退与恢复，保留两侧原始证据；字段集 13 不变。
+
+**1.4.0**：设备档案支持合并影响预览和有保护的撤销；手机新增主动 USB 插拔观察，并在网络、AVC 和 GLES 实验中记录起止墙钟。验收工作台保留单调时钟间隔、同资产重复次数和导出依据。离线校准按设备统计，尚不等同于独立设备证明。
+
+**1.3.0**：App「查看扩展采集」和报告详情「扩展采集」直接显示已记录、有值及各字段集覆盖。标准采样新增 GNSS、输入、传感器和 Camera2 七项，ROM 验收另加三项离屏图形实测证据。历史快照保持原样。见 [采集字段说明](docs/FRAMEWORK-DIAGNOSTICS.md#字段集-12扩展硬件采集与图形实测)。
+
 Android 设备采集与 ROM 验收工具。**1.1.0** 新增独立「验收工作台」，旧报告也能直接筛选同机变化、失值和受限原因；手机首页新增「网络切换实验」，记录两次观察并保存待上传报告。见 [验收手册](docs/ACCEPTANCE-1.0.md)。
 
 0.18.2 起将「整体获取」与「上传报告」分开：在移动网络点击采集，结果保存在手机；连回后台所在 Wi-Fi 后按采集时间和网络选报告，确认才发送。重新采集、切网或重启 App 不会覆盖已保存的报告。保留设备归组、双卡诊断、链路时间线和报告批量导出。详见 [安全证据](docs/SECURITY-EVIDENCE.md) 和 [内网试验手册](docs/LAN-PILOT.md)。
 
-资产管理顶部保留「仓库总览」，下方默认每部已归组手机一行，点「查看采样」看历史；另设在库报告、字段覆盖和回收站。报告档案逐份保留。指纹安全可选样本和基线，解释启动链、保护状态和调试线索，不将配置摘要当硬件证明。见 [后台工作台](docs/WORKSPACE-UI.md)、[安全证据](docs/SECURITY-EVIDENCE.md) 和 [后续路线](docs/ROADMAP.md)。
+资产管理顶部保留「仓库总览」，下方每部已归组手机一行。点「打开档案」查看该设备最近一次采样的 12 类参数、缺项原因和采样历史；另设在库报告、全仓字段覆盖和回收站。报告档案逐份保留。指纹安全可选样本和基线，解释启动链、保护状态和调试线索，不将配置摘要当硬件证明。见 [后台工作台](docs/WORKSPACE-UI.md)、[安全证据](docs/SECURITY-EVIDENCE.md) 和 [后续路线](docs/ROADMAP.md)。
 
 报告可保存为命名基线，在「指纹安全」选新样本复测并导出结果。操作、API 和证据格式见 [ROM 回归工作流](docs/REGRESSION-WORKFLOW.md)。
 

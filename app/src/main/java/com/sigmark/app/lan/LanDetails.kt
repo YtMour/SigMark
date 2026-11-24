@@ -26,7 +26,8 @@ private val diagnosticFields = mapOf(
     "cellular" to setOf("carrierBandwidths", "simState", "defaultDataSlot", "slotService"),
     "network" to setOf("visibleTransports", "wifiRouteRole"),
     "system" to setOf("display", "incremental", "buildTime", "board", "sku", "baseOs", "tags", "device", "product", "bootloader",
-        "partitionCount","webViewProvider","webViewVersion","webViewCode","systemSpl","vendorSpl"),
+        "partitionCount","webViewProvider","webViewVersion","webViewCode","systemSpl","vendorSpl","initialSdk",
+        "boardPlatform","bootHardware","hardwareSku","bootCount","mediaPerformanceClass"),
     "cpu" to setOf("arch", "abi32", "abi64"),
     "memory" to setOf("ramUseEstimate", "volumeSummary", "systemSpace", "appCacheSpace"),
     "display" to setOf("wideGamut", "visibleDisplays", "windowSize", "systemBarInsets", "cutoutInsets"),
@@ -50,6 +51,41 @@ private val acceptanceFields = mapOf(
     "media" to setOf("avcFixture","avcFirstFrame","avcStage","avcDecoder","avcElapsed"),
 )
 
+private val observationFields = mapOf(
+    "cpu" to setOf("processBitness","kernelMachine"),
+    "system" to setOf("interfaceCapabilities"),
+    "runtime" to setOf("externalInputTypes"),
+)
+private val extendedHardwareFields = mapOf(
+    "system" to setOf("gnssHardwareYear", "gnssCapabilities"),
+    "runtime" to setOf("declaredInput", "glesProbeResult", "glesProbeVersion", "glesProbeStage"),
+    "sensors" to setOf("reportingModes", "fifoCount", "directChannelTypes"),
+    "media" to setOf("cameraModes"),
+)
+private val timedExperimentFields = mapOf(
+    "network" to setOf("checkStartAt","checkEndAt"),
+    "media" to setOf("avcStartAt","avcEndAt"),
+    "runtime" to setOf("glesStartAt","glesEndAt","usbStartAt","usbEndAt","usbStartCount","usbEndCount","usbOutcome","usbElapsed"),
+)
+// Field set 17: this process's own hook, trace, root, profile, DRM and ROM evidence.
+// environment.androidIdSha256 stays local and is never projected.
+private val processEvidenceFields = mapOf(
+    "environment" to setOf("hookSignals","tracerPid","rootMountHints","rootManagerVisible","userProfile",
+        "drmSecurityLevel","verityMode","buildDebuggable"),
+    "system" to setOf("partitionBuildDates","selinuxEvidence"),
+    "cpu" to setOf("coresConfigured"),
+)
+
+private val projectionFields = listOf(legacyFields, diagnosticFields, capabilityFields, acceptanceFields,
+    observationFields, extendedHardwareFields, timedExperimentFields, processEvidenceFields,
+    mapOf("system" to (setOf("gnssProvider","gnssAntennaSupport","gnssModelReported") + com.sigmark.app.collector.gnssCheckKeys)),
+    com.sigmark.app.collector.SysfsField.entries.groupBy({ it.group }, { it.key }).mapValues { it.value.toSet() },
+    mapOf("battery" to setOf("present","cycleCount"), "cellular" to setOf("dataSubscriptionService")))
+    .flatMap { it.entries }.groupBy({ it.key }, { it.value }).mapValues { (_, values) -> values.flatten().toSet() }
+
+internal val lanProjectionKeys: Set<String>
+    get() = projectionFields.flatMap { (group, fields) -> fields.map { "$group.$it" } }.toSet()
+
 internal data class LanCoverage(
     val group: String,
     val available: Int,
@@ -69,10 +105,9 @@ internal fun lanCoverage(snapshot: DeviceSnapshot): List<LanCoverage> =
 
 internal fun lanParameters(snapshot: DeviceSnapshot): List<LanParameter> =
     snapshot.sections.flatMap { section ->
-        val fields = legacyFields[section.key].orEmpty() + diagnosticFields[section.key].orEmpty() +
-            capabilityFields[section.key].orEmpty() + acceptanceFields[section.key].orEmpty()
+        val fields = projectionFields[section.key].orEmpty()
         section.items.filter { it.key in fields || (section.key == "system" && partitionField(it.key)) }.mapNotNull { item ->
-            val value = clean(item.value, 512)
+            val value = lanFieldValue(item.value)
             if (item.status == ValueStatus.AVAILABLE && value == null) return@mapNotNull null
             LanParameter(section.key, item.key, clean(item.label, 64) ?: item.key,
                 value.takeIf { item.status == ValueStatus.AVAILABLE },
@@ -80,6 +115,8 @@ internal fun lanParameters(snapshot: DeviceSnapshot): List<LanParameter> =
                 item.errno, clean(item.note, 280))
         }
     }.distinctBy { it.group to it.key }
+
+internal fun lanFieldValue(value: String?): String? = clean(value, 512)
 
 private fun clean(value: String?, max: Int): String? = value?.replace(Regex("[\\p{Cc}]+"), " ")
     ?.trim()?.takeIf { it.isNotEmpty() }?.let { it.substring(0, it.offsetByCodePoints(0, minOf(max, it.codePointCount(0,it.length)))) }

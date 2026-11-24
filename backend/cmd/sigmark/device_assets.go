@@ -136,53 +136,11 @@ type assetMerge struct {
 	Source    string `json:"source"`
 	Target    string `json:"target"`
 	Confirmed bool   `json:"confirmed"`
+	Preview   string `json:"previewToken"`
 }
 
 func (a assetMerge) valid() bool {
 	return a.Confirmed && a.Source != a.Target && requestPattern.MatchString(a.Source) && requestPattern.MatchString(a.Target)
-}
-
-func (s server) mergeDeviceAsset(w http.ResponseWriter, r *http.Request) {
-	var a assetMerge
-	if decodeStrict(http.MaxBytesReader(w, r.Body, 2048), &a) != nil || !a.valid() {
-		fail(w, 400, "invalid_device_assignment")
-		return
-	}
-	ctx, cancel := context.WithTimeout(r.Context(), 4*time.Second)
-	defer cancel()
-	tx, err := s.db.Begin(ctx)
-	if err != nil {
-		fail(w, 503, "storage_unavailable")
-		return
-	}
-	defer tx.Rollback(ctx)
-	if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(714301,5527)`); err != nil {
-		fail(w, 503, "storage_unavailable")
-		return
-	}
-	var count int
-	if err = tx.QueryRow(ctx, `SELECT count(*) FROM device_assets WHERE id IN ($1,$2)`, a.Source, a.Target).Scan(&count); err != nil {
-		fail(w, 503, "storage_unavailable")
-		return
-	}
-	if count != 2 {
-		fail(w, 404, "device_asset_not_found")
-		return
-	}
-	for _, statement := range []string{
-		`UPDATE reports SET asset_id=$2 WHERE asset_id=$1`,
-		`UPDATE asset_installations SET asset_id=$2 WHERE asset_id=$1`,
-	} {
-		if _, err = tx.Exec(ctx, statement, a.Source, a.Target); err != nil {
-			fail(w, 503, "storage_unavailable")
-			return
-		}
-	}
-	if _, err = tx.Exec(ctx, `DELETE FROM device_assets WHERE id=$1`, a.Source); err != nil || tx.Commit(ctx) != nil {
-		fail(w, 503, "storage_unavailable")
-		return
-	}
-	send(w, 200, map[string]string{"assetId": a.Target})
 }
 
 func (s server) deviceAssets(w http.ResponseWriter, r *http.Request) {

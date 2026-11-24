@@ -67,6 +67,12 @@ func (s server) manageReports(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback(ctx)
+	// Keep trash and purge from changing the preview snapshot while an asset
+	// merge or undo holds the exclusive association lock.
+	if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock_shared(714301,5527)`); err != nil {
+		fail(w, 503, "storage_unavailable")
+		return
+	}
 	result, err := tx.Exec(ctx, statement, input.IDs)
 	if err != nil {
 		fail(w, 503, "storage_unavailable")

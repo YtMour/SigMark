@@ -39,7 +39,10 @@ async function run(){
       const r=rows.find(x=>x.id===p);
       const start=Number(q.get('before')||0);
       const totals={devices:1,reports:set.length,unassigned:0,trash:0};
-      const data=r?{...r,...(p===id(65)?{trashedAt:when}:{}),report:{...r.report,metrics:[],parameters:params,coverage,
+      const data=p==='dossier'?{schemaVersion:1,ruleVersion:'sigmark-dossier/1',assetId:asset,reportId:id(1),batch:'qa-reader',
+        receivedAt:when,capturedAtEpochMs:Date.parse(when),reportSchemaVersion:4,fieldSetVersion:6,appVersion:'0.17.0',androidApi:29,context:{},
+        categories:groups.map(group=>({group,counts:{available:0,restricted:0,unavailable:0,errors:0},checklistSaved:0,checklistScope:0,fields:[],gaps:[]}))}:
+        r?{...r,...(p===id(65)?{trashedAt:when}:{}),report:{...r.report,metrics:[],parameters:params,coverage,
         ...(p===id(64)?{schemaVersion:1,parameters:undefined,coverage:undefined,metrics:[{key:'system.selinux',status:'RESTRICTED'}]}:{})}}:
         p==='device-assets'?(q.has('summary')?{generatedAt:when,totals,distributions:{}}:{items:[{id:asset,label:'设备样本',model:'QA',reports:65,firstSeen:when,lastSeen:when}],totals}):
         p==='report-count'?{total:set.length}:p==='reports'?{items:set.slice(start,start+30),nextCursor:start+30<set.length?String(start+30):''}: {items:[]};
@@ -91,7 +94,7 @@ async function run(){
     await page.getByRole('link',{name:'看全部报告'}).click();
     await page.getByRole('heading',{name:'在库报告',exact:true}).waitFor();
     await page.getByRole('link',{name:'设备档案',exact:true}).click();
-    await page.getByRole('link',{name:'查看采样',exact:true}).click();
+    await page.getByRole('link',{name:'打开档案',exact:true}).click();
     await page.getByRole('button',{name:'加载更早采样'}).click();
     await openAndCheck(page.locator('#sample-read-'+id(48)),'返回设备采样','button');
     const picks=page.getByRole('checkbox',{name:/选择采样/});

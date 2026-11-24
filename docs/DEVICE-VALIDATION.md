@@ -1,5 +1,96 @@
 # 设备验证记录与复测清单
 
+## 1.11.0 / 38 · 开机次数、媒体性能等级与 root 观察（2026-11-24）
+
+- **构建与测试**：97 项 Android JVM 单测、Lint（0 错误、30 项既有警告）、Go `vet` / 51 项测试、Web 70 项测试与生产构建、Python 8 项工具测试全部通过。APK 为 `app/build/outputs/apk/debug/app-debug.apk`，1.11.0 / 38，SHA-256 `341279bcba2399a4d9af11c7bc15ff016af6f5e3ec4a7e3d0a4d9b388f375c3c`；两台手机覆盖升级，仪器测试包用完卸载。
+- **字段集 20**：`system.bootCount` 在 App 侧读到 86 / 56，与 shell `settings get global boot_count` 一致；`system.mediaPerformanceClass` 在 Pixel 6 / API 34 上为 31，MI 8 / API 29 记 `INTERFACE_UNSUPPORTED`。字段集 20 归档 184 / 178 项，默认 `CapabilitySmoke` 在两台均通过（字段集 20、扩展键、AVC 首帧、GLES 探针、USB 观察、本机草稿）。
+- **root 观察通道**：新增 `sigmark-adb-evidence/5`（`observer=ROOT`）与 `tools/root_observation.py`，在 v4 字段之外给出 SELinux 策略摘要（`sha256:<64 位>`）；面板把 App、ADB shell、root 三个来源分列，root 值不回填 App 字段。**没有 root 真机可测**，只有解析、摘要格式与读数校验的单测；实机运行前先确认 `su -c getenforce` 与 `sha256sum /sys/fs/selinux/policy` 可用。
+- **浏览器 QA（Chrome headless，fixture 拦截，无数据库写入）**：`report-reader`（9 视口、126 字段、搜索/状态/覆盖/返回位置）、新写的 `identity-summary`（导航、概览、三张表、导出 JSON、320/390 px、报告详情身份提示与一致报告不提示）、`device-profile`（重试、390 px、键盘、历史受限、JSON）、`security-v7`（签名匹配/不匹配、冲突、分区披露、窄屏）、`configuration-evidence`（隔离栈内 320 px 档案、机器码三分量、ROM 输入变化、sysfs 对照、上一份采样链接、导出）均通过。截图在 `app/build/lan-qa/qa-web/`。
+- **内网部署**：重建并就地替换 `sigmark-lan-api-1`，数据库容器与卷未动。线上 `field-dictionary` 返回 `latestFieldSet=20`、`sigmark-lan-fields/10`、224 项；bundle 含「身份分布」「身份声明不一致」「root 观察」。真实库的 `identity-summary` 正常返回。
+- **未做**：root 真机、Android 8/9 分区属性真机、向正式库上传测试样本；不判断那台双身份设备的物理来源。
+
+## 1.10.0 / 37 · 身份字段与内部一致性（2026-11-24）
+
+- **构建与测试**：97 项 Android JVM 单测、Lint（0 错误、30 项警告）、Go `build` / `vet` / 51 项测试、Web 69 项测试与生产构建、Python 4 项工具测试全部通过。APK 为 `app/build/outputs/apk/debug/app-debug.apk`，1.10.0 / 37，SHA-256 `ec03a7011933cc1cb6eeaf0179800516bab622e25130241924b8d7788d1d9828`。两台手机已覆盖升级，仪器测试包用完卸载。
+- **字段集 19**：`system.boardPlatform`、`system.bootHardware`、`system.hardwareSku` 在 App 侧全部读到。序列 `35241FDF6S1P3K` 为 `mt6985 / mtk / 23078PND5G`，MI 8 为 `sdm845 / qcom / 未上报`（该 ROM 没有 `ro.boot.hardware.sku`）。快照 245 / 240 项，其中 232 / 219 可用、11 / 18 不可用、2 / 3 受限；归档字段 182 / 176。
+- **App 内部一致性**：两台都通过。「指纹安全 → 查看其他系统检查」显示「设备身份字段 · 已观察」：序列 `35241FDF6S1P3K` 比较 3 对一致（`mt6985/mt6985`、`mtk/mtk`、`23078PND5G/23078PND5G`），MI 8 比较 2 对一致（SKU 两侧都没有值，不算可比）。**内部一致不等于物理真相**，这条只报告同一观察者内部的自洽性。
+- **跨来源身份冲突（关键）**：同一分钟用 ADB 观察文件 v4 对照 App 报告：
+  - 序列 `35241FDF6S1P3K`：平台代号 `mt6985` vs `gs101`、启动硬件 `mtk` vs `oriole`、启动硬件 SKU `23078PND5G` vs `GR1YH`——**三对全部不一致**；SELinux 推断值仍与 `getenforce` 一致；电池节点 App 受限、shell 读到 262。
+  - MI 8：平台代号 `sdm845`、启动硬件 `qcom` 两侧一致；SKU 两侧都无值；电池节点两侧都读不到。
+  页面按「App 与 shell 身份字段不一致（同一属性可能按上下文改写），两值分别保留」呈现，不合并、不回填。
+- **规则版本**：前端 `rom-evidence/4` 新增 `identity_fields` 检查（review/observed/unknown）；设备风险画像 `sigmark-profile/3` 末尾追加 `identity_conflict`（9 个标签，顺序固定）；ADB 观察文件升到 `sigmark-adb-evidence/4`。
+- **同资产身份漂移**：设备风险画像新增 `identityHistory`（窗口内出现过的「型号+主板+硬件声明」组合，含份数、最近时间与报告链接，最多 5 套）。用一份合成 v19 报告验证：同资产两份样本出现两种身份组合时，画像返回 2 条并保持最近优先；单份时返回 1 条。前端「设备风险画像」增加「历史身份声明」折叠块。
+- **上传验收（隔离栈）**：用 `docker compose -p sigmark-qa1100` 起临时 PostgreSQL 17 + API（`127.0.0.1:48293`），上传两份合成 v19 报告（同资产、两种身份声明），逐项核对后 `down -v`，卷与网络均删除，未接触正式库。结果：
+  - 上传 201，`assetLinked=true`；归档回读 `fieldSetVersion=19`，18 个字段含三条身份声明。
+  - `GET /api/admin/field-dictionary`：`latestFieldSet=19`、`dictionaryVersion=sigmark-lan-fields/9`、222 项。
+  - `GET .../device-profile`：`sigmark-profile/3`、9 个标签；第一份 `identity_conflict=hit`（`boardPlatform=gs101` 与 `board=mt6985` 冲突），第二份 `not_observed`；`identityHistory` 分别为 1 / 2 条。
+  - 档案（dossier）：三个机器码分量全部生成，商品 `P2-1c04…`、硬件 `H2-d23f…` 与真机 App 值一致，ROM `R2-8b6d…`；`previousReportId` 指向上一次同资产采样；身份字段已归档。
+  - 证据脚本与输出在 `app/build/lan-qa/upload-1100/`（不提交）。
+- **仓库级身份分布**：新增 `GET /api/admin/identity-summary` 与「身份分布」页。在隔离栈（项目 `sigmark-qa1100`，`down -v` 后清理）上传 3 份合成 v19 报告：2 份同资产（两种身份声明）、1 份另一资产（与第二种相同声明）。接口返回 `assets=2`、`reports=3`、`multiIdentityAssets=1`、`sharedIdentities=1`（`assetCount=2`）、`conflictReports=1`（2 个冲突对）。纯函数单测覆盖聚合、缺失/受限不算冲突、列表截断；`TestIdentitySummaryPostgres` 在临时 PostgreSQL 上覆盖 SQL 投影、回收站排除与共享声明。前端构建产物包含该页面，浏览器回归未跑。
+- **内网部署**：重建并就地替换 `sigmark-lan-api-1`，数据库容器与卷未动（`sigmark-lan-db-1` 运行时长未变）。健康检查 ready；线上 `GET /api/admin/field-dictionary` 返回 `latestFieldSet=19`、`sigmark-lan-fields/9`、222 项；`GET /api/admin/identity-summary` 在真实库（2 份在库报告、2 个资产）返回 `reports=2 assets=2`、三类列表为空（现有报告早于身份字段），页面 bundle 已包含「身份分布」与报告详情的「身份声明不一致」提示。
+- **身份提示**：报告详情新增顶部「身份声明不一致」提示（共享纯函数 `identityConflictsOf`，忽略大小写、两侧都有值才比较），设备风险画像在 `identity_conflict` 命中时同样置顶提示；两处都只提示核对。新增 Web 单测覆盖三对冲突、缺一侧、受限与大小写归一。
+- **未做**：未向正式后台上传；未运行浏览器 QA；Android 8/9 分区属性回退仍无真机（已补纯函数单测）；root 观察通道未接；不判断这台双身份设备的物理来源。
+
+## 1.9.0 / 36 · 机器码三分量与设备世代（2026-11-24）
+
+- **构建与单元测试**：Debug APK、94 项 Android JVM 单测、Lint（0 错误、30 项既有警告）、Go `build` / `vet` / 41 项测试、Web 65 项测试与生产构建、Python 4 项工具测试全部通过。APK 为 `app/build/outputs/apk/debug/app-debug.apk`，1.9.0 / 36，SHA-256 `a07ea151707d70e9ca9725ff0d90e97cf3ad3414bec7873bd413ef1af82d8c3e`。
+- **正式包升级**：两台手机都用 `adb install -r` 覆盖到 1.9.0 (36)，数据和授权保留；仪器测试包用完已卸载，手机上只有 `com.sigmark.app`。
+- **机器码三分量已在真机生成**（`-e configuration check` 连跑两次同码）：
+  - 序列 `35241FDF6S1P3K`：`P2-1c041f1e860b175b83bda8ec8bb1f684` / `H2-d23fc40b1186d4fbf2fdbe5bb095699f` / `R2-45874610a0c6da10767fa24a206438a6`。
+  - 序列 `5371113b`：`P2-2f9d7b64849e7b272548d6958d5ca996` / `H2-c4930cdce4ec2d4ddf9ea340ab056a26` / `R2-d4d8acf103f666a06786bb3e5e4c147e`。
+- **字段集 18**：`system.initialSdk` 在 App 侧读到 33（序列 `35241FDF6S1P3K`）与 27（MI 8）。同一属性在 ADB shell 上分别是 31 与 27——第一台设备的属性值按上下文改写。分区分支两台都走 `Build.getFingerprintedPartitions`（API 34：5 个分区；API 29：4 个），Android 8/9 的属性回退分支本轮没有对应真机，只做了静态与契约核对。
+- **真机发现的身份冲突（重要）**：序列 `35241FDF6S1P3K` 上，同一时刻两个上下文给出两套自洽的设备身份：
+
+  | 观察项 | App（`untrusted_app` / `run-as`） | ADB shell（`u:r:shell:s0`） |
+  | --- | --- | --- |
+  | 型号 / 代号 | `23078PND5G` / `corot` | `Pixel 6` / `oriole` |
+  | 主板 / SoC | `mt6985` / `Dimensity 9200+`（MediaTek） | `gs101` / `Tensor`（Google） |
+  | `ro.product.first_api_level` | 33 | 31 |
+  | 分区构建指纹 | `Xiaomi/corot_global/corot:14/…` | `google/oriole/oriole:14/…` |
+  | 显示物理尺寸 / 内存 | 1220×2712 / 12.00 GiB | `wm size` 1080×2400 |
+
+  用 `adb shell run-as com.sigmark.app getprop ro.product.model` 得到 `23078PND5G`，同一命令在 shell 下得到 `Pixel 6`：差异发生在按调用上下文的属性视图，而不是采集器。两种视图各自内部一致，本轮不判断哪一个是物理真相；结论是**任何单一 API 都不是“真实设备信息”**，报告只能标注观察者。机器码因此只编码 App 归档视角，跨来源对照用「证据来源对照」并排保留。
+- **状态计数（快照口径）**：序列 `35241FDF6S1P3K` 241 项：229 可用、11 不可用、2 受限；MI 8 237 项：217 可用、17 不可用、3 受限。LAN 归档字段 179 / 173。
+- **未做**：未上传到正式后台或临时 PostgreSQL；未运行浏览器 QA；未测 Android 8/9 分区属性回退；未接 root 观察通道；两台设备的真实物理来源不由本工具认定。
+
+## 1.8.0 / 35 · 进程内安全线索与读取回退（2026-11-24）
+
+- **构建与单元测试**：Debug APK、93 项 Android JVM 单测、Lint（0 错误、30 项既有警告）、Go `build` / `vet` / 41 项测试、Web 65 项测试与生产构建全部通过。APK 为 `app/build/outputs/apk/debug/app-debug.apk`，版本 1.8.0 / 35，SHA-256 `bd4bd24880e29ae93830cf8cbb53a89446b95c580755c9790f932e6af2699ca7`，签名仍为 Android Debug 证书（`e424900e…`）。
+- **正式包已升级**：`adb install -r` 把 `com.sigmark.app` 从 1.7.0 覆盖到 1.8.0 (35)，两台手机的数据与已授权限保留（Pixel 6 与 MI 8 的电话状态、精确位置均为 granted）。升级后两台都能正常采集，`CapabilitySmoke`（字段集 17 断言、AVC 首帧、GLES 探针、USB 观察、本机草稿）通过。本轮用过的隔离包 `com.sigmark.app.qa` 与仪器测试包已卸载，手机上只留正式包。
+- **SELinux 推断已在真机成立，并有内核审计旁证**：两台都得到 `system.selinux = Enforcing（强制模式，推断）`、`system.selinuxEvidence = inferred_mac`。logcat 同时给出 `avc: denied { read } name="enforce" ... scontext=u:r:untrusted_app ... permissive=0`，即策略拒绝发生在强制模式下；ADB `getenforce` 也返回 `Enforcing`。三个来源一致，推断值不是猜的。`system.selinuxPolicy` 仍 `RESTRICTED / ACCESS_DENIED / errno=13`，shell 也被 `security:read_policy` 拒绝，只有 root 能读内容。
+- **真机发现并修掉一个误报**：首轮 dump 时两台都报 `environment.hookSignals = memfd_exec`。排查后确认是 ART 运行时自己创建的 JIT memfd，已改为排除运行时 memfd 名称（jit、dalvik、vdex、oat、gralloc、hwui、ion、adf）后才计入。复测两台均为 `none`。
+- **属性回退与上下文改写**：Pixel 6 的 `system.bootloader` 由回退 `getprop ro.bootloader` 得到 `corot-1.0.9`；同一台设备的 shell 读同一属性得到 `slider-14.5-12088207`，说明属性会被 ROM 按进程上下文改写。MI 8 的该属性对 App 不可见，保持 `OPTIONAL_UNSET`。`system.baseOs` 两台都未提供。`system.partitionBuildDates`：Pixel 6 五个分区均 2024-08-09（`ro.bootimage.build.date.utc` 被 App 的 SELinux 策略拒绝，所以没有 bootimage）；MI 8 system / vendor / odm / bootimage 均 2021-10-28。
+- **跨来源对照（App / 无 root 的 shell）**：`tools/coverage_observation.py` 升级为 `sigmark-adb-evidence/3`，新增 `ro.bootloader`、`ro.boot.veritymode`、`ro.debuggable` 与电池驱动温度节点。两台实机各采一份，与 15 秒内的 App 快照并排比较：补丁、启动校验、锁定、VBMeta、verity、SELinux 全部一致；电池温度在差值内（Pixel 6 26.5 °C / 264，电压 4395 mV 对 4395）；App 拒读的 `battery.sysBatteryTemp` 在 Pixel 6 上 shell 读到 265（26.5 °C），MI 8 上 shell 也读不到；`system.vendorSpl` 与 `environment.buildDebuggable` 在 Pixel 6 上 App 为未上报、shell 可读（2026-07-05 / 0）。这些都只在「证据来源对照」里并列，没有写回 App 字段。证据在 `app/build/lan-qa/evidence-180/`。
+- **状态计数（快照口径，正式包）**：Pixel 6 为 241 项：228 可用、11 不可用、2 受限；受限只剩 `system.selinuxPolicy` 与 `battery.sysBatteryTemp`（公开温度仍可用）。MI 8 为 241 项：222 可用、16 不可用、3 受限（多出的是 GNSS 接口不支持与平均电流等本机不提供的项）。LAN 归档字段 178 / 175。
+- **未做**：未向正式后台或临时 PostgreSQL 上传（避免测试样本写入真实仓库）；未运行浏览器 QA `backend/web/qa/*.cjs`；未测试分身/工作资料、被注入环境或模拟器；`backend/scripts/qa_device_profile.py` 未执行；`capture-adb-evidence.ps1` 因本机执行策略禁止运行脚本而未实跑，同等逻辑由 Python 工具在实机验证。
+
+## 1.7.0 / 34 · 跨版本采集（2026-11-24）
+
+- **构建**通过 Debug APK、78 项 Android JVM 单测、Lint、Go test/vet、52 项 Web 测试和 Web 生产构建。内网下载的 `com.sigmark.app` APK 版本为 1.7.0 / 34，签名与 1.6.0 一致。下载 SHA-256 为 `e0b29cdc3c0f6efd8af5e58ac0b5ed94fbfe30fa803dc1a5cb0821efc822d8db`。
+- **安装与采集**使用独立测试包 `com.sigmark.app.qa`。Pixel 6 / Android 14（应用视角型号 `23078PND5G`）和 MI 8 / Android 10 均报告有电池。Pixel 样本报告 44 次电池循环，且仅有电话状态权限时成功取得默认数据卡「有服务」。Android 10 缺少公开循环次数接口，MI 8 上该字段为 `INTERFACE_UNSUPPORTED`。MI 8 的未授权样本将默认数据卡服务和订阅载波带宽标为 `PERMISSION_REQUIRED`；在正式 `com.sigmark.app` 1.7.0、电话状态与精确位置均已授权的复测中，两项均如实返回 `NOT_REPORTED`，没有用其他 SIM、注册小区或 ADB 读数填充。
+- **上传、页面与导出**在独立临时 PostgreSQL 中验证。每部手机的两个不同采样归入同一测试资产，重送同一请求复用回执。360 px Chromium 搜索归档字段，检查状态、来源及下载 JSON。正式 LAN 更新后，数据库容器、卷与部署前可读的 4 份归档响应哈希匹配。
+- **待验证** 真机成功返回订阅载波带宽、正式包手机内在线安装。当前 Pixel 样本为 `MODEM_NOT_REPORTED`，MI 8 全授权样本为 `NOT_REPORTED`，分别代表服务状态接口未给出有效载波列表；不是跨 ROM 固定值。普通 APK 仍按 Android 公共 API 和运行时权限工作，不依赖特定 ROM 分支。验收证据保存在 `app/build/lan-qa/portable-v16/`。
+
+## 缺项与补充证据（2026-11-24）
+
+- 两台已连接真机的 ADB 系统诊断显示 SELinux 均为 Enforcing。系统电池服务返回 MI 8 25.0 °C / 4164 mV，Pixel 6 27.0 °C / 4396 mV。MI 8 的 VBMeta 锁定属性未回报。记录在本机忽略目录 `app/build/lan-qa/coverage-evidence/`。
+- 320 px Chrome 使用 MI 8 原报告和上述实机文件验证导入、坏文件提示、键盘展开和移除。App 原始拒读及另一次系统观察并列展示。检查期间浏览器只发 GET；部署沿用原 PostgreSQL 容器和卷。Web 48 项测试和生产构建、Python 2 项测试通过。
+
+## 1.6.0 / 33 · 机器码与节点证据（2026-11-24）
+
+- Pixel 6、MI 8 使用隔离 APK，各在普通应用进程连续采样两次。两个机器码分量均稳定；Pixel 6 重装隔离 APK 后两码仍匹配。两部相同配置可同码、ROM 输入变化只改变 ROM 分量、受限输入时暂停生成分量，均以合成夹具验证。
+- 两台实机的 `possible` 和 `online` 均为 `0-7`。电池节点均为 `RESTRICTED / ACCESS_DENIED / errno=13`。Pixel 6 页面的本机重测草稿同时保存 `Runtime.availableProcessors=8` 和 `BatteryManager.EXTRA_TEMPERATURE=26.5 °C`，保留受限节点的空值。未将公开温度冒充节点返回。
+- Pixel 6 走过生成机器码、重采与待上传列表，冻结草稿已核对但未发送。MI 8 的隔离 App 向临时 PostgreSQL 实际上传并核对字段来源、重试、同资产归档。320 px Chrome 验证机器码、ROM 输入变化、节点/API 对照和诊断 JSON 导出，浏览器数据为合成样本。
+- Android 76 项单测、Debug 构建及 Lint，Go test/vet，Web 46 项单测与生产构建通过。内网发布 APK 下载哈希匹配且签名承接 1.5.0。数据库容器、卷与 3 份在库原报告已核对。未验收正式包的手机内升级、两台同型号实机、实际刷机前后变化或 ROM 服务。证据位于 `app/build/lan-qa/config-v15/`。
+
+## 1.5.0 / 32 · GNSS 读数核对（2026-11-23）
+
+- 用 1.4.1 的真实归档确认 Redmi 23076RA4BC 的原始值为 `2016`，来源为 Android GNSS 接口；新后台在 320 px 展开后按正确语义解释，无历史报告改写。三份在库报告的详情响应在部署前后逐份核对一致，PostgreSQL 容器和卷保留。
+- Pixel 6 用隔离应用 ID 验证：无精确位置授权时为 `RESTRICTED / PERMISSION_REQUIRED`；授权后前台等待约 20 秒，本次两路未收到非空事件，记录 `not_seen`。型号年再次取得 2020。实际点按「更多工具 → GNSS 读数核对 → 开始前台实测 → 保存本机报告」，本地出现一份待上传；未发送到正式仓库。
+- MI 8（Android 10）验证隔离包启动并完成 12 类标准采集；MIUI 拦截自动授予测试包权限，未在此机取得前台 GNSS 实测结果。Redmi 本轮仅复核历史报告，未进行新版开阔环境复测。API 30 单独天线接口已核对 SDK 签名，未在 Android 11 真机测试。
+- Android Debug 和测试 APK、72 项单测与 Lint，Go test/vet，Web 46 项单测及生产构建通过。临时 PostgreSQL 用合成样本验证原始 0、状态/测量双回调正向、后续标准报告不覆盖该资产的 GNSS 回链；320 px 浏览器验证键盘展开、工作台结果和证据导出。真实非空 GNSS 回调仍待开阔处确认。
+- 内网 1.5.0 同签名发布，实际下载与候选 APK 的 SHA-256 一致；从旧安装走设备安装器升级不在本轮验收内。本地测试证据在 `app/build/lan-qa/gnss-v14/`。
+
 ## 1.1.0 / 27 · 验收工作台（2026-11-23）
 
 - 在 MI 8、Pixel 6 完成覆盖安装，仪器测试验证字段集 10 的两点网络数据和首帧测试。Pixel 6 实际走过「记录起点 → 系统网络设置 → 返回 → 记录终点 → 上传预览」；两次观察均为已验证的 Wi-Fi，未切换蜂窝，未提交真实报告。
@@ -263,3 +354,10 @@ adb shell am start -n com.sigmark.app/.MainActivity
 5. 用 `adb logcat` 排查启动或导出异常；使用不同 Android 版本与厂商 ROM 重复验证。
 
 报告含设备识别信息，真机 JSON 和截图只保留在本地构建目录，默认不提交仓库。
+
+## 1.4.1 综合验收补充
+
+- App 更新页从 PackageManager 取实际已安装的版本；按 versionCode 判定是否更新，包名、版本、签名及下载哈希核验继续保留。
+- 真机 App 上报可用 `python -B backend/scripts/qa_android_upload.py --serial <USB设备> --image <已构建镜像>` 验收。需先在这台设备安装签名一致的 Debug APK 和 instrumentation APK；脚本使用临时反向端口、独立测试 SQLite 文件及临时 PostgreSQL，不写正式报告。检查两次实际 HTTP 上报、重试使用同一回执及新采样正确归组。
+- Pixel 6 实机观察到 1.4.1 查询与发布版一致；从 App 进程通过隔离服务上报两份不同采样（首份 157 项），同一请求重试不重复入库，两份结果正确归组。新 Android 14 测试机（23076RA4BC）手动安装 1.4.0 后，首页显示 12 类、206 项，其中 193 项有值。该 ROM 拦截主机模拟点击，查验主页不代表完成了真机在线安装。
+- 当前仅实现内网上报。整体验收仍需实体 OTG 的正向数量变化、独立预标注设备的校准集、硬件挑战验证、远程 HTTPS/独立上报身份与完整字段适用性审计。

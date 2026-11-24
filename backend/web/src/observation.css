@@ -12,3 +12,7 @@
 .observation-scroll :is(th,td) { text-align: start; padding: .6rem; vertical-align: top; }
 .observation-scroll tbody th { position: sticky; inset-inline-start: 0; background: var(--panel); }
 .observation-scroll small { display: block; color: var(--muted); overflow-wrap: anywhere; }
+.evidence-observations details { overflow-wrap: anywhere; }
+.evidence-observations summary { cursor: pointer; padding-block: .45rem; }
+.observation-gaps { padding-inline-start: 1.3rem; }
+.observation-gaps li { padding-block: .45rem; border-block-end: 1px solid var(--border); }

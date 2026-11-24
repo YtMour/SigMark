@@ -26,8 +26,12 @@ import java.util.Date
 
 private val securityGroups = listOf(
     "启动与系统保护" to listOf("environment.verifiedBoot","environment.vbmetaState","environment.flashLock","system.selinux",
-        "system.patch","environment.keyguardSecure","environment.storageEncryption"),
-    "构建与运行时" to listOf("environment.buildSignals","environment.virtualDeviceHints","app.appDebuggable","app.debuggerConnected"),
+        "system.selinuxEvidence","system.selinuxPolicy","environment.verityMode","environment.buildDebuggable","system.patch",
+        "environment.keyguardSecure","environment.storageEncryption"),
+    "构建与运行时" to (listOf("environment.buildSignals","environment.virtualDeviceHints","app.appDebuggable","app.debuggerConnected",
+        "environment.tracerPid","environment.hookSignals","environment.rootMountHints","environment.rootManagerVisible",
+        "environment.userProfile","environment.drmSecurityLevel","system.partitionBuildDates","cpu.coresConfigured",
+        "system.baseOs","system.bootloader") + architectureKeys),
     "组件与采集器" to listOf("system.webViewProvider","system.webViewVersion","system.webViewCode","system.systemSpl","system.vendorSpl","app.package","app.channel","app.version","app.certSha256"),
     "仅本机对照" to listOf("environment.configurationDigest","environment.strongBiometrics"),
 )

@@ -69,7 +69,7 @@ Debug 内网试验分支：冻结当前本地快照 → `lan/LanReport.kt` 按�
 ### 普通设备兼容策略
 
 - LAN v4 字段集 7：`system.partitionCount`、`system.partition_<name>`、`system.webViewProvider/webViewVersion/webViewCode`、`system.systemSpl/vendorSpl`、`environment.keyProtection`、`app.package/channel/certSha256`。动态分区名仅限小写字母、数字、下划线（1–32 字符、最多 24 个），只允许在 system 下。v7 最多 192 条，旧 v3/v4 仍最多 160 条。对照按稳定键，不按显示顺序。按需密钥测试的采样时刻在该项说明里，不改原快照时间。
-- 启动规则的 Kotlin / TypeScript 实现共用测试样例 `app/src/test/resources/security-boot.tsv`；单份和对比都先判红色与冲突，再判符合预期的解锁。复测 JSON 新增 `ruleVersion: rom-evidence/2`，与采集器和字段集版本独立。
+- 启动规则的 Kotlin / TypeScript 实现共用测试样例 `app/src/test/resources/security-boot.tsv`；单份和对比都先判红色与冲突，再判符合预期的解锁。复测 JSON 的 `ruleVersion` 为 `rom-evidence/4`，与采集器和字段集版本独立。
 - 管理端 `GET /api/admin/release-signer?package=com.sigmark.app&channel=lan-debug&version=0.18.0&code=20` 仅查已发布版本。当前记录来自发布指针，切换前将原发布证书摘要保存在构建数据目录 `published-signers/`；旧文件中从未记录的历史不作猜测。无对应数据是 `unregistered`，存储不可读是服务故障，不能作为证书不匹配。未改变用户归组或报告鉴权机制。
 
 - 公开 API 优先：Build、ActivityManager、StatFs、Display、BatteryManager、SensorManager、ConnectivityManager。CPU 文本、首核频率、Swap、SELinux 与厂商属性是可选补充，不阻断其他参数。
@@ -93,3 +93,15 @@ Debug 内网试验分支：冻结当前本地快照 → `lan/LanReport.kt` 按�
 - 普通启动及权限结果回调只更新首页显示。主动整体获取、手动刷新、密钥复测在配置 LAN 的构建中产生独立条目；首次可手动选择首页结果。采集不会发起网络请求。
 - ReportShelf 在 App 私有 SQLite 中按后台地址隔离报告，仅存 LAN 允许的投影、采集网络和时间、备注、关联选择和发送状态，不保存完整本地导出。成功上传不自动删除本机副本。用户可按条删除；默认无自动上传、无后台重试。
 - 首次确认时以事务固定正文、提交编号和关联选择，再发送；中断后从同一目的地恢复原始字节。回执保存在本机，查看已上传不重复发出请求。服务器仍按批次与提交编号去重，切换服务端批次不承诺跨批次去重。
+
+### 字段集 17 与比对规则
+
+- 字段集 20 增加 `system.bootCount`、`system.mediaPerformanceClass`，静态键 224、单帧上限 248，词典 `sigmark-lan-fields/10`。外部观察文件增加 `sigmark-adb-evidence/5`（`observer=ROOT`，SELinux 策略摘要），面板按来源分列。
+- 字段集 19 增加 `system.boardPlatform`、`system.bootHardware`、`system.hardwareSku` 三个只读属性声明，静态键 222、单帧上限 246。安全规则 `rom-evidence/4` 新增同一观察者内部的「身份字段一致性」检查；设备风险画像升到 `sigmark-profile/3`，末尾追加 `identity_conflict`。ADB 观察文件升到 `sigmark-adb-evidence/4`，并列比较这三项。
+- 字段集 18 增加 `system.initialSdk`（出厂 API 级别，来自 `ro.product.first_api_level`），静态键 219 个、单帧上限 243（219 + 最多 24 个分区行）。Android 8/9 的分区构建指纹改由 `ro.<partition>.build.fingerprint` 只读属性补齐，键空间与来源字段不变。
+- 机器码升级为 `sigmark-config-code/2`，分为商品 `P2-`、硬件 `H2-`、ROM `R2-` 三个独立分量；硬件分量使用 `cpu.hardware`、`system.board`、`cpu.coresConfigured`、`system.initialSdk`。任一分量输入不全只影响该分量。它只编码 App 归档视角，不代表物理设备真相。
+- Android 投影新增 11 个静态键：`environment.hookSignals`、`tracerPid`、`rootMountHints`、`rootManagerVisible`、`userProfile`、`drmSecurityLevel`、`verityMode`、`buildDebuggable`，`system.partitionBuildDates`、`selinuxEvidence`，`cpu.coresConfigured`。`environment.androidIdSha256` 只在本机 JSON 中，不进入上传投影。静态键 218 个，单帧上限 242（218 + 最多 24 个分区行）。共享登记表为 `app/src/test/resources/lan-projection-v17.txt`，Go 契约测试逐键比对。
+- 采集侧统一「先公开 API、再固定节点、再只读属性」的顺序。属性读取每份快照执行一次 `getprop` 并解析成内存表，未命中的键回退单键读取；`battery.sysBatteryTemp` 允许 `battery/temp` 与 `bms/temp`，服务端按「命中任一允许路径」校验来源，词典与档案仍展示主路径。
+- `system.selinux` 与 `system.selinuxEvidence` 必须成对解释：直接读数为 `exact`，EACCES 且 DAC 允许读取为 `inferred_mac`，selinuxfs 未挂载为 `inferred_disabled`。推断值在值串里带「推断」，任何消费者都不得把推断当成直接读数；规则与画像只把 `Permissive` 当风险线索。
+- 前端安全规则升到 `rom-evidence/3`，检查项增加 `hook`、`trace`、`profile`、`drm`、`rom`；对照每行带 `category`，结论新增 `restricted`（一侧被系统拒绝）与 `not_archived`（一侧字段集未包含该键），并提供 `compareSummary` 汇总。`regression.ts` 生成的对比导出使用同一规则版本。
+- 设备风险画像升到 `sigmark-profile/2`，标签顺序固定为 `virtual_build_markers`、`selinux_permissive`、`debugger_attached`、`hook_injection`、`root_manager_visible`、`multi_open`、`rom_verification`、`software_drm`，并输出 `historyRestricted`。历史样本的受限字段不进入命中，也不作为反证。

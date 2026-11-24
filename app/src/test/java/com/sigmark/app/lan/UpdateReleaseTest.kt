@@ -5,6 +5,14 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class UpdateReleaseTest {
+    @Test fun updateDecisionUsesActualInstalledCode() {
+        val published=UpdateRelease("1.4.1",31,4096,"a".repeat(64))
+        org.junit.Assert.assertEquals(UpdateAvailability.AVAILABLE,updateAvailability(InstalledUpdateVersion("7.0.0",30),published))
+        org.junit.Assert.assertEquals(UpdateAvailability.CURRENT,updateAvailability(InstalledUpdateVersion("1.4.1",31),published))
+        org.junit.Assert.assertEquals(UpdateAvailability.AHEAD,updateAvailability(InstalledUpdateVersion("0.9.0",32),published))
+        org.junit.Assert.assertFalse(published.copy(name="...").isValid())
+        org.junit.Assert.assertFalse(published.copy(code=2_100_000_001L).isValid())
+    }
     @Test fun verifiesKnownCertificatesAndDefersMissingRomData() {
         org.junit.Assert.assertEquals(UpdateSigners.MATCH, compareUpdateSigners(setOf("A"), setOf("A")))
         org.junit.Assert.assertEquals(UpdateSigners.MISMATCH, compareUpdateSigners(setOf("A"), setOf("B")))

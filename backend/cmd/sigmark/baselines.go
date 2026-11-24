@@ -58,6 +58,10 @@ func (s server) createBaseline(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback(ctx)
+	if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock_shared(714301,5527)`); err != nil {
+		fail(w, 503, "storage_unavailable")
+		return
+	}
 	var count int
 	if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(714301,5528)`); err != nil {
 		fail(w, 503, "storage_unavailable")
@@ -102,13 +106,27 @@ func (s server) deleteBaseline(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 4*time.Second)
 	defer cancel()
-	row, err := s.db.Exec(ctx, `DELETE FROM regression_baselines WHERE id=$1`, id)
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		fail(w, 503, "storage_unavailable")
+		return
+	}
+	defer tx.Rollback(ctx)
+	if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock_shared(714301,5527)`); err != nil {
+		fail(w, 503, "storage_unavailable")
+		return
+	}
+	row, err := tx.Exec(ctx, `DELETE FROM regression_baselines WHERE id=$1`, id)
 	if err != nil {
 		fail(w, 503, "storage_unavailable")
 		return
 	}
 	if row.RowsAffected() != 1 {
 		fail(w, 404, "baseline_not_found")
+		return
+	}
+	if tx.Commit(ctx) != nil {
+		fail(w, 503, "storage_unavailable")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

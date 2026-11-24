@@ -27,6 +27,20 @@ func digest(value string) string {
 func (s server) tokenMatches(value string) bool {
 	return value != "" && s.token != "" && subtle.ConstantTimeCompare([]byte(digest(value)), []byte(digest(s.token))) == 1
 }
+func (s server) readerMatches(value string) bool {
+	return value != "" && s.readerToken != "" && subtle.ConstantTimeCompare([]byte(digest(value)), []byte(digest(s.readerToken))) == 1
+}
+func (s server) requireRepositoryRead(next http.Handler) http.Handler {
+	normal := s.requireAdmin(next)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if bearer, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer "); ok &&
+			(r.Method == http.MethodGet || r.Method == http.MethodHead) && s.readerMatches(bearer) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		normal.ServeHTTP(w, r)
+	})
+}
 func adminIntent(r *http.Request) bool {
 	// No CORS headers; a cross-origin browser cannot send this non-simple header.
 	return r.Header.Get("X-SigMark-Admin") == "1" && r.Header.Get("Sec-Fetch-Site") != "cross-site"
@@ -35,6 +49,10 @@ func (s server) requireAdmin(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		auth := r.Header.Get("Authorization")
 		bearer, hasBearer := strings.CutPrefix(auth, "Bearer ")
+		if hasBearer && s.readerMatches(bearer) {
+			fail(w, 403, "read_only_token")
+			return
+		}
 		ok := hasBearer && s.tokenMatches(bearer)
 		if auth == "" && s.db != nil {
 			if c, err := r.Cookie(sessionCookie); err == nil && sessionPattern.MatchString(c.Value) {

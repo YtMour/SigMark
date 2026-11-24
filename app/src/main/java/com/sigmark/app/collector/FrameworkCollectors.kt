@@ -69,6 +69,9 @@ internal object RuntimeCollector : DeviceCollector {
         observation("openGlEs", "声明的 OpenGL ES 版本", features.map { list ->
             list.firstOrNull { it.name == null && it.reqGlEsVersion > 0 }?.glEsVersion
         })
+        observation("externalInputTypes", "外接输入设备类型", externalInputTypes())
+        value("declaredInput", "系统声明的输入能力", "PackageManager.hasSystemFeature",
+            "触屏、多点触控及手柄声明，和当前连接的外设不是一回事。") { declaredInput(pm) }
         observation("vulkanVersion", "声明的 Vulkan 版本", features.map { list ->
             list.firstOrNull { it.name == PM.FEATURE_VULKAN_HARDWARE_VERSION }?.let { vulkanVersion(it.version) }
         }.let { it.copy(detail = it.detail ?: "系统公开的规范版本，未运行图形驱动探针。") })
@@ -145,6 +148,24 @@ internal object MediaCollector : DeviceCollector {
             }
         }
         observation("cameraCapabilitySummary", "Camera2 镜头能力", cameraSummary)
+        val cameraModes: ReadResult<String> = when {
+            characteristics == null -> ids.map { null }
+            characteristics.isNotEmpty() && characteristics.none { it.value != null } ->
+                (characteristics.firstOrNull { it.status == ValueStatus.RESTRICTED } ?: characteristics.first()).map { null }
+            else -> SafeReader.read("CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES",
+                "汇总应用已读到的摄像头声明，不拍照；无权限的摄像头能力未计入。") {
+                val readers = characteristics.mapNotNull { it.value }
+                val readable = readers.mapNotNull { it[CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES] }
+                if (readers.isNotEmpty() && readable.isEmpty()) null else {
+                    val reported = readable.flatMap { it.toList() }.toSet()
+                    codeList("raw" to (CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_RAW in reported),
+                        "depth" to (CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_DEPTH_OUTPUT in reported),
+                        "logical_multi_camera" to (CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_LOGICAL_MULTI_CAMERA in reported),
+                        "high_speed_video" to (CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_CONSTRAINED_HIGH_SPEED_VIDEO in reported))
+                }
+            }
+        }
+        observation("cameraModes", "Camera2 高级能力", cameraModes)
         value("bluetoothCapabilities", "蓝牙能力", "PackageManager.hasSystemFeature") {
             "经典蓝牙 ${yesNo(pm.hasSystemFeature(PM.FEATURE_BLUETOOTH))} · BLE ${yesNo(pm.hasSystemFeature(PM.FEATURE_BLUETOOTH_LE))}"
         }
@@ -238,7 +259,7 @@ internal object EnvironmentCollector : DeviceCollector {
         value("keyguardSecure", "已配置锁屏凭证", "KeyguardManager.isDeviceSecure") {
             context.getSystemService(KeyguardManager::class.java)?.isDeviceSecure?.let(::yesNo)
         }
-        value("storageEncryption", "存储加密状态", "DevicePolicyManager.getStorageEncryptionStatus") {
+        val policyEncryption = SafeReader.read("DevicePolicyManager.getStorageEncryptionStatus") {
             when (context.getSystemService(DevicePolicyManager::class.java)?.storageEncryptionStatus) {
                 DevicePolicyManager.ENCRYPTION_STATUS_UNSUPPORTED -> "系统报告不支持"
                 DevicePolicyManager.ENCRYPTION_STATUS_INACTIVE -> "系统报告未启用"
@@ -249,6 +270,19 @@ internal object EnvironmentCollector : DeviceCollector {
                 else -> null
             }
         }
+        val cryptoState = {
+            val reading = SafeReader.property(SafeReader.Property.CRYPTO_STATE)
+            when (val mark = reading.value?.trim()?.lowercase(Locale.ROOT)) {
+                "encrypted" -> reading.copy(value = "已启用（系统属性声明）",
+                    detail = "DevicePolicyManager 未返回状态，回退读取 ro.crypto.state=encrypted；这是系统属性声明，不是系统接口读数。")
+                "unencrypted" -> reading.copy(value = "系统报告未启用",
+                    detail = "DevicePolicyManager 未返回状态，回退读取 ro.crypto.state=unencrypted；这是系统属性声明。")
+                null -> reading
+                else -> SafeReader.missing(reading.source, ReadReason.INVALID_VALUE, "ro.crypto.state 不是已知标记：${mark.take(24)}。")
+            }
+        }
+        observation("storageEncryption", "存储加密状态",
+            SafeReader.firstAvailable({ policyEncryption }, cryptoState))
         if (Build.VERSION.SDK_INT >= 30) value("strongBiometrics", "强生物识别可用性",
             "BiometricManager.canAuthenticate(BIOMETRIC_STRONG)") {
             when (val result = context.getSystemService(BiometricManager::class.java)
@@ -262,6 +296,7 @@ internal object EnvironmentCollector : DeviceCollector {
                 else -> "系统返回状态 $result"
             }
         }
+        securityEnvironment(context)
     }
 
     private fun settingFlag(context: Context, setting: String): String? =

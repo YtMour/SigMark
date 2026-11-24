@@ -94,6 +94,17 @@ private object SystemCollector : DeviceCollector {
                 PackageManager.FEATURE_USB_HOST to "USB Host",
             ).joinToString(" / ") { (feature, name) -> "$name ${if (pm.hasSystemFeature(feature)) "已声明" else "未声明"}" }
         }
+        value("interfaceCapabilities", "设备接口声明", "PackageManager.hasSystemFeature",
+            "NFC、GNSS（GPS）、USB 主机及配件模式的声明；none 表示这四项均未声明。未探测设备标识或接口是否可用。") {
+            val pm = context.packageManager
+            listOf(
+                PackageManager.FEATURE_NFC to "nfc",
+                PackageManager.FEATURE_LOCATION_GPS to "gnss",
+                PackageManager.FEATURE_USB_HOST to "usb_host",
+                PackageManager.FEATURE_USB_ACCESSORY to "usb_accessory",
+            ).filter { (feature, _) -> pm.hasSystemFeature(feature) }.joinToString(" / ") { it.second }.ifEmpty { "none" }
+        }
+        gnssObservations(context)
         value("fingerprint", "构建指纹", "Build.FINGERPRINT", "应用进程视角；可能与 ADB 属性不同") { Build.FINGERPRINT }
         value("buildId", "构建 ID", "Build.ID") { Build.ID }
         value("display", "构建显示名", "Build.DISPLAY") { Build.DISPLAY }
@@ -104,10 +115,34 @@ private object SystemCollector : DeviceCollector {
         value("buildUser", "构建用户", "Build.USER") { Build.USER }
         value("buildHost", "构建主机", "Build.HOST") { Build.HOST }
         value("board", "主板代号", "Build.BOARD") { Build.BOARD }
+        // Independent read-only declarations. They are compared with the Build values
+        // above: a ROM that rewrites properties per context can make them disagree.
+        fun declaredProperty(itemKey: String, property: String, label: String, pattern: Regex, lowercase: Boolean, note: String) {
+            observation(itemKey, label, SafeReader.property(property).map { raw ->
+                val text = raw.trim()
+                val normalized = if (lowercase) text.lowercase(Locale.ROOT) else text
+                normalized.takeIf { pattern.matches(it) }
+            }.let { reading ->
+                reading.copy(detail = listOfNotNull(reading.detail, note).joinToString(" "))
+            })
+        }
+        declaredProperty("boardPlatform", "ro.board.platform", "平台代号声明", Regex("[a-z0-9_.-]{1,32}"), true,
+            "只读属性，与 Build.BOARD 是两条独立来源；不一致时先核对 ROM 是否改写属性，不据此判定真伪。")
+        declaredProperty("bootHardware", "ro.boot.hardware", "启动硬件声明", Regex("[a-z0-9_.-]{1,32}"), true,
+            "只读属性，与 Build.HARDWARE 是两条独立来源；不一致时先核对 ROM 是否改写属性。")
+        declaredProperty("hardwareSku", "ro.boot.hardware.sku", "启动硬件 SKU", Regex("[A-Za-z0-9._-]{1,32}"), false,
+            "只读属性，与 Build.SKU（API 31+）是两条独立来源。")
         if (Build.VERSION.SDK_INT >= 31) value("sku", "硬件 SKU", "Build.SKU") { Build.SKU }
-        observation("baseOs", "基础系统版本", SafeReader.read("Build.VERSION.BASE_OS", "OEM 可选字段。") {
-            normalizeValue(Build.VERSION.BASE_OS)
-        }.explainMissing(ReadReason.OPTIONAL_UNSET, "OEM 可选字段，当前 ROM 未提供。Android 版本见上方独立字段。"))
+        observation("baseOs", "基础系统版本", SafeReader.firstAvailable(
+            { SafeReader.read("Build.VERSION.BASE_OS", "OEM 可选字段。") { normalizeValue(Build.VERSION.BASE_OS) } },
+            { SafeReader.property(SafeReader.Property.BASE_OS) },
+        ).let { reading ->
+            val source = "Build.VERSION.BASE_OS / getprop ro.build.version.base_os"
+            val qualified = reading.copy(source = source).explainMissing(ReadReason.OPTIONAL_UNSET,
+                "OEM 可选字段，当前 ROM 未提供。Android 版本见上方独立字段。")
+            if (reading.value != null) qualified.copy(detail = "优先 Build.VERSION.BASE_OS，为空时回退 getprop ro.build.version.base_os。")
+            else qualified
+        })
         value("type", "构建类型", "Build.TYPE") { Build.TYPE }
         value("tags", "构建标签", "Build.TAGS") { Build.TAGS }
         value("manufacturer", "制造商", "Build.MANUFACTURER") { Build.MANUFACTURER }
@@ -115,9 +150,16 @@ private object SystemCollector : DeviceCollector {
         value("model", "型号", "Build.MODEL", "应用进程视角") { Build.MODEL }
         value("device", "设备代号", "Build.DEVICE", "应用进程视角") { Build.DEVICE }
         value("product", "产品代号", "Build.PRODUCT") { Build.PRODUCT }
-        observation("bootloader", "Bootloader", SafeReader.read("Build.BOOTLOADER") {
-            normalizeValue(Build.BOOTLOADER)
-        }.explainMissing(ReadReason.OPTIONAL_UNSET, "当前 ROM 未向应用提供 Bootloader 版本。"))
+        observation("bootloader", "Bootloader", SafeReader.firstAvailable(
+            { SafeReader.read("Build.BOOTLOADER") { normalizeValue(Build.BOOTLOADER) } },
+            { SafeReader.property(SafeReader.Property.BOOTLOADER) },
+        ).let { reading ->
+            val source = "Build.BOOTLOADER / getprop ro.bootloader"
+            val qualified = reading.copy(source = source).explainMissing(ReadReason.OPTIONAL_UNSET,
+                "当前 ROM 未向应用提供 Bootloader 版本。")
+            if (reading.value != null) qualified.copy(detail = "优先 Build.BOOTLOADER，为空时回退 getprop ro.bootloader。")
+            else qualified
+        })
         value("uptime", "开机时长", "SystemClock.elapsedRealtime") {
             val minutes = SystemClock.elapsedRealtime() / 60_000
             "${minutes / 1440} 天 ${minutes % 1440 / 60} 小时 ${minutes % 60} 分钟"
@@ -136,12 +178,19 @@ private object CpuCollector : DeviceCollector {
     override val title = "内核与 CPU"
     override fun collect(context: Context) = section(key, title) {
         value("kernel", "内核版本", "System.getProperty(os.version)") { System.getProperty("os.version") }
-        value("kernelFull", "内核编译信息", "Os.uname()", "通过 uname 获取；/proc/version 在部分设备上禁止读取") {
-            val uts = Os.uname()
-            "${uts.sysname} ${uts.release} ${uts.version} ${uts.machine}"
-        }
+        val uname = SafeReader.read("Os.uname()") { Os.uname() }
+        observation("kernelFull", "内核编译信息", uname.map { "${it.sysname} ${it.release} ${it.version} ${it.machine}" }.let {
+            if (it.value != null) it.copy(detail = "通过 uname 获取；/proc/version 在部分设备上禁止读取。") else it
+        })
+        observation("kernelMachine", "内核报告的架构", uname.map { kernelMachineName(it.machine) }.let {
+            if (it.value != null) it.copy(detail = "应用进程看到的 uname 架构，不是物理芯片证明。") else it
+        })
         value("abis", "支持的 ABI", "Build.SUPPORTED_ABIS") { Build.SUPPORTED_ABIS.joinToString(", ") }
         value("arch", "进程架构", "System.getProperty(os.arch)") { System.getProperty("os.arch") }
+        value("processBitness", "印迹进程位宽", "android.os.Process.is64Bit()",
+            "单位 bit。64 位系统运行 32 位进程属于正常兼容模式。") {
+            if (android.os.Process.is64Bit()) "64" else "32"
+        }
         value("abi32", "支持的 32 位 ABI", "Build.SUPPORTED_32_BIT_ABIS") {
             Build.SUPPORTED_32_BIT_ABIS.joinToString(", ").ifEmpty { "未声明" }
         }
@@ -151,6 +200,10 @@ private object CpuCollector : DeviceCollector {
         value("hardware", "硬件代号", "Build.HARDWARE") { Build.HARDWARE }
         value("cores", "可用逻辑核心", "Runtime.availableProcessors") {
             Runtime.getRuntime().availableProcessors().toString()
+        }
+        value("coresConfigured", "内核配置的逻辑 CPU 数", "Os.sysconf(_SC_NPROCESSORS_CONF)",
+            "内核配置的逻辑 CPU 数，可能大于当前在线数或本进程可用数。") {
+            Os.sysconf(OsConstants._SC_NPROCESSORS_CONF).takeIf { it in 1L..1024L }?.toString()
         }
         value("pageSize", "内存页大小", "Os.sysconf(_SC_PAGESIZE)") {
             Os.sysconf(OsConstants._SC_PAGESIZE).takeIf { it > 0 }?.let { "$it B" }
@@ -167,6 +220,7 @@ private object CpuCollector : DeviceCollector {
             { maxFrequency(SafeReader.Node.CPU_POLICY0_MAX) })
         observation("cpu0MaxFrequency", "CPU 0 / policy0 最高频率",
             if (frequency.value != null) frequency.copy(detail = "CPU 0 或 policy0 的样本，不代表整颗处理器峰值。") else frequency)
+        sysfsObservations(key, Build.VERSION.SDK_INT)
     }
 }
 
@@ -262,6 +316,17 @@ private object BatteryCollector : DeviceCollector {
     override fun collect(context: Context) = section(key, title) {
         val intent = context.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
         fun extra(name: String) = intent?.getIntExtra(name, Int.MIN_VALUE)?.takeIf { it != Int.MIN_VALUE }
+        value("present", "电池存在状态", "BatteryManager.EXTRA_PRESENT", "仅使用广播明确返回的值，字段缺失不代表无电池。") {
+            intent?.takeIf { it.hasExtra(BatteryManager.EXTRA_PRESENT) }
+                ?.let { if (it.getBooleanExtra(BatteryManager.EXTRA_PRESENT, false)) "yes" else "no" }
+        }
+        val cycleSource = "BatteryManager.EXTRA_CYCLE_COUNT"
+        val cycle = if (Build.VERSION.SDK_INT >= 34) SafeReader.read(cycleSource, "Android 上报的充放电循环次数，不是插拔或充电会话次数。") {
+            val raw = extra(BatteryManager.EXTRA_CYCLE_COUNT)
+            raw?.takeIf { it in 0..99_999 }?.toString()
+        }.explainMissing(ReadReason.NOT_REPORTED, "广播未提供有效循环次数。")
+        else SafeReader.missing(cycleSource, ReadReason.INTERFACE_UNSUPPORTED, "公开循环次数字段需要 API 34。")
+        observation("cycleCount", "电池循环次数", cycle)
         value("level", "电量", "ACTION_BATTERY_CHANGED") {
             val level = extra(BatteryManager.EXTRA_LEVEL)
             val scale = extra(BatteryManager.EXTRA_SCALE)
@@ -287,6 +352,14 @@ private object BatteryCollector : DeviceCollector {
         }
         value("temperature", "电池温度", "BatteryManager.EXTRA_TEMPERATURE") {
             extra(BatteryManager.EXTRA_TEMPERATURE)?.let { String.format(Locale.US, "%.1f °C", it / 10.0) }
+        }
+        val publicTemperature = extra(BatteryManager.EXTRA_TEMPERATURE)
+        SysfsField.entries.filter { it.group == key }.forEach { field ->
+            val reading = readSysfs(field, Build.VERSION.SDK_INT)
+            observation(field.key, field.label, if (reading.value == null && field == SysfsField.BATTERY_TEMP)
+                reading.withNote("依次尝试 /sys/class/power_supply/battery/temp 与 /sys/class/power_supply/bms/temp，均未取得驱动温度。" +
+                    "公开温度 battery.temperature ${if (publicTemperature != null) "已取得，可作对照。" else "也未取得。"}")
+            else reading)
         }
         value("voltage", "电池电压", "BatteryManager.EXTRA_VOLTAGE") {
             extra(BatteryManager.EXTRA_VOLTAGE)?.let { "$it mV" }
@@ -355,8 +428,10 @@ private object SensorsCollector : DeviceCollector {
     override val key = "sensors"
     override val title = "传感器"
     override fun collect(context: Context) = section(key, title) {
-        val sensors = context.getSystemService(SensorManager::class.java)?.getSensorList(Sensor.TYPE_ALL)
-        value("count", "传感器数量", "SensorManager.getSensorList") { sensors?.size?.toString() }
+        val list = SafeReader.read("SensorManager.getSensorList") { context.getSystemService(SensorManager::class.java)?.getSensorList(Sensor.TYPE_ALL) }
+        val sensors = list.value
+        observation("count", "传感器数量", list.map { it.size.toString() })
+        sensorObservations(list)
         value("typeWakeupSummary", "传感器类型与唤醒能力", "SensorManager.getSensorList / Sensor.isWakeUpSensor",
             "格式为 Android 类型编号:公开条目数/可唤醒条目数，最多列出 24 类。") {
             sensors?.map { it.type to it.isWakeUpSensor }?.let(::sensorTypeWakeupSummary)
@@ -379,6 +454,8 @@ class DeviceRepository(private val context: Context) {
     )
 
     suspend fun collect(refreshRadio: Boolean = false): DeviceSnapshot {
+        // One getprop call per collection; individual reads fall back to their key.
+        PropertySnapshot.refresh()
         val capturedAt = System.currentTimeMillis()
         val access = collectionContext(com.sigmark.app.CollectionAccess.read(context))
         return DeviceSnapshot(capturedAt, collectors.map { collector ->

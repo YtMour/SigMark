@@ -1,0 +1,13 @@
+64	arm64-v8a, armeabi-v7a	aarch64	compatible
+32	arm64-v8a, armeabi-v7a	aarch64	compatible
+32	x86	x86_64	compatible
+64	x86_64	x86_64	compatible
+64	arm64-v8a	x86_64	compatible
+64	arm64-v8a	armv7l	conflict
+64	armeabi-v7a, x86	aarch64	conflict
+64	armeabi-v7a, future_abi	aarch64	insufficient
+32	arm64-v8a	aarch64	insufficient
+32	armeabi-v7a	armv7l	compatible
+64	arm64-v8a	future_machine	insufficient
+64	-	aarch64	insufficient
+-	x86	i686	insufficient

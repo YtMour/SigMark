@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { diffParameters, type Parameter } from './compare';
 import { BuildPage, Downloads, SettingsPage, request, RequestError, errorMessage as message } from './console';
 import { AssetsWorkspace } from './assets';
+import { IdentitySummaryPage } from './identity-summary';
 import { SecurityPage } from './security';
 import { BaselineDialog } from './baselines';
 import { refreshSeconds, useVisiblePoll } from './live';
@@ -10,6 +11,9 @@ import { reportWorkspaceLink, type ReportFilters } from './facets';
 import { ReportFiltersBar } from './asset-filters';
 import {hashParams,reportScope} from './workspace-route';
 import {ReaderParameters} from './reader-parameters';
+import { identityConflictsOf } from './security-rules';
+import {ObservationPanel} from './observation-panel';
+import {ReportRecoveredPanel} from './report-recovered-panel';
 import {AcceptancePanel} from './acceptance-panel';
 import {LabPage,labLink} from './lab';
 import {listPages,openFromList,navigateReader,returnFromReader,returnLabel,useRestoreList,followReadLink} from './reader-history';
@@ -77,7 +81,7 @@ function App(){
     {session==='active'&&error&&<p className="workspace error" role="alert">{error}</p>}
     {section==='downloads'?<Downloads/>:session==='active'?
       section==='settings'?<SettingsPage/>:section==='builds'?<BuildPage/>:
-        section==='assets'?<AssetsWorkspace/>:section==='security'?<SecurityPage/>:section==='lab'?<LabPage/>:<Archive/>:
+        section==='assets'?<AssetsWorkspace/>:section==='identity'?<IdentitySummaryPage/>:section==='security'?<SecurityPage/>:section==='lab'?<LabPage/>:<Archive/>:
       <main className="workspace"><PageHead section={section} description="通过管理员令牌访问内网工作台。"/><section className="login"><h2>管理员登录</h2>
       {session==='checking'?<p className="muted" role="status">正在检查登录状态…</p>:
         session==='unavailable'?<>
@@ -228,8 +232,21 @@ function ReportReader({id,compareId,filters,baseline,pin}:{
   </main>;
 }
 
+function IdentityNotice({fields}:{fields:Parameter[]}){
+  const conflicts=identityConflictsOf(fields);
+  if(!conflicts.length)return null;
+  return <section className="panel identity-notice" role="status" aria-label="身份声明不一致">
+    <h2>身份声明不一致</h2>
+    <p>同一份报告里 Build 字段与只读属性给出不同声明。先核对 ROM 是否改写 <code>ro.*</code> 属性或打包来源；它只说明归档内部不自洽，不判定真伪。</p>
+    <ul>{conflicts.map(pair=><li key={pair.leftKey+pair.rightKey}>
+      {pair.title}：<code>{pair.leftKey}</code> = <strong>{pair.left}</strong>{' ≠ '}<code>{pair.rightKey}</code> = <strong>{pair.right}</strong>
+    </li>)}</ul>
+    <a className="subtle-link" href="#identity">查看全库身份分布 →</a>
+  </section>;
+}
+
 function Details({row,filters,pin,isBaseline,hasBaseline,startCompare}:{row:Report;filters:ReportFilters;pin:()=>void;isBaseline:boolean;hasBaseline:boolean;startCompare:()=>void}){
-  const [panel,setPanel]=useState<'fields'|'coverage'>('fields');
+  const [panel,setPanel]=useState<'fields'|'coverage'|'followup'>('fields');
   const [saveBaseline,setSaveBaseline]=useState(false);
   const [savedId,setSavedId]=useState('');
   const fields=row.report.parameters??[];
@@ -248,16 +265,20 @@ function Details({row,filters,pin,isBaseline,hasBaseline,startCompare}:{row:Repo
     </div>
     {savedId&&<p className="inset" role="status">已保存回归基线。 <a className="subtle-link" href={reportWorkspaceLink('security',filters,{baseline:row.id,saved:savedId,retest:true})}>用这条基线复测 →</a></p>}
     {row.report.feedback&&<p className="feedback"><b>测试反馈：</b>{row.report.feedback}</p>}
+    <IdentityNotice fields={fields}/>
+    <ReportRecoveredPanel fields={fields}/>
     {(row.report.fieldSetVersion??0)>=9&&<AcceptancePanel row={row}/>}
     <section className="panel reading-panel">
       <div className="inspector-tabs" role="group" aria-label="报告视图">
         <button aria-pressed={panel==='fields'} onClick={()=>setPanel('fields')}>归档参数 · {fields.length} 项</button>
         <button aria-pressed={panel==='coverage'} onClick={()=>setPanel('coverage')}>手机快照覆盖</button>
+        <button aria-pressed={panel==='followup'} onClick={()=>setPanel('followup')}>缺项与补充证据</button>
       </div>
-      <div hidden={panel!=='fields'}>{fields.length?<ReaderParameters fields={fields}/>:
+      <div hidden={panel!=='fields'}>{fields.length?<ReaderParameters fields={fields} fieldSet={row.report.fieldSetVersion??0} capturedAt={row.report.capturedAtEpochMs}/>:
         <div className="empty">{row.report.schemaVersion===1?'旧报告只保存了采集状态，没有归档参数值。':'这份报告没有归档参数明细。'}
         <ul>{(row.report.metrics??[]).map(m=><li key={m.key}>{caption(m.key)} · {caption(m.status)}</li>)}</ul></div>}</div>
       {panel==='coverage'&&<SnapshotCoverage rows={row.report.coverage} fields={fields}/>}
+      {panel==='followup'&&<ObservationPanel key={row.id} report={row} showGaps/>}
     </section>
     {saveBaseline&&<BaselineDialog reportId={row.id} model={row.report.model} expectUnlock={false}
       close={()=>setSaveBaseline(false)} saved={id=>{setSavedId(id);setSaveBaseline(false);}}/>}

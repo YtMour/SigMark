@@ -9,6 +9,13 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class LanReportTest {
+    @Test fun projectionMatchesSharedLanRegistry() {
+        val filename = "/lan-projection-v${LanFieldSetVersion}.txt"
+        val spec = requireNotNull(javaClass.getResourceAsStream(filename)) { "Missing shared LAN registry $filename" }
+            .bufferedReader().use { it.readLines() }.filter(String::isNotBlank)
+        assertEquals("Registry must be unique and sorted", spec.distinct().sorted(), spec)
+        assertEquals(spec, lanProjectionKeys.sorted())
+    }
     @Test fun v8ProjectsPublicCapabilitySummariesInTheirOwnGroups() {
         val keys = listOf("vulkanVersion","cameraCapabilitySummary","typeWakeupSummary","sensor_0","camera_0")
         val snapshot = DeviceSnapshot(1,listOf("runtime","media","sensors").map { group ->
@@ -17,7 +24,7 @@ class LanReportTest {
         assertEquals(setOf("runtime.vulkanVersion","media.cameraCapabilitySummary","sensors.typeWakeupSummary"),
             lanParameters(snapshot).map { it.group+"."+it.key }.toSet())
         val report = lanReport(snapshot,"0.20.0","")
-        assertEquals(10, report.fieldSetVersion)
+        assertEquals(20, report.fieldSetVersion)
         assertEquals(7, report.copy(fieldSetVersion = 7).copy(feedback = "old draft").fieldSetVersion)
     }
 
@@ -42,7 +49,23 @@ class LanReportTest {
             DeviceInfoItem(key,key,value,"public Android API")
         })))
         assertEquals(setOf("keyguardSecure","storageEncryption"),lanParameters(snapshot).map { it.key }.toSet())
-        assertEquals(10,LanFieldSetVersion)
+        assertEquals(20,LanFieldSetVersion)
+    }
+
+    @Test fun onlyProjectsVersion11CompatibilityEvidenceInItsGroup() {
+        val groups = mapOf("cpu" to listOf("processBitness", "kernelMachine", "externalInputTypes"),
+            "system" to listOf("interfaceCapabilities", "processBitness"),
+            "runtime" to listOf("externalInputTypes", "inputDeviceNames", "inputDeviceDescriptors"))
+        val snapshot = DeviceSnapshot(1800000000000, groups.map { (group, keys) ->
+            DeviceSection(group, group, keys.map { key ->
+                if (key == "externalInputTypes") DeviceInfoItem(key, key, null, "test", ValueStatus.UNAVAILABLE,
+                    reason = ReadReason.INTERFACE_UNSUPPORTED) else DeviceInfoItem(key, key, "64", "test")
+            })
+        })
+        val rows = lanParameters(snapshot)
+        assertEquals(setOf("cpu.processBitness", "cpu.kernelMachine", "system.interfaceCapabilities", "runtime.externalInputTypes"),
+            rows.map { it.group + "." + it.key }.toSet())
+        assertEquals("INTERFACE_UNSUPPORTED", rows.single { it.key == "externalInputTypes" }.reason)
     }
     @Test fun assetIdentityIsScopedToTheBackendAddressAndPort() {
         fun scope(origin: String) = assetIdentityScope(requireNotNull(lanEndpoint(origin)))
@@ -56,11 +79,11 @@ class LanReportTest {
             "app" to listOf("permissions", "installedAt", "certificateChain", "visibleLauncherApps","partition_vendor"),
             "environment" to listOf("configurationDigest", "suFileHint", "strongBiometrics"),
             "system" to listOf("fingerprint", "buildHost", "buildUser"),
-            "runtime" to listOf("locale", "timeZone", "featureList"),
             "media" to listOf("camera_0"),
-            "sensors" to listOf("sensor_0"),
+            "sensors" to listOf("sensor_0", "sampleValues"),
             "timeline" to listOf("events"),
             "cellular" to listOf("subscriptionId", "iccid", "phoneNumber"),
+            "runtime" to listOf("locale", "timeZone", "featureList", "inputDeviceIds", "glDriverRaw"),
         )
         val snapshot = DeviceSnapshot(0, keys.map { (group, fields) ->
             DeviceSection(group, group, fields.map { DeviceInfoItem(it, it, "local", "test") })

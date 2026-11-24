@@ -4,6 +4,8 @@ import {useVisiblePoll,refreshSeconds} from './live';
 import {date,saveDownload,type Page,type Row} from './reports';
 import {reportWorkspaceLink,emptyReportFilters} from './workspace-route';
 import {listPages,openFromList,useRestoreList} from './reader-history';
+import {DeviceDossier} from './device-dossier';
+import {MergeAudit,MergeDevice} from './asset-merge';
 
 type DeviceRow={id:string;label:string;model:string;reports:number;firstSeen:string;lastSeen:string};
 type Inventory={items:DeviceRow[];nextCursor:string;totals:{devices:number;reports:number;unassigned:number;trash:number}};
@@ -78,6 +80,8 @@ export function DeviceInventory({changed,sampleAsset}:{changed:()=>void;sampleAs
   const [pages,setPages]=useState(['']);
   const [revision,refresh]=useState(0);
   const [merge,setMerge]=useState<DeviceRow>();
+  const [audit,setAudit]=useState(false);
+  const onAssetChange=()=>{setPages(['']);refresh(n=>n+1);changed();};
   const [detail,setDetail]=useState<{id:string;row?:DeviceRow;error?:string}>();
   const [result,setResult]=useState<{path:string;value:Inventory}>();
   const [error,setError]=useState('');
@@ -126,8 +130,10 @@ export function DeviceInventory({changed,sampleAsset}:{changed:()=>void;sampleAs
   return <>
     <section className="panel stats-analysis" aria-labelledby="devices-title">
       <div className="pane-title"><div><h2 id="devices-title">设备档案</h2>
-        <p className="muted">每部已归组手机只显示一行。点「查看采样」查看该设备的历次报告；搜索不改变顶部全库统计。</p></div>
-        <button type="button" className="secondary" onClick={()=>refresh(n=>n+1)}>刷新</button></div>
+        <p className="muted">每部已归组手机只显示一行。打开档案可检查最近一次采样的缺项和历次报告。</p></div>
+        <div className="actions"><button type="button" className="secondary" aria-expanded={audit} onClick={()=>setAudit(!audit)}>
+          {audit?'收起合并记录':'查看合并记录'}</button>
+          <button type="button" className="secondary" onClick={()=>refresh(n=>n+1)}>刷新</button></div></div>
       <form className="asset-device-search" onSubmit={e=>{e.preventDefault();setPages(['']);setQ(input.trim());setError('');refresh(n=>n+1);}}>
         <label>搜索设备<input id="device-search" value={input} maxLength={80} placeholder="资产别名、型号或资产编号" onChange={e=>setInput(e.target.value)}/></label>
         <button>查询设备</button>
@@ -139,7 +145,7 @@ export function DeviceInventory({changed,sampleAsset}:{changed:()=>void;sampleAs
           {current.items.map(row=><li key={row.id}>
             <div><strong>{row.label||row.model}</strong><small>{row.label?row.model+' · ':''}<code>{row.id}</code></small></div>
             <div><strong>{row.reports} 份采样</strong><small>首次 {date(row.firstSeen)} · 最近 {date(row.lastSeen)}</small></div>
-            <div className="actions"><a id={'history-'+row.id} className="button-link secondary" href={devicePage(row.id)}>查看采样</a>
+            <div className="actions"><a id={'history-'+row.id} className="button-link secondary" href={devicePage(row.id)}>打开档案</a>
               <a className="subtle-link" href={assetReports(row.id)}>管理报告 →</a>
               <button type="button" className="secondary" onClick={()=>setMerge(row)}>合并到另一设备</button></div>
           </li>)}
@@ -154,8 +160,9 @@ export function DeviceInventory({changed,sampleAsset}:{changed:()=>void;sampleAs
       <p>新版 App 经用户勾选后，同一安装发出的报告会自动归组。清除数据、刷机或重装可能生成新的标记；同型号不代表同一手机。没有关联的报告只能由确认过设备归属的管理员手动归组。</p>
       <p>归组只改变关联，不覆盖或删除原始采样。确认刷机前后是同一部手机，可合并两个资产。该统计不是硬件身份核验。</p>
     </details>
+    {audit&&<MergeAudit revision={revision} changed={onAssetChange}/>}
     {merge&&<MergeDevice row={merge} candidates={current?.items??[]} close={()=>setMerge(undefined)} done={()=>{
-      setMerge(undefined);setPages(['']);refresh(n=>n+1);changed();
+      setMerge(undefined);setAudit(true);onAssetChange();
     }}/>}
   </>;
 }
@@ -169,8 +176,9 @@ function AssetTimeline({row,close}:{row:DeviceRow;close:()=>void}){
   const [error,setError]=useState('');
   const [loading,setLoading]=useState(true);
   const [selected,setSelected]=useState<string[]>([]);
+  const [dossierReady,setDossierReady]=useState(false);
   const target=useRef<HTMLElement>(null);
-  useRestoreList(!loading);
+  useRestoreList(!loading&&dossierReady);
   useEffect(()=>{target.current?.focus();},[]);
   useEffect(()=>{
     const control=new AbortController();
@@ -183,12 +191,14 @@ function AssetTimeline({row,close}:{row:DeviceRow;close:()=>void}){
       }}).catch(err=>{if(!control.signal.aborted){setError(errorMessage(err));setLoading(false);}});
     return ()=>control.abort();
   },[row.id,cursor,savedPages]);
-  return <section className="panel" aria-label="设备历史报告" tabIndex={-1} ref={target}>
+  return <section className="panel" aria-labelledby={'samples-'+row.id} tabIndex={-1} ref={target}>
     <div className="pane-title"><div className="device-reader-heading">
       <button type="button" className="secondary" onClick={close}>← 返回设备列表</button>
-      <h2 tabIndex={-1} id={'samples-'+row.id}>{row.label||row.model} · 设备采样</h2>
+      <h2 tabIndex={-1} id={'samples-'+row.id}>{row.label||row.model} · 设备档案</h2>
       </div></div>
+    <DeviceDossier asset={row.id} pages={visited.current} onSettled={setDossierReady}/>
     <div className="pane-title"><div>
+      <h3>采样历史</h3>
       <p className="muted">按接收时间排序；保留手机采样时间。依次勾选基线和对照报告，新旧字段集会影响对比结果。</p></div>
       <div className="actions">{selected.length===2&&<a className="subtle-link" id={'pair-'+row.id}
         onClick={e=>openFromList(e,visited.current,'返回设备采样','samples-'+row.id)} href={'#reports?'+new URLSearchParams({q:'asset:'+row.id,baseline:selected[0],report:selected[1]})}>对比所选两份 →</a>}
@@ -212,31 +222,6 @@ function AssetTimeline({row,close}:{row:DeviceRow;close:()=>void}){
     <div className="pages"><span>{loading?'正在读取…':`已载入 ${entries.length} 份`}</span>
       {next&&<button disabled={loading} className="secondary" type="button" onClick={()=>{setError('');setLoading(true);setCursor(next);}}>加载更早采样</button>}</div>
   </section>;
-}
-
-function MergeDevice({row,candidates,close,done}:{row:DeviceRow;candidates:DeviceRow[];close:()=>void;done:()=>void}){
-  const ref=useRef<HTMLDialogElement>(null);
-  const [target,setTarget]=useState(''),[error,setError]=useState('');
-  const [confirmed,setConfirmed]=useState(false),[busy,setBusy]=useState(false);
-  useEffect(()=>{const node=ref.current;node?.showModal();return ()=>node?.close();},[]);
-  const ready=confirmed&&/^[0-9a-f-]{36}$/.test(target.trim())&&target.trim()!==row.id;
-  return <dialog ref={ref} className="manage-dialog" aria-labelledby="merge-title" onCancel={e=>{e.preventDefault();if(!busy)close();}}>
-    <form onSubmit={async e=>{
-      e.preventDefault();if(!ready||busy)return;
-      setBusy(true);setError('');
-      try {await request('/api/admin/device-assets/merge',{method:'POST',body:JSON.stringify({source:row.id,target:target.trim(),confirmed})});done();}
-      catch(error){setError(errorMessage(error));setBusy(false);}
-    }}>
-      <h2 id="merge-title">合并设备资产</h2>
-      <p className="muted">将 {row.label||row.model}（{row.id.slice(0,8)}）的报告和后续上传归到目标。保留目标别名和所有报告，但来源资产将移除，暂无一键撤销。</p>
-      <label>目标设备编号<input list="merge-device-targets" maxLength={36} value={target} onChange={e=>setTarget(e.target.value)} disabled={busy}/>
-        <datalist id="merge-device-targets">{candidates.filter(item=>item.id!==row.id).map(item=><option key={item.id} value={item.id}>{item.label||item.model}</option>)}</datalist></label>
-      <label className="build-check"><input type="checkbox" checked={confirmed} onChange={e=>setConfirmed(e.target.checked)} disabled={busy}/>我已确认两个资产对应同一部手机</label>
-      {error&&<p className="error" role="alert">{error}</p>}
-      <div className="actions"><button type="button" className="secondary" onClick={close} disabled={busy}>取消</button>
-        <button disabled={!ready||busy}>{busy?'正在合并…':'确认合并'}</button></div>
-    </form>
-  </dialog>;
 }
 
 export function AssignDevice({rows,close,done}:{rows:Row[];close:()=>void;done:()=>void}){

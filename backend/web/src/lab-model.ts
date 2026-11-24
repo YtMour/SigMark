@@ -2,12 +2,15 @@ import type {Parameter} from './compare';
 import type {Report} from './reports';
 import {acceptanceComparison} from './acceptance.ts';
 
-export type LabSheet = {schemaVersion:1;current:Report;history:Report[];historyLimit:number;hasEarlier:boolean};
+export type RegisteredLabBaseline = {id:string;name:string;reportId:string;expectUnlock:boolean;expectedNetwork:string;state:'ready'};
+export type LabSheet = {schemaVersion:1;current:Report;history:Report[];historyLimit:number;hasEarlier:boolean;
+  registeredBaselines?:RegisteredLabBaseline[];registeredReport?:Report};
 export type Delta = 'lost'|'restored'|'changed'|'unchanged'|'provenance'|'not_comparable';
 const keyOf=(p:Parameter)=>p.group+'.'+p.key;
 const dynamic=new Set(['system.uptime','memory.availableRam','memory.ramUseEstimate','memory.internalAvailable',
   'runtime.heapAllocated','runtime.heapFree','battery.level','battery.temperature','battery.voltage','battery.current',
-  'battery.currentAverage','battery.chargeCounter','battery.energyCounter','media.avcElapsed']);
+  'battery.currentAverage','battery.chargeCounter','battery.energyCounter','media.avcElapsed','runtime.externalInputTypes',
+  'runtime.glesProbeResult','runtime.glesProbeVersion','runtime.glesProbeStage']);
 export function evidenceDelta(before:Parameter|undefined,after:Parameter|undefined):Delta {
   if(!before||!after) return 'not_comparable';
   const had=before.status==='AVAILABLE'&&before.value!=null;

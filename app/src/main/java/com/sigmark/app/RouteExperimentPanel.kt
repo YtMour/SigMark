@@ -20,9 +20,10 @@ import com.sigmark.app.lan.networkLabel
 
 private val pointSaver = listSaver<RoutePoint?, Any>(
     save = { point -> if (point == null) emptyList() else
-        listOf(point.timeMs, point.transport.orEmpty(), when (point.validated) { true -> 1; false -> 0; null -> -1 }) },
+        listOf(point.timeMs, point.transport.orEmpty(), when (point.validated) { true -> 1; false -> 0; null -> -1 }, point.wallTimeMs ?: 0L) },
     restore = { values -> if (values.isEmpty()) null else RoutePoint(values[0] as Long,
-        (values[1] as String).ifEmpty { null }, (values[2] as Int).takeIf { it >= 0 }?.let { it == 1 }) },
+        (values[1] as String).ifEmpty { null }, (values[2] as Int).takeIf { it >= 0 }?.let { it == 1 },
+        (values.getOrNull(3) as? Long)?.takeIf { it > 0 }) },
 )
 
 @Composable

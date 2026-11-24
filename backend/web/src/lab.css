@@ -18,3 +18,13 @@
 .lab-table :is(th,td) { padding: .55rem; text-align: start; vertical-align: top; overflow-wrap: anywhere; border-block-end: 1px solid var(--line-subtle); }
 .lab-table th:first-child { inline-size: 10.5rem; }
 .lab-table small { display: block; color: var(--muted); }
+.verification { overflow-wrap: anywhere; }
+.verification-grid,.verification-cover { display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,13rem),1fr));gap:.65rem; }
+.verification-grid { margin-block:.65rem; }
+.verification-grid > div,.verification-cover > li { min-width:0;padding:.65rem;border:1px solid var(--line-subtle);border-radius:var(--radius-control); }
+.verification-grid p { margin:.3rem 0 0; }
+.verification > details,.verification-experiments { margin-block:.8rem;border-block-start:1px solid var(--line-subtle);padding-block-start:.65rem; }
+.verification-experiments details { margin-block:.45rem; }
+.verification summary { cursor:pointer;color:var(--mint); }
+.verification-cover { list-style:none;padding:0; }
+.verification-cover b,.verification-cover small { display:block; }

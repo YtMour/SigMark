@@ -26,7 +26,7 @@ test('partition additions are not regressions; component rollback requires same 
   const fields=(provider,code)=>[field('system','webViewProvider',provider),field('system','webViewCode',code)];
   const a=fields('provider.a','100'),b=[...fields('provider.a','88'),field('system','partition_vendor','fp')];
   assert.equal(compareSecurity(a,b).find(x=>x.key==='system.webViewCode').verdict,'review');
-  assert.equal(compareSecurity(a,b).find(x=>x.key==='system.partition_vendor').verdict,'insufficient');
+  assert.equal(compareSecurity(a,b).find(x=>x.key==='system.partition_vendor').verdict,'not_archived');
   assert.equal(compareSecurity(a,fields('provider.b','12')).find(x=>x.key==='system.webViewCode').verdict,'changed');
   assert(!evaluateSecurity({fieldSetVersion:6,parameters:[]}).some(x=>x.id==='keystore'));
 });

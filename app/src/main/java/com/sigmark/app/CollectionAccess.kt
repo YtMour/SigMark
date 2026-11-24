@@ -53,7 +53,8 @@ internal fun networkAccessNeeds(api: Int, group: String, key: String): NetworkAc
     return when (key) {
         "dataRat" -> if (api < 33) NetworkAccessNeeds(phone = true, fine = false) else null
         "defaultDataSlot" -> if (api < 29) NetworkAccessNeeds(phone = true, fine = false) else null
-        "slotService" -> if (api >= 28) NetworkAccessNeeds(phone = true, fine = api < 33) else null
+        "slotService", "dataSubscriptionService", "carrierBandwidths" ->
+            if (api >= 28) NetworkAccessNeeds(phone = true, fine = api < 33) else null
         "cellDiagnostics", "cellLTEBandwidth" -> NetworkAccessNeeds(phone = false, fine = true)
         else -> null
     }
@@ -68,6 +69,6 @@ internal fun collectionAction(api: Int, group: String, item: DeviceInfoItem, acc
 internal fun restrictionLabel(item: DeviceInfoItem): String = when (item.reason) {
     ReadReason.PERMISSION_REQUIRED -> "需用户授权"
     ReadReason.LOCATION_DISABLED -> "系统位置已关闭"
-    ReadReason.ACCESS_DENIED -> if (item.key == "selinux") "系统拒读 · 模式未确认" else "系统拒绝读取"
+    ReadReason.ACCESS_DENIED -> if (item.key == "selinuxPolicy") "需 root／系统策略固定拒绝" else "系统拒绝读取"
     else -> "访问受限"
 }

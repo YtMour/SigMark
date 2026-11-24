@@ -6,8 +6,8 @@
 
 ## 手机操作
 
-1. 日常参数选「整体获取」；需要特定实验时点「选择验收方案」。
-2. 「ROM 验收」在标准采集后运行内置 H.264 样片，将首帧结果、阶段、解码器和毫秒数附到这次采样。「网络复测」保留当前链路和授权状态，不切换 Wi-Fi、蜂窝或 SIM，也不执行密钥和媒体实测。
+1. 1.12.0 起，「整体获取」自动运行密钥保护、内置 AVC 样片首帧和 GLES 离屏回读。结果随设备参数保存为一份待上传报告。轻量采样可在「选择验收方案」选「标准采集」。
+2. 「ROM 验收」仍可单独运行。网络切换、USB 插拔、GNSS 观测从各自入口启动，按页面提示完成所需操作。
 3. 点击「上传报告」，选对应时间的独立采样，预览后确认。权限回调仅更新本机实时页面。ROM 验收不发送样片、坐标、电话号码和额外设备标识。
 4. 只想运行本地解码时走「更多工具 → 视频解码实测」。该独立面板不改采样报告。
 
@@ -27,7 +27,7 @@ LAN 上传仍为 schemaVersion 4，新增 fieldSetVersion 9。稳定字段：
 | `environment.capturePhoneAccess` | `granted/not_granted` |
 | `environment.captureLocationAccess` | `precise/approximate/not_granted` |
 | `environment.captureLocationSwitch` | `enabled/disabled`，或保留无读数 |
-| `media.avcFixture` | `sigmark-avc/1`，仅显式选择 ROM 验收时归档 |
+| `media.avcFixture` | `sigmark-avc/1`，随整体获取或 ROM 验收归档 |
 | `media.avcFirstFrame` | `pass/fail`，未执行不生成字段 |
 | `media.avcStage` | `source/configure/decode/done` |
 | `media.avcDecoder`、`media.avcElapsed` | 可选解码器名称与 `N ms` |

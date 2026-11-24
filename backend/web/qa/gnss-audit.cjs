@@ -30,7 +30,8 @@ async function run(){
     assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
     await page.getByRole('link',{name:'打开验收工作台',exact:true}).click();
     const workbench=page.getByRole('region',{name:'设备证据与风险验收'});
-    await workbench.getByText(/GNSS 读数核对 · 达到判定条件/).waitFor();
+    await workbench.locator('.experiment-card').filter({hasText:'GNSS 读数核对'})
+      .getByText('达到判定条件',{exact:true}).waitFor();
     assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
     const pending=page.waitForEvent('download');
     await workbench.getByRole('button',{name:'导出验收证据包 JSON'}).click();

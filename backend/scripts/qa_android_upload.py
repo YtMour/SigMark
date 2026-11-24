@@ -55,11 +55,20 @@ def run(args):
             return get('/api/admin/reports/'+id+'?include=asset')
         a,b=report(first),report(second)
         assert a['id']!=b['id'] and a['assetId'] and a['assetId']==b['assetId']
-        assert all(r['batch']=='qa-phone-wire' and r['report']['fieldSetVersion']==16 for r in (a,b))
+        assert all(r['batch']=='qa-phone-wire' and r['report']['fieldSetVersion']==20 for r in (a,b))
         assert b['report']['capturedAtEpochMs'] > a['report']['capturedAtEpochMs']
         fields={(p['group'],p['key']):p for p in a['report']['parameters']}
+        for archived in (a, b):
+            evidence={(p['group'],p['key']):p for p in archived['report']['parameters']}
+            assert evidence['environment','capturePlan']['value']=='full'
+            assert evidence['media','avcFirstFrame']['value']=='pass'
+            assert evidence['runtime','glesProbeResult']['value']=='pass'
+            for group,start,end in [('media','avcStartAt','avcEndAt'),('runtime','glesStartAt','glesEndAt')]:
+                assert 0 < int(evidence[group,start]['value']) <= int(evidence[group,end]['value'])
         assert fields['battery','present']['source']=='BatteryManager.EXTRA_PRESENT'
         assert fields['battery','cycleCount']['source']=='BatteryManager.EXTRA_CYCLE_COUNT'
+        assert fields['system','bootCount']['source']=='Settings.Global.BOOT_COUNT'
+        assert fields['system','mediaPerformanceClass']['source']=='Build.VERSION.MEDIA_PERFORMANCE_CLASS'
         for key in ('dataSubscriptionService','carrierBandwidths'):
             assert fields['cellular',key]['source'].startswith('TelephonyManager.')
         for group,key in [('battery','present'),('battery','cycleCount'),('cellular','dataSubscriptionService'),('cellular','carrierBandwidths')]:
@@ -70,9 +79,13 @@ def run(args):
             ('cpu','sysCpuPossible','/sys/devices/system/cpu/possible'),
             ('battery','sysBatteryTemp','/sys/class/power_supply/battery/temp')]:
             row=fields[group,key]
-            assert row['source']==path and (row['value'] is not None)==(row['status']=='AVAILABLE'),row
+            allowed_sources={path}
+            if key=='sysBatteryTemp':
+                allowed_sources.add('/sys/class/power_supply/bms/temp')
+            assert row['source'] in allowed_sources and (row['value'] is not None)==(row['status']=='AVAILABLE'),row
         dossier=get('/api/admin/device-assets/'+a['assetId']+'/dossier')
-        assert dossier['configurationCode']['version']=='sigmark-config-code/1'
+        assert dossier['configurationCode']['version']=='sigmark-config-code/2'
+        assert {part['domain'] for part in dossier['configurationCode']['components']}=={'product','hardware','rom'}
         assert dossier['configurationCode']['previousReportId']==a['id']
         inventory=get('/api/admin/device-assets')
         assert inventory['totals']['reports']==2 and inventory['totals']['devices']==1
@@ -82,7 +95,7 @@ def run(args):
                        SIGMARK_QA_REPORT=first)
             subprocess.run(['node', str(Path(__file__).resolve().parents[1] / 'web/qa/portable-fields.cjs')],
                            env=env, check=True, timeout=35)
-        print(f"PASS actual Android upload: {a['report']['model']} · {len(a['report']['parameters'])} fields, 2 captures and 1 asset; retried request reused receipt.")
+        print(f"PASS actual Android upload: {a['report']['model']} · {len(a['report']['parameters'])} fields, AVC/GLES passed in both captures; 1 asset and retry reused receipt.")
 
 
 if __name__=='__main__':

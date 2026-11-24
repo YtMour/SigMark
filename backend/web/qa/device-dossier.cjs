@@ -26,7 +26,7 @@ async function run(){
     const dossier=page.getByRole('region',{name:'最近一次采样'});
     const categories=dossier.getByRole('region',{name:'12 类设备参数'});
     await categories.getByText('系统与固件',{exact:true}).waitFor();
-    assert.equal(await categories.locator('details').count(),12);
+    assert.equal(await categories.locator('details.dossier-group').count(),12);
     const system=categories.locator('details').filter({hasText:'系统与固件'});
     await system.locator('summary').focus();
     await page.keyboard.press('Space');
@@ -48,12 +48,12 @@ async function run(){
     assert.equal(data.categories.find(c=>c.group==='runtime').fields.find(f=>f.key==='externalInputTypes').kind,'snapshot');
     await dossier.getByRole('link',{name:'查看这一份原报告'}).click();
     await page.waitForURL(url=>url.hash.includes('report='+current));
-    await page.getByRole('button',{name:'返回设备档案'}).click();
+    await page.getByRole('link',{name:'返回设备档案'}).click();
     await page.waitForFunction(()=>document.activeElement?.id==='dossier-report');
     await dossier.getByRole('link',{name:/到验收工作台/}).click();
     await page.getByLabel('同一资产的基线').waitFor();
     assert.equal(await page.getByLabel('同一资产的基线').inputValue(),baseline);
-    await page.getByRole('button',{name:'返回设备档案'}).click();
+    await page.getByRole('link',{name:'返回设备档案'}).click();
     await page.waitForFunction(()=>document.activeElement?.id==='dossier-lab');
     await page.setViewportSize({width:1366,height:900});
     assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth), 'desktop should not overflow');

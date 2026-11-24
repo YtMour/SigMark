@@ -118,8 +118,9 @@ def main(browser, image, mobile_payloads):
         dictionary = get('/api/admin/field-dictionary')
         duration = next(item for item in dictionary['items'] if item['key']=='media.avcElapsed')
         bits = next(item for item in dictionary['items'] if item['key']=='cpu.processBitness')
-        assert dictionary['latestFieldSet']==17 and dictionary['dictionaryVersion']=='sigmark-lan-fields/7'
+        assert dictionary['latestFieldSet']==20 and dictionary['dictionaryVersion']=='sigmark-lan-fields/11'
         assert (duration['unit'], duration['sinceFieldSet'], duration['plan'], duration['temporal'])==('ms',9,'rom','experiment')
+        assert duration['alsoPlans']==['full']
         assert (bits['unit'],bits['sinceFieldSet'],bits['valueKind'],bits['scope'])==('bit',11,'integer_text','lan_projection')
         cell = next(item for item in dictionary['items'] if item['key']=='cellular.cellLTEBandwidth')
         assert cell['minApi']==28 and cell['requires']==['android.permission.ACCESS_FINE_LOCATION','system_location_enabled']
@@ -164,9 +165,9 @@ def main(browser, image, mobile_payloads):
         def profile(rid): return get(url(rid))
         def label(p, code): return next(l for l in p['labels'] if l['code']==code)
         p = profile(selected)
-        assert (p['reportId'], p['ruleVersion'], p['linked'],p['historySamples'],p['historyLimited']) == (selected,'sigmark-profile/2',True,4,False),p
+        assert (p['reportId'], p['ruleVersion'], p['linked'],p['historySamples'],p['historyLimited']) == (selected,'sigmark-profile/3',True,4,False),p
         assert [l['code'] for l in p['labels']]==['virtual_build_markers','selinux_permissive','debugger_attached',
-            'hook_injection','root_manager_visible','multi_open','rom_verification','software_drm'],p
+            'hook_injection','root_manager_visible','multi_open','rom_verification','software_drm','identity_conflict'],p
         assert all('historyRestricted' in l for l in p['labels']),p
         dbg = label(p,'debugger_attached')
         assert (dbg['state'],dbg['historyHits'],dbg['historyEvaluable'],dbg['lastHistoricalHit']) == ('not_observed',2,3,{'id':last,'capturedAtEpochMs':now-2000}),dbg
@@ -278,10 +279,14 @@ def main(browser, image, mobile_payloads):
         cfg_asset = get('/api/admin/reports/'+cfg_new+'?include=asset')['assetId']
         cfg_dossier = get(dossier_url(cfg_asset))['configurationCode']
         assert cfg_dossier['previousReportId']==cfg_old
-        assert cfg_dossier['components'][0]['code'].startswith('P1-')
-        assert [v['key'] for v in cfg_dossier['components'][1]['inputs'] if v.get('change')]=='system.incremental'.split()
-        assert cfg_dossier['components'][1]['inputs'][2]['change']=='changed'
-        print('PASS configuration v15: same-asset predecessor, ROM delta, raw sysfs/API archive and two code components.',flush=True)
+        assert cfg_dossier['version']=='sigmark-config-code/2'
+        components={part['domain']:part for part in cfg_dossier['components']}
+        assert set(components)=={'product','hardware','rom'}
+        assert components['product']['code'].startswith('P2-')
+        assert not components['hardware'].get('code'), 'v15 fixture is missing hardware inputs'
+        assert components['rom']['code'].startswith('R2-')
+        assert {v['key']:v['change'] for v in components['rom']['inputs'] if v.get('change')}=={'system.incremental':'changed'}
+        print('PASS configuration v15: same-asset predecessor, ROM delta, raw sysfs/API archive and versioned code components.',flush=True)
         ids, route_reports, usb_reports = [], [], []
         for sample in mobile_payloads:
             payload = Path(sample).read_bytes()

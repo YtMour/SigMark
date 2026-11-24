@@ -15,8 +15,8 @@ async function run(){
     await page.goto(base+'/#lab?report='+process.argv[2]+'&objective=network');
     const experiments=page.getByRole('region',{name:'实验步骤与归档结果'});
     await experiments.locator('summary').getByText(/Wi-Fi → 蜂窝/).waitFor();
-    const text=await experiments.locator('summary').innerText();
-    if(process.argv[3]==='yes')assert.match(text,/ · 达到判定条件$/u);
+    const text=await experiments.locator('.experiment-status').innerText();
+    if(process.argv[3]==='yes')assert.equal(text,'达到判定条件');
     else assert.match(text,/未达到判定条件|证据未齐/);
     await page.getByRole('region',{name:'网络切换实验',exact:true}).getByText(/Wi-Fi → 移动网络/).waitFor();
     console.log('PASS real app Wi-Fi -> cellular archive in workbench; endpoint validation='+process.argv[3]);

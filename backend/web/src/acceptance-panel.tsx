@@ -4,7 +4,7 @@ import {acceptance,acceptanceComparison} from './acceptance';
 
 const titles={plan:'采样方案',phone:'电话状态权限',location:'位置权限',locationSwitch:'系统位置开关',
   fixture:'样片版本',output:'首帧结果',stage:'测试阶段',decoder:'解码器',elapsed:'本次耗时'};
-const labels:Record<string,string>={standard:'标准采集',rom:'ROM 验收',network:'网络复测',usb:'USB 插拔实验',gnss:'GNSS 读数核对',granted:'已授权',not_granted:'未授权',
+const labels:Record<string,string>={full:'整体获取',standard:'标准采集',rom:'ROM 验收',network:'网络复测',usb:'USB 插拔实验',gnss:'GNSS 读数核对',granted:'已授权',not_granted:'未授权',
   precise:'精确',approximate:'仅大致',enabled:'开启',disabled:'关闭',pass:'通过',fail:'未通过',
   source:'读取样片',configure:'初始化解码器',decode:'等待首帧',done:'首帧已输出'};
 type View = ReturnType<typeof acceptance>;

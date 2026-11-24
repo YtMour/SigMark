@@ -146,6 +146,9 @@ func (p Parameter) valid(schema, fieldSet int) bool {
 		if p.Value != nil && p.Group == "environment" && p.Key == "capturePlan" && *p.Value == "gnss" && fieldSet < 14 {
 			return false
 		}
+		if p.Group == "environment" && p.Key == "capturePlan" && p.Value != nil && *p.Value == "full" && fieldSet < 20 {
+			return false
+		}
 		if p.Value != nil && p.Group == "system" && p.Key == "gnssHardwareYear" && fieldSet >= 14 {
 			// A signed SDK int, including zero and semantically unusual values, remains raw evidence.
 			n, err := strconv.ParseInt(*p.Value, 10, 32)
@@ -271,7 +274,7 @@ func validAcceptanceValue(group, key, value string) bool {
 	case "cpu.coresConfigured":
 		return compactIntRange(value, 1, 1024)
 	case "environment.capturePlan":
-		return oneOf(value, "standard", "rom", "network", "usb", "gnss")
+		return oneOf(value, "full", "standard", "rom", "network", "usb", "gnss")
 	case "environment.capturePhoneAccess":
 		return oneOf(value, "granted", "not_granted")
 	case "environment.captureLocationAccess":
@@ -533,6 +536,10 @@ func (p Report) valid() bool {
 	return (p.FieldSetVersion < 13 || validTimedExperiment(p.Parameters)) && (p.SchemaVersion < 3 || validCoverage(p.Coverage, p.Parameters))
 }
 
+func matchesExperimentPlan(actual, required string) bool {
+	return actual == required || (actual == "full" && required == "rom")
+}
+
 func validTimedExperiment(fields []Parameter) bool {
 	archive := map[string]Parameter{}
 	for _, f := range fields {
@@ -562,7 +569,7 @@ func validTimedExperiment(fields []Parameter) bool {
 		{"network.checkStartAt", "network"}, {"network.checkEndAt", "network"}, {"media.avcStartAt", "rom"}, {"media.avcEndAt", "rom"},
 		{"runtime.glesStartAt", "rom"}, {"runtime.glesEndAt", "rom"},
 	} {
-		if _, found := archive[v.key]; found && plan != v.plan {
+		if _, found := archive[v.key]; found && !matchesExperimentPlan(plan, v.plan) {
 			return false
 		}
 	}

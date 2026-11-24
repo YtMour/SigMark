@@ -14,9 +14,10 @@ export function reportScope(hash:string):ReportFilters {
   return Object.fromEntries(scopeKeys.map(key=>[key,params.get(key)??''])) as ReportFilters;
 }
 
-export type AssetTab='reports'|'devices'|'coverage'|'trash';
+export type AssetTab='reports'|'devices'|'coverage'|'identity'|'trash';
 export function assetTab(hash:string):AssetTab {
   const params=hashParams(hash);
+  if(params.get('tab')==='identity'||hash.split('?')[0]==='#identity')return 'identity';
   if(params.get('tab')==='coverage')return 'coverage';
   if(params.get('tab')==='devices'||hash.split('?')[0]==='#stats')return 'devices';
   if(params.get('view')==='trash')return 'trash';

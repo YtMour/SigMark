@@ -1,4 +1,46 @@
 /* Shared workbench frame and interaction primitives. Domain tables stay in style.css. */
+
+.workspace-content :where(a:not([class]), a.subtle-link) {
+  color: var(--mint);
+  text-underline-offset: .2em;
+  overflow-wrap: anywhere;
+}
+.workspace-content :where(summary):focus-visible { outline: 2px solid var(--mint); outline-offset: 3px; }
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 9.25rem), 1fr));
+  gap: .55rem;
+  margin: 0;
+  padding: .8rem 1rem;
+  list-style: none;
+}
+.metric-card {
+  display: grid;
+  align-content: start;
+  gap: .18rem;
+  inline-size: 100%;
+  block-size: 100%;
+  min-inline-size: 0;
+  padding: .62rem .75rem;
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius-control);
+  background: var(--surface-recessed);
+  color: inherit;
+  text-align: start;
+  text-decoration: none;
+  font-weight: 400;
+}
+.metric-label { overflow-wrap: anywhere; font-size: .9rem; font-weight: 650; }
+.metric-card strong { color: var(--mint); font-size: clamp(1.42rem, 1.18rem + 1vw, 2rem); line-height: 1.15; font-variant-numeric: tabular-nums; }
+.metric-hint { color: var(--muted); font-size: .84rem; }
+:is(a,button).metric-card:hover { background: var(--alt); border-color: var(--mint); }
+:is(a,button).metric-card .metric-hint { color: var(--mint); }
+.profile-body { display: grid; gap: .6rem; padding: .35rem 1rem 1rem; }
+.profile-panel > p:not(.identity-notice) { margin: .7rem 1rem .4rem; }
+.profile-panel > .identity-notice { margin-inline: 1rem; }
+@media (max-width: 36rem) {
+  .metric-grid { grid-template-columns: repeat(2,minmax(0,1fr)); padding-inline: .75rem; }
+}
 :root {
   --frame: #101d24;
   --surface-recessed: #0e1b23;
@@ -10,7 +52,7 @@
 }
 .console-shell {
   display: grid;
-  grid-template-columns: minmax(12.5rem, 13.8%) minmax(0, 1fr);
+  grid-template-columns: clamp(12rem, 14vw, 15rem) minmax(0, 1fr);
   min-block-size: 100vh;
 }
 .workspace-content { min-inline-size: 0; }
@@ -33,7 +75,7 @@
   align-self: start;
   display: flex;
   flex-direction: column;
-  gap: 1.45rem;
+  gap: 1.25rem;
   padding: 1.15rem .75rem .75rem;
   min-block-size: 100vh;
   min-block-size: 100dvb;
@@ -62,7 +104,7 @@
   gap: 1.15rem;
   min-inline-size: 0;
 }
-.rail-group p { padding: 0 .6rem .4rem; color: var(--muted); font-size: .81rem; }
+.rail-group p { padding: 0 .6rem .32rem; color: var(--muted); font-size: .81rem; font-weight: 600; }
 .rail-group ul { margin: 0; padding: 0; list-style: none; display: grid; gap: .2rem; }
 .rail-group a {
   display: flex;
@@ -119,7 +161,7 @@
   color: var(--mint);
 }
 .heading-mark svg { inline-size: 1.7rem; block-size: 1.7rem; }
-.heading-copy h1 { font-size: clamp(1.55rem, 2.1vw, 2.05rem); line-height: 1.22; }
+.heading-copy h1 { font-size: clamp(1.55rem, 1.25rem + .85vw, 2.05rem); line-height: 1.22; }
 .heading-copy p { color: var(--muted); margin-block-start: .35rem; overflow-wrap: anywhere; }
 .heading-actions { display: flex; align-items: center; flex-wrap: wrap; gap: .6rem; }
 .button-link {
@@ -174,7 +216,46 @@
 .asset-search button { background: var(--alt); color: #eaf4f1; border-color: var(--border); }
 .asset-search button:hover,button.secondary:not(:disabled):hover { border-color: var(--mint); }
 .archive-filters,.report-index,.asset-panel { min-inline-size: 0; }
-.archive-browse .report-row { padding: .85rem 1rem; }
+.archive-filters { container: archive-filters / inline-size; }
+.archive-filters .facet-fields {
+  inline-size: 100%;
+  grid-template-columns: repeat(auto-fit, minmax(min(8rem, 100%), 1fr));
+  margin-block-start: .65rem;
+}
+.archive-filters select { min-block-size: 2.6rem; }
+.archive-sync {
+  display: flex;
+  gap: .55rem;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.archive-list-head [role=status] { display: block; font-variant-numeric: tabular-nums; }
+.archive-browse .report-index { container: archive-index / inline-size; }
+.archive-browse .report-row {
+  padding: .88rem clamp(.65rem, 2.75cqi, 1.35rem);
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas: "device arrow" "tags arrow" "received arrow";
+  align-items: center;
+}
+.archive-browse .report-list li:last-child .report-row { border-block-end: 0; }
+.archive-device { grid-area: device; display: grid; gap: .15rem; min-inline-size: 0; overflow-wrap: anywhere; }
+.archive-device strong { font-size: 1.08rem; line-height: 1.3; }
+.archive-device .device-dimensions { font-size: .88rem; }
+.archive-browse .row-tags { grid-area: tags; }
+.archive-browse .row-tags span { font-size: .82rem; }
+.archive-received { grid-area: received; color: var(--muted); display: flex; align-items: baseline; flex-wrap: wrap; gap: .3rem .65rem; font-variant-numeric: tabular-nums; font-size: .86rem; }
+.archive-arrow { grid-area: arrow; color: var(--mint); font-size: 1.45rem; }
+.archive-browse .pages { border-block-start: 1px solid var(--line-subtle); padding: .72rem 1rem; }
+.identity-overview { grid-template-columns: repeat(5,minmax(0,1fr)); }
+.identity-overview > div { grid-template-columns: minmax(0,1fr); }
+.identity-overview button { min-block-size: 1.75rem; }
+.identity-scope { padding: .65rem 1rem; border-block-start: 1px solid var(--line-subtle); overflow-wrap: anywhere; }
+.identity-table { container: identity-grid / inline-size; }
+.identity-table th,.identity-table td { inline-size: auto; }
+.identity-table th:last-child { inline-size: 48%; }
+.identity-table tr:last-child td { border-block-end: 0; }
+.identity-workspace h2 { scroll-margin-block-start: 1rem; }
+.identity-workspace h2:focus-visible { outline: 2px solid var(--mint); outline-offset: .22rem; }
 .device-reader-heading { display: flex; align-items: center; flex-wrap: wrap; gap: .55rem .9rem; }
 .security-context { padding: 1rem; }
 .security-card h2 { font-size: 1.1rem; }
@@ -217,10 +298,32 @@
 .install-guide { justify-items: stretch; }
 .install-guide ol { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(13rem,100%),1fr)); gap: .8rem 1rem; margin: 0; padding-inline-start: 1.3rem; }
 .install-guide small { display: block; margin-block-start: .15rem; }
-@media (min-width: 66rem) {
-  .archive-browse .report-row { grid-template-columns: minmax(0,1.2fr) minmax(0,1fr) minmax(0,1.15fr); align-items: center; gap: 1rem; }
-  .archive-browse .row-top { justify-content: start; gap: .4rem .8rem; }
-  .archive-browse .row-tags { justify-content: end; }
+@container archive-index (min-width: 43rem) {
+  .archive-browse .report-row {
+    grid-template-columns: minmax(0,1.2fr) minmax(0,1fr) minmax(8rem,.72fr) auto;
+    grid-template-areas: "device tags received arrow";
+    gap: .85rem;
+  }
+  .archive-received { justify-content: end; }
+}
+@container archive-filters (max-width: 30rem) {
+  .archive-filters .facet-fields { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .archive-filters .facet-fields label:last-of-type { grid-column: 1/-1; }
+}
+@container identity-grid (max-width: 36rem) {
+  .identity-table :is(table,tbody) { display: block; }
+  .identity-table thead { display: none; }
+  .identity-table tr { display: grid; gap: .5rem; padding: .8rem 1rem; }
+  .identity-table tr+tr { border-block-start: 1px solid var(--line-subtle); }
+  .identity-table td {
+    display: grid;
+    grid-template-columns: minmax(4.75rem,26%) minmax(0,1fr);
+    gap: .35rem .7rem;
+    padding: 0;
+    border: 0;
+    min-inline-size: 0;
+  }
+  .identity-table td::before { content: attr(data-label); color: var(--muted); font-size: .84rem; }
 }
 @media (max-width: 59rem) {
   .console-shell { grid-template-columns: minmax(0,1fr); grid-template-rows: auto 1fr; }
@@ -259,6 +362,10 @@
   .build-status-strip { grid-template-columns: repeat(2,minmax(0,1fr)); }
   .build-status-strip a { grid-column: 1/-1; justify-self: start; }
   .build-form { grid-template-columns: minmax(0,1fr); }
+  .identity-overview { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .identity-overview > div:nth-child(odd) { border-inline-start: 0; }
+  .identity-overview > div:nth-child(n+3) { border-block-start: 1px solid var(--line-subtle); }
+  .identity-overview > div:last-child { grid-column: 1/-1; }
 }
 @media (max-width: 28rem) {
   .rail-group a { font-size: .88rem; }

@@ -1,5 +1,6 @@
 .dossier { margin-block: 0 1.5rem; padding-block: .85rem 1rem; border-block: 1px solid var(--line-subtle); overflow-wrap: anywhere; }
 .dossier h3,.dossier h4,.dossier h5 { margin: 0; }
+.dossier-content { padding-inline: clamp(.7rem, 2vw, 1.2rem); }
 .dossier p { margin-block: .25rem; }
 .dossier-meta,.dossier-totals { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(100%,10rem),1fr)); gap: .5rem; padding: 0; margin-block: .9rem; }
 .dossier-meta > div,.dossier-totals > li { border: 1px solid var(--line-subtle); border-radius: .65rem; padding: .55rem .7rem; min-width: 0; }
@@ -10,10 +11,15 @@
 .dossier-totals strong { display: block; font-size: 1.35rem; font-variant-numeric: tabular-nums; }
 .dossier-tools { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .6rem; margin-block: .65rem; }
 .dossier-categories { margin-block-start: 1rem; }
-.dossier-group { border-block-end: 1px solid var(--line-subtle); }
-.dossier-group summary { padding: .6rem .2rem; cursor: pointer; }
+.dossier-category-head { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: .4rem; }
+.dossier-category-head label { padding: .3rem .55rem; color: inherit; border: 1px solid var(--line-subtle); border-radius: var(--radius-control); }
+.dossier-scope { margin-block: .45rem .7rem; color: var(--muted); font-size: .88rem; }
+.dossier-scope summary { cursor: pointer; }
+.dossier-group { margin-block: .4rem; border: 1px solid var(--line-subtle); border-radius: var(--radius-control); background: var(--surface-recessed); }
+.dossier-group summary { padding: .55rem .7rem; cursor: pointer; }
+.dossier-group summary:hover { background: var(--alt); }
 .dossier-summary { display: inline-flex; flex-wrap: wrap; gap: .2rem .7rem; margin-inline-start: .65rem; font-size: .83rem; color: var(--muted); }
-.dossier-group-body { padding: .15rem .2rem .7rem; }
+.dossier-group-body { padding: .35rem .7rem .7rem; border-block-start: 1px solid var(--line-subtle); }
 .dossier-bucket { margin-block-start: .7rem; }
 .dossier-bucket ul { padding: 0; margin: .25rem 0 0; list-style: none; }
 .dossier-evidence { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,2fr); gap: .35rem 1rem; padding: .55rem; border-block-start: 1px solid var(--line-subtle); }

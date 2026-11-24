@@ -3,7 +3,6 @@ import { createRoot } from 'react-dom/client';
 import { diffParameters, type Parameter } from './compare';
 import { BuildPage, Downloads, SettingsPage, request, RequestError, errorMessage as message } from './console';
 import { AssetsWorkspace } from './assets';
-import { IdentitySummaryPage } from './identity-summary';
 import { SecurityPage } from './security';
 import { BaselineDialog } from './baselines';
 import { refreshSeconds, useVisiblePoll } from './live';
@@ -15,16 +14,18 @@ import { identityConflictsOf } from './security-rules';
 import {ObservationPanel} from './observation-panel';
 import {ReportRecoveredPanel} from './report-recovered-panel';
 import {AcceptancePanel} from './acceptance-panel';
-import {LabPage,labLink} from './lab';
-import {listPages,openFromList,navigateReader,returnFromReader,returnLabel,useRestoreList,followReadLink} from './reader-history';
+import {LabPage} from './lab';
+import {ReportFlow} from './report-flow';
+import {listPages,openFromList,navigateReader,returnFromReader,returnLabel,useRestoreList} from './reader-history';
 import { caption, date, shortDate, groups, saveJson, type Report, type Page, type CoverageGroup } from './reports';
 import {EmptyState,PageHead,WorkspaceNav,workspaces,type Section} from './workspace-ui';
 import './style.css';
 import './workspace-ui.css';
 import './report-reader.css';
+import './console-design.css';
 
 function readSection(): Section {
-  if(location.hash.split('?')[0]==='#stats')return 'assets';
+  if(['#stats','#identity'].includes(location.hash.split('?')[0]))return 'assets';
   return workspaces.find(section => '#' + section.id === location.hash.split('?')[0])?.id ?? 'reports';
 }
 
@@ -81,7 +82,7 @@ function App(){
     {session==='active'&&error&&<p className="workspace error" role="alert">{error}</p>}
     {section==='downloads'?<Downloads/>:session==='active'?
       section==='settings'?<SettingsPage/>:section==='builds'?<BuildPage/>:
-        section==='assets'?<AssetsWorkspace/>:section==='identity'?<IdentitySummaryPage/>:section==='security'?<SecurityPage/>:section==='lab'?<LabPage/>:<Archive/>:
+        section==='assets'?<AssetsWorkspace/>:section==='security'?<SecurityPage/>:section==='lab'?<LabPage/>:<Archive/>:
       <main className="workspace"><PageHead section={section} description="通过管理员令牌访问内网工作台。"/><section className="login"><h2>管理员登录</h2>
       {session==='checking'?<p className="muted" role="status">正在检查登录状态…</p>:
         session==='unavailable'?<>
@@ -114,34 +115,47 @@ function App(){
 function Archive(){
   const [hash,setHash]=useState(()=>location.hash);
   const [baseline,setBaseline]=useState<Report|null>(null);
+  const filterFocus=useRef<{hash:string;key:string}|undefined>(undefined);
   useEffect(()=>{
     const follow=()=>setHash(location.hash);
     window.addEventListener('hashchange',follow);
     return ()=>window.removeEventListener('hashchange',follow);
   },[]);
+  useEffect(()=>{
+    const target=filterFocus.current;
+    if(!target)return;
+    filterFocus.current=undefined;
+    if(target.hash!==hash)return;
+    document.querySelector<HTMLSelectElement>(`.archive-filters [data-facet="${target.key}"]`)?.focus({preventScroll:true});
+  },[hash]);
   const params=hashParams(hash),filters=reportScope(hash);
   return params.has('report')?<ReportReader key={hash} id={params.get('report')??''} compareId={params.get('baseline')}
     filters={filters} baseline={baseline} pin={setBaseline}/>:
-    <ReportIndex key={hash} filters={filters} baseline={baseline} clearBaseline={()=>setBaseline(null)}/>;
+    <ReportIndex key={hash} filters={filters} baseline={baseline} clearBaseline={()=>setBaseline(null)}
+      rememberFilter={(nextHash,key)=>{filterFocus.current={hash:nextHash,key};}}/>;
 }
 
-function ReportIndex({filters,baseline,clearBaseline}:{filters:ReportFilters;baseline:Report|null;clearBaseline:()=>void}){
+function ReportIndex({filters,baseline,clearBaseline,rememberFilter}:{
+  filters:ReportFilters;baseline:Report|null;clearBaseline:()=>void;rememberFilter:(hash:string,key:string)=>void;
+}){
   const [pages,setPages]=useState(listPages);
   const [revision,setRevision]=useState(0);
-  const [data,setData]=useState<Page|null>(null),[total,setTotal]=useState<number>();
+  const [loaded,setLoaded]=useState<{cursor:string;page:Page}>(),[total,setTotal]=useState<number>();
   const [error,setError]=useState(''),[busy,setBusy]=useState(true);
   const cursor=pages[pages.length-1];
+  const data=loaded?.cursor===cursor?loaded.page:undefined;
+  const refreshInterval=refreshSeconds();
   useVisiblePoll(!cursor&&!busy,async signal=>{
     const params=new URLSearchParams(filters);
     const [page,stats]=await Promise.all([
       request<Page>('/api/admin/reports?'+params,{signal}),
       request<{total:number}>('/api/admin/report-count?'+params,{signal}),
     ]);
-    if(!signal.aborted){setData(page);setTotal(stats.total);setError('');}
+    if(!signal.aborted){setLoaded({cursor,page});setTotal(stats.total);setError('');}
   },new URLSearchParams(filters).toString());
   useRestoreList(!busy&&!!data);
   useEffect(()=>{
-    const controller=new AbortController();setTotal(undefined);
+    const controller=new AbortController();
     request<{total:number}>('/api/admin/report-count?'+new URLSearchParams(filters),{signal:controller.signal})
       .then(row=>{if(!controller.signal.aborted)setTotal(row.total);}).catch(()=>{});
     return ()=>controller.abort();
@@ -150,40 +164,47 @@ function ReportIndex({filters,baseline,clearBaseline}:{filters:ReportFilters;bas
     const controller=new AbortController();setBusy(true);setError('');
     const params=new URLSearchParams(filters);if(cursor)params.set('before',cursor);
     request<Page>('/api/admin/reports?'+params,{signal:controller.signal})
-      .then(page=>{if(!controller.signal.aborted)setData(page);})
-      .catch(err=>{if(!controller.signal.aborted){setError(message(err));setData(null);}})
+      .then(page=>{if(!controller.signal.aborted)setLoaded({cursor,page});})
+      .catch(err=>{if(!controller.signal.aborted)setError(message(err));})
       .finally(()=>{if(!controller.signal.aborted)setBusy(false);});
     return ()=>controller.abort();
   },[filters,cursor,revision]);
-  function filter(next:ReportFilters){
+  function filter(next:ReportFilters,focusKey?:string){
     const target=reportWorkspaceLink('reports',next);
     if(location.hash===target){setRevision(value=>value+1);setPages(['']);}
-    else location.hash=target;
+    else {
+      if(focusKey)rememberFilter(target,focusKey);
+      location.hash=target;
+    }
   }
   return <main className="workspace report-workspace archive-browse">
-    <PageHead section="reports" className="archive-heading" description="查找采样，查看参数和采集依据。">
-      <span className="workspace-badge">{total===undefined?'报告归档':`${total.toLocaleString('zh-CN')} 份匹配报告`}</span>
+    <PageHead section="reports" className="archive-heading" description="选择一份采样，查看参数、做单份安全分析或进入验收。">
+      <a className="button-link secondary" href={reportWorkspaceLink('assets',filters,{view:'archive'})}>管理当前结果 <span aria-hidden="true">→</span></a>
     </PageHead>
     <div className="panel archive-filters">
-      <ReportFiltersBar filters={filters} apply={filter}>
+      <ReportFiltersBar filters={filters} apply={filter} applyFacet={filter}>
         <div className="archive-scope-actions">
           <a className="subtle-link" href={reportWorkspaceLink('stats',filters)}>查看字段覆盖</a>
-          <a className="subtle-link" href={reportWorkspaceLink('assets',filters,{view:'archive'})}>管理当前结果</a>
         </div>
       </ReportFiltersBar>
     </div>
     <section className="panel report-index" aria-label="报告列表">
-        <div className="pane-title"><div><h2>采样记录</h2><small>{!refreshSeconds()?'自动刷新已关闭':cursor?'历史页保持当前位置':`首页每 ${refreshSeconds()} 秒同步`}</small></div>
-          <button type="button" className="secondary" disabled={busy} onClick={()=>setRevision(value=>value+1)}>刷新</button></div>
+        <div className="pane-title archive-list-head"><div><h2>采样记录</h2>
+          <small role="status">{total===undefined?(busy?'正在统计报告':`本页 ${data?.items.length??0} 份`):`${total.toLocaleString('zh-CN')} 份匹配报告`}</small></div>
+          <div className="archive-sync"><small>{cursor?'历史页保持当前位置':refreshInterval?`每 ${refreshInterval} 秒同步`:'自动刷新已关闭'}</small>
+            <button type="button" className="secondary" disabled={busy} onClick={()=>setRevision(value=>value+1)}>{busy&&data?'刷新中…':'刷新'}</button></div></div>
         {baseline&&<div className="baseline compact-baseline"><span><b>基线</b>{baseline.report.model} · <code>{baseline.id.slice(0,8)}</code></span>
           <button className="secondary" onClick={clearBaseline}>移除</button></div>}
         {error&&<p role="alert" className="error inset">{error}</p>}
-        {busy?<EmptyState title="正在读取报告…" loading/>:!error&&!data?.items.length?<EmptyState title="没有匹配报告">试试调整或清除上方筛选条件。</EmptyState>:null}
-        <ul className="report-list" aria-busy={busy}>{!busy&&data?.items.map(row=><li key={row.id}><a className="report-row"
+        {busy&&!data?<EmptyState title="正在读取报告…" loading/>:!error&&!data?.items.length?<EmptyState title="没有匹配报告">试试调整或清除上方筛选条件。</EmptyState>:null}
+        {!!data?.items.length&&<div className="archive-columns" aria-hidden="true"><span>设备</span><span>批次与版本</span><span>入库时间 / 报告编号</span></div>}
+        <ul className="report-list" aria-busy={busy}>{data?.items.map(row=><li key={row.id}><a className="report-row"
           id={'archive-read-'+row.id} onClick={e=>openFromList(e,pages,'返回报告列表')} href={reportWorkspaceLink('reports',filters,{report:row.id})}>
-          <span className="row-top"><strong>{row.report.model}</strong><span>{shortDate(row.receivedAt)}</span></span>
-          <span className="device-dimensions">{[row.report.brand,row.report.device,row.report.android&&'Android '+row.report.android].filter(Boolean).join(' · ')}</span>
-          <span className="row-tags"><span>{row.batch}</span><span>API {row.report.androidApi||'—'}</span><span>App {row.report.appVersion}</span><code>{row.id.slice(0,8)}</code></span>
+          <span className="archive-device"><strong>{row.report.model}</strong>
+            <span className="device-dimensions">{[row.report.brand,row.report.device,row.report.android&&'Android '+row.report.android].filter(Boolean).join(' · ')}</span></span>
+          <span className="row-tags"><span>{row.batch}</span><span>API {row.report.androidApi||'—'}</span><span>App {row.report.appVersion}</span></span>
+          <span className="archive-received"><time dateTime={row.receivedAt}>入库 {shortDate(row.receivedAt)}</time><code>{row.id.slice(0,8)}</code></span>
+          <span className="archive-arrow" aria-hidden="true">›</span>
         </a></li>)}</ul>
         <nav className="pages" aria-label="报告分页"><button className="secondary" disabled={busy||pages.length===1} onClick={()=>setPages(p=>p.slice(0,-1))}>上一页</button><span>第 {pages.length} 页 · 每页 30 份</span><button className="secondary" disabled={busy||!data?.nextCursor} onClick={()=>{if(data?.nextCursor)setPages(p=>[...p,data.nextCursor]);}}>下一页</button></nav>
       </section>
@@ -218,11 +239,9 @@ function ReportReader({id,compareId,filters,baseline,pin}:{
     return ()=>ctl.abort();
   },[id,compareId]);
   return <main className="workspace reading-workspace" ref={frame} tabIndex={-1} aria-label="报告工作区">
-    <header className="reading-header"><button type="button" className="secondary reader-return"
-      onClick={()=>returnFromReader(reportWorkspaceLink('reports',filters))}>{returnLabel()}</button>
-      <div><p className="eyebrow">{compareId&&compareId!==id&&!error?'参数对照':'采样报告'}</p><h1>{row?.report.model??'报告详情'}</h1></div>
-      {row&&<p className="reading-identity">API {row.report.androidApi||'—'} · App {row.report.appVersion}<br/>采样 {date(row.report.capturedAtEpochMs)}</p>}
-    </header>
+    {row?<ReportFlow report={row} view="report"/>:
+      <header className="reading-header"><h1>报告详情</h1><button type="button" className="secondary reader-return"
+        onClick={()=>returnFromReader(reportWorkspaceLink('reports',filters))}>{returnLabel()}</button></header>}
     {error&&<p className="panel error inset" role="alert">{error}</p>}
     {left&&row?<section className="panel"><Compare left={left} right={row} close={()=>navigateReader(reportWorkspaceLink('reports',filters,{report:id}))}/></section>:
       row&&(!compareId||compareId===id||error)?<Details row={row} filters={filters} pin={()=>pin(row)}
@@ -241,44 +260,53 @@ function IdentityNotice({fields}:{fields:Parameter[]}){
     <ul>{conflicts.map(pair=><li key={pair.leftKey+pair.rightKey}>
       {pair.title}：<code>{pair.leftKey}</code> = <strong>{pair.left}</strong>{' ≠ '}<code>{pair.rightKey}</code> = <strong>{pair.right}</strong>
     </li>)}</ul>
-    <a className="subtle-link" href="#identity">查看全库身份分布 →</a>
+    <a className="subtle-link" href="#assets?tab=identity">查看全库身份分布 →</a>
   </section>;
 }
 
 function Details({row,filters,pin,isBaseline,hasBaseline,startCompare}:{row:Report;filters:ReportFilters;pin:()=>void;isBaseline:boolean;hasBaseline:boolean;startCompare:()=>void}){
-  const [panel,setPanel]=useState<'fields'|'coverage'|'followup'>('fields');
+  const [panel,setPanel]=useState<'fields'|'coverage'|'followup'|'context'>('fields');
   const [saveBaseline,setSaveBaseline]=useState(false);
   const [savedId,setSavedId]=useState('');
   const fields=row.report.parameters??[];
   return <>
     <div className="reading-actions actions">
-      <a className="button-link secondary" onClick={followReadLink} href={labLink(row.id)}>打开验收工作台</a>
-      <a className="primary-link" onClick={followReadLink} href={reportWorkspaceLink('security',filters,{report:row.id,retest:true})}>与基线复测 →</a>
-      <a className="subtle-link" onClick={followReadLink} href={reportWorkspaceLink('security',filters,{report:row.id})}>单份安全分析</a>
-      <details className="report-options"><summary>更多报告操作</summary><div className="actions">
+      <button className="secondary" type="button" onClick={()=>saveJson(row)}>下载 JSON</button>
+      <details className="report-options"><summary>基线与参数对比</summary><div className="actions">
         <button className="secondary" onClick={()=>setSaveBaseline(true)}>保存回归基线</button>
-        <button className="secondary" onClick={()=>saveJson(row)}>下载 JSON</button>
         {!!fields.length&&<button className="secondary" onClick={pin} disabled={isBaseline}>{isBaseline?'已设临时对比基线':'设为临时对比基线'}</button>}
         {hasBaseline&&<button className="secondary" onClick={startCompare}>对比全部参数</button>}
         <small>批次 {row.batch} · {row.report.fieldSetVersion?`字段集 v${row.report.fieldSetVersion} · 采集器 ${row.report.collectorVersion??'未记录'}`:`历史协议 v${row.report.schemaVersion}`} · 编号 <code>{row.id}</code></small>
       </div></details>
     </div>
     {savedId&&<p className="inset" role="status">已保存回归基线。 <a className="subtle-link" href={reportWorkspaceLink('security',filters,{baseline:row.id,saved:savedId,retest:true})}>用这条基线复测 →</a></p>}
-    {row.report.feedback&&<p className="feedback"><b>测试反馈：</b>{row.report.feedback}</p>}
     <IdentityNotice fields={fields}/>
-    <ReportRecoveredPanel fields={fields}/>
-    {(row.report.fieldSetVersion??0)>=9&&<AcceptancePanel row={row}/>}
     <section className="panel reading-panel">
       <div className="inspector-tabs" role="group" aria-label="报告视图">
         <button aria-pressed={panel==='fields'} onClick={()=>setPanel('fields')}>归档参数 · {fields.length} 项</button>
         <button aria-pressed={panel==='coverage'} onClick={()=>setPanel('coverage')}>手机快照覆盖</button>
         <button aria-pressed={panel==='followup'} onClick={()=>setPanel('followup')}>缺项与补充证据</button>
+        <button aria-pressed={panel==='context'} onClick={()=>setPanel('context')}>采样条件</button>
       </div>
       <div hidden={panel!=='fields'}>{fields.length?<ReaderParameters fields={fields} fieldSet={row.report.fieldSetVersion??0} capturedAt={row.report.capturedAtEpochMs}/>:
         <div className="empty">{row.report.schemaVersion===1?'旧报告只保存了采集状态，没有归档参数值。':'这份报告没有归档参数明细。'}
         <ul>{(row.report.metrics??[]).map(m=><li key={m.key}>{caption(m.key)} · {caption(m.status)}</li>)}</ul></div>}</div>
       {panel==='coverage'&&<SnapshotCoverage rows={row.report.coverage} fields={fields}/>}
       {panel==='followup'&&<ObservationPanel key={row.id} report={row} showGaps/>}
+      {panel==='context'&&<div className="reader-context">
+        <dl className="release-data">
+          <dt>采样时间</dt><dd>{date(row.report.capturedAtEpochMs)}</dd>
+          <dt>入库时间</dt><dd>{date(row.receivedAt)}</dd>
+          <dt>批次</dt><dd>{row.batch}</dd>
+          <dt>采样网络</dt><dd>{caption(row.report.network)}</dd>
+          <dt>采集器</dt><dd>{row.report.collectorVersion??'未记录'}</dd>
+          <dt>字段集</dt><dd>{row.report.fieldSetVersion?`v${row.report.fieldSetVersion}`:'未记录'}</dd>
+          <dt>报告编号</dt><dd><code>{row.id}</code></dd>
+        </dl>
+        {row.report.feedback&&<p><b>测试反馈：</b>{row.report.feedback}</p>}
+        <ReportRecoveredPanel fields={fields}/>
+        {(row.report.fieldSetVersion??0)>=9&&<AcceptancePanel row={row}/>}
+      </div>}
     </section>
     {saveBaseline&&<BaselineDialog reportId={row.id} model={row.report.model} expectUnlock={false}
       close={()=>setSaveBaseline(false)} saved={id=>{setSavedId(id);setSaveBaseline(false);}}/>}

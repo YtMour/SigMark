@@ -51,7 +51,7 @@ internal fun LanReportDialog(upload: SampleUpload, onAssociate: (Boolean) -> Uni
                         Text("只发送这份已保存的报告，不会重新检测。")
                         Text("发送到：" + BuildConfig.LAN_ORIGIN + "（内网，传输未加密）")
                         Text("包含设备型号、系统、网络及安全检查结果，共 " + data.parameters.size + " 项明细。不发送密钥、应用清单或手机号码。")
-                        if (data.fieldSetVersion >= 9) Text("含采集时的授权状态；仅在运行 ROM 验收后包含样片结果、解码器名称和耗时，不发送视频或位置。")
+                        if (data.fieldSetVersion >= 9) Text("含采集时的授权状态。新版整体获取和 ROM 验收归档样片结果、解码器名称和耗时。上传内容是实验摘要。")
                         if (data.fieldSetVersion >= 11) Text("包含 App 进程位宽、可见内核架构、接口声明和外接输入类别；不发送外设名称、标识或输入内容。")
                         if (data.fieldSetVersion >= 12) {
                             val expanded = data.parameters.count { "${it.group}.${it.key}" in com.sigmark.app.collector.expandedHardwareKeys }

@@ -216,7 +216,7 @@ func dossierGapCode(p Report, field dictionaryField, rule dossierRule, access do
 		return "API_BELOW_MINIMUM"
 	case rule.plan != "" && access.CapturePlan == "":
 		return "PLAN_UNKNOWN"
-	case rule.plan != "" && access.CapturePlan != rule.plan:
+	case rule.plan != "" && !matchesExperimentPlan(access.CapturePlan, rule.plan):
 		return "OTHER_CAPTURE_PLAN"
 	case rule.fine && noCellular:
 		return "CELLULAR_NOT_OBSERVED"

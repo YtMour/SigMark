@@ -24,6 +24,7 @@ async function run(){
       return route.fulfill({response});
     });
     await page.goto(base+'/#reports?report='+current);
+    await page.getByRole('button',{name:'采样条件',exact:true}).click();
     const single=page.getByRole('region',{name:'验收证据'});
     await single.getByText('ROM 验收 · 视频首帧未通过').waitFor();
     const summary=single.locator('summary');

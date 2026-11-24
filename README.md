@@ -1,5 +1,7 @@
 # SigMark / 印迹
 
+**1.12.0** · 「整体获取」同时执行密钥保护、AVC 首帧和 GLES 离屏回读。实验结果随采样保存，可在后台验收工作台展开查看。网络切换、USB 插拔和 GNSS 保留单独入口。[操作与验证](docs/ACCEPTANCE-1.0.md)
+
 **1.11.0** · 字段集 20 采集系统冷启动次数（`Settings.Global.BOOT_COUNT`）与媒体性能等级（API 31+），两者都只作世代/生命周期对照。外部观察新增 opt-in 的 `sigmark-adb-evidence/5`（`observer=ROOT`）：在 v4 字段之外给出 SELinux 策略摘要，需已 root 的测试机；面板把 App、ADB shell、root 三个来源分列，互不填充。浏览器 QA 新增身份分布页用例，报告详情对身份声明不一致的样本置顶提示。详见 [字段集 20](docs/FRAMEWORK-DIAGNOSTICS.md#字段集-20开机次数与媒体性能等级)、[syscall 边界](docs/SYSCALL-BOUNDARIES.md) 与 [设备验证记录](docs/DEVICE-VALIDATION.md)。
 
 **1.10.0** · 字段集 19 新增三条身份声明（`ro.board.platform`、`ro.boot.hardware`、`ro.boot.hardware.sku`），与 `Build.BOARD / HARDWARE / SKU` 做同一观察者内部的三对一致性检查；安全规则升到 `rom-evidence/4`，设备风险画像升到 `sigmark-profile/3`（第 9 个标签 `identity_conflict`），ADB 观察文件升到 v4 并并列比较这三项；设备风险画像新增同资产「历史身份声明」；报告详情对身份声明不一致的样本置顶提示；后台新增「身份分布」页，汇总多身份资产、跨资产同一声明与内部冲突报告。真机实测：小米序列上 App 读到 `mt6985 / mtk / 23078PND5G`，ADB shell 读到 `gs101 / oriole / GR1YH`，三对全部冲突；另一台 MI 8 两侧一致。详见 [字段集 19](docs/FRAMEWORK-DIAGNOSTICS.md#字段集-19身份字段与内部一致性)、[设备验证记录](docs/DEVICE-VALIDATION.md) 与 [安全证据](docs/SECURITY-EVIDENCE.md)。

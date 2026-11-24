@@ -7,6 +7,7 @@ import android.os.SystemClock
 import com.sigmark.app.collector.DeviceRepository
 import com.sigmark.app.collector.DecodeStage
 import com.sigmark.app.collector.CapturePlan
+import com.sigmark.app.collector.captureLocalExperiments
 import com.sigmark.app.collector.acceptanceEvidence
 import com.sigmark.app.collector.RouteCheck
 import com.sigmark.app.collector.RoutePoint
@@ -274,8 +275,10 @@ class CapabilitySmoke : Instrumentation() {
         val code=try {
             val endpoint=checkNotNull(lanEndpoint(origin))
             fun captureReport() = runBlocking {
-                lanReport(acceptanceEvidence(DeviceRepository(targetContext).collect(), CapturePlan.STANDARD, null),
-                    BuildConfig.VERSION_NAME, "")
+                val snapshot = DeviceRepository(targetContext).collect()
+                val complete = captureLocalExperiments(snapshot, CapturePlan.FULL,
+                    decode = { probeMediaDecode(targetContext) }, graphics = { probeGraphics() })
+                lanReport(complete, BuildConfig.VERSION_NAME, "")
             }
             val report=captureReport()
             val installKey=UUID.randomUUID().toString()

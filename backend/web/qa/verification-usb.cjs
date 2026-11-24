@@ -16,7 +16,7 @@ async function run(){
     await experiments.getByText('USB 插拔实验',{exact:true}).waitFor();
     const summary=experiments.locator('summary');
     const expected={no_change:'未达到判定条件',incomplete:'证据未齐',increase:'达到判定条件',decrease:'达到判定条件'};
-    assert((await summary.innerText()).endsWith(' · '+expected[process.argv[3]]));
+    assert.equal(await summary.locator('.experiment-status').innerText(),expected[process.argv[3]]);
     await summary.click();
     await experiments.getByText(/设备墙钟：/).waitFor();
     console.log('PASS USB workbench replay: actual captured endpoints and correct outcome ('+process.argv[3]+').');

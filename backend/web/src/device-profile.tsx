@@ -39,7 +39,7 @@ export function DeviceProfilePanel({reportId}:{reportId:string}) {
     request<Profile>('/api/admin/reports/'+reportId+'/device-profile',{signal:ctl.signal}).then(p=>{
       if(!ctl.signal.aborted){if(p.reportId!==reportId||!Array.isArray(p.labels))throw Error('设备画像与报告不匹配');setData(p);}
     }).catch(e=>{if(!ctl.signal.aborted)setError(errorMessage(e));});return ()=>ctl.abort();},[reportId,retry]);
-  return <section className="panel" aria-labelledby="device-profile-heading">
+  return <section className="panel profile-panel" aria-labelledby="device-profile-heading">
     <div className="pane-title"><div><h2 id="device-profile-heading">设备风险画像</h2><p className="muted">本次观察与过去记录分开看，不用于判定交易欺诈。</p></div>
       {data&&<button type="button" className="secondary" onClick={()=>saveDownload(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}),'SigMark-profile-'+reportId+'.json')}>导出画像 JSON</button>}</div>
     {!data?(error?<div className="inset"><span role="alert">{error}</span> <button type="button" className="secondary" onClick={()=>setRetry(n=>n+1)}>重试读取画像</button></div>:<p role="status">正在读取画像…</p>):<>
@@ -47,6 +47,7 @@ export function DeviceProfilePanel({reportId}:{reportId:string}) {
         '同一已归组资产 · 采样前 '+data.historyDays+' 天内的 '+data.historySamples+' 份先前报告'+(data.historyLimited?'（仅计最近 '+data.historyLimit+' 份）':'')+'。'}</p>
       {data.labels.some(label=>label.code==='identity_conflict'&&label.state==='hit')&&
         <p className="identity-notice" role="status">本份报告的身份声明不一致：Build 与只读属性对不上（详见下方「身份字段冲突」）；先核对 ROM 属性改写，不据此判定真伪。</p>}
+      <div className="profile-body">
       <div className="security-readings">{data.labels.map(l=><details key={l.code} className="panel security-card" data-profile={l.code}>
         <summary><strong>{rules[l.code]?.[0]??l.code}</strong> <span className={'tag security-'+(l.state==='hit'?'review':l.state==='insufficient'?'unknown':'context')}>{states[l.state]}</span>
           <span className="security-finding">{!data.linked?'未作历史关联':data.historySamples===0?'暂无此前采样':!l.historyEvaluable?'此前采样证据不足':'历史观察到 '+l.historyHits+' / '+l.historyEvaluable+' 份可判断报告'}</span></summary>
@@ -55,7 +56,7 @@ export function DeviceProfilePanel({reportId}:{reportId:string}) {
         {l.evidence.length?<dl>{l.evidence.map(e=><div key={e.key}><dt><code>{e.key}</code></dt><dd>{e.status==='AVAILABLE'?(e.value||'无有效读数'):(missing[e.status]??e.status)}{e.errno!=null&&'（errno='+e.errno+'）'}{e.source&&<small>来源：{e.source}</small>}</dd></div>)}</dl>:<p>本报告没有可用于此标签的读数。</p>}
         {data.linked&&data.historySamples>l.historyEvaluable&&<p>另有 {data.historySamples-l.historyEvaluable} 份证据不足，未计入分母。</p>}
         {typeof l.historyRestricted==='number'&&l.historyRestricted>0&&<p>历史受限 {l.historyRestricted} 份（系统拒绝读取，不计入命中）。</p>}
-        {l.lastHistoricalHit&&<p>最近一次观察到：{date(l.lastHistoricalHit.capturedAtEpochMs)} · <a href={'#reports?report='+l.lastHistoricalHit.id} onClick={followReadLink}>查看当时的报告</a></p>}
+        {l.lastHistoricalHit&&<p>最近一次观察到：{date(l.lastHistoricalHit.capturedAtEpochMs)} · <a className="subtle-link" href={'#reports?report='+l.lastHistoricalHit.id} onClick={followReadLink}>查看当时的报告</a></p>}
       </details>)}</div>
       {!!data.identityHistory?.length&&<details className="panel security-card" data-profile="identity-history" open>
         <summary><strong>历史身份声明</strong> <span className={'tag security-'+(data.identityHistory.length>1?'review':'context')}>{data.identityHistory.length>1?'出现 '+data.identityHistory.length+' 套':'1 套'}</span>
@@ -66,11 +67,12 @@ export function DeviceProfilePanel({reportId}:{reportId:string}) {
           {' · 主板 '+(entry.board??'—')+(entry.boardPlatform?' / '+entry.boardPlatform:'')}
           {' · 硬件 '+(entry.bootHardware??'—')+(entry.hardwareSku?' / '+entry.hardwareSku:'')}
           {' · '+entry.samples+' 份 · 最近 '+date(entry.lastCapturedAtEpochMs)}
-          {' · '}<a href={'#reports?report='+entry.lastReportId} onClick={followReadLink}>查看当时报告</a>
+          {' · '}<a className="subtle-link" href={'#reports?report='+entry.lastReportId} onClick={followReadLink}>查看当时报告</a>
         </li>)}</ul>
         {data.identityTruncated&&<p>组合超过 5 套，只列最近 5 套。</p>}
       </details>}
       <small className="muted">规则 {data.ruleVersion} · 仅使用本仓库报告；资产关系不等于物理设备认证。</small>
+      </div>
     </>}
   </section>;
 }

@@ -5,6 +5,7 @@ import {linkedReportFilters,reportWorkspaceLink,type ReportFilters} from './face
 import {ReportFiltersBar} from './asset-filters';
 import { refreshSeconds, useVisiblePoll } from './live';
 import { RepositoryStats } from './stats';
+import {IdentitySummaryPage} from './identity-summary';
 import { DeviceInventory, AssignDevice, InventorySummary } from './device-assets';
 import {assetTab,hashParams} from './workspace-route';
 import {listPages,openFromList,useRestoreList} from './reader-history';
@@ -27,19 +28,21 @@ export function AssetsWorkspace(){
   const filters=linkedReportFilters();
   const reports=reportWorkspaceLink('assets',filters,{view:'archive'});
   const coverage=reportWorkspaceLink('stats',filters);
+  const sampleAsset=hashParams(route).get('sampleAsset')??'';
   return <main className="workspace assets-workspace">
-    <PageHead section="assets" description="按手机管理归档、批量导出或恢复报告。">
+    <PageHead section="assets" description="按设备归组、管理报告，查看全库字段与身份声明。">
       <a className="button-link secondary" href={reportWorkspaceLink('reports',tab==='devices'?undefined:filters)}>查看报告档案 →</a>
     </PageHead>
-    <InventorySummary revision={inventoryVersion}/>
+    {tab==='devices'&&!sampleAsset&&<InventorySummary revision={inventoryVersion}/>}
     <WorkspaceTabs label="资产工作区" items={[
       {label:'设备档案',href:reportWorkspaceLink('assets'),active:tab==='devices'},
       {label:'在库报告',href:reports,active:tab==='reports'},
       {label:'字段覆盖',href:tab==='coverage'?route:coverage,active:tab==='coverage'},
+      {label:'身份分布',href:'#assets?tab=identity',active:tab==='identity'},
       {label:'回收站',href:reportWorkspaceLink('assets',filters,{view:'trash'}),active:tab==='trash'},
     ]}/>
-    {tab==='coverage'?<RepositoryStats key={route}/>:tab==='devices'?
-      <DeviceInventory sampleAsset={hashParams(route).get('sampleAsset')??''} changed={()=>invalidateInventory(i=>i+1)}/>:
+    {tab==='identity'?<IdentitySummaryPage/>:tab==='coverage'?<RepositoryStats key={route}/>:tab==='devices'?
+      <DeviceInventory sampleAsset={sampleAsset} changed={()=>invalidateInventory(i=>i+1)}/>:
       <AssetsPage key={route} view={tab==='trash'?'trash':'archive'} changed={()=>invalidateInventory(i=>i+1)}/>}
   </main>;
 }
@@ -167,7 +170,6 @@ function AssetsPage({view,changed}:{view:View;changed:()=>void}) {
           <td><div className="actions">{view==='archive'?<>
             <a id={'asset-read-'+row.id} className="subtle-link" onClick={e=>openFromList(e,cursors,'返回资产管理')}
               href={reportWorkspaceLink('reports',filter,{report:row.id})}>查看报告</a>
-            <a className="subtle-link" href={reportWorkspaceLink('security',filter,{report:row.id})}>安全分析</a>
           </>:
             <button className="secondary" onClick={()=>setPending({action:'restore',rows:[row]})}>恢复此报告</button>}
             <button className="text-button" disabled={!!downloadId} onClick={()=>void download(row)}>{downloadId===row.id?'下载中…':'下载 JSON'}</button>

@@ -39,13 +39,18 @@ async function run(){
       const r=rows.find(x=>x.id===p);
       const start=Number(q.get('before')||0);
       const totals={devices:1,reports:set.length,unassigned:0,trash:0};
-      const data=p==='dossier'?{schemaVersion:1,ruleVersion:'sigmark-dossier/1',assetId:asset,reportId:id(1),batch:'qa-reader',
+      const sample=rows.find(x=>x.id===u.pathname.split('/').at(-2));
+      const data=p==='lab'&&sample?{schemaVersion:1,current:{...sample,report:{...sample.report,parameters:params}},
+        history:[],historyLimit:12,hasEarlier:false}:
+        p==='dossier'?{schemaVersion:1,ruleVersion:'sigmark-dossier/1',assetId:asset,reportId:id(1),batch:'qa-reader',
         receivedAt:when,capturedAtEpochMs:Date.parse(when),reportSchemaVersion:4,fieldSetVersion:6,appVersion:'0.17.0',androidApi:29,context:{},
         categories:groups.map(group=>({group,counts:{available:0,restricted:0,unavailable:0,errors:0},checklistSaved:0,checklistScope:0,fields:[],gaps:[]}))}:
         r?{...r,...(p===id(65)?{trashedAt:when}:{}),report:{...r.report,metrics:[],parameters:params,coverage,
         ...(p===id(64)?{schemaVersion:1,parameters:undefined,coverage:undefined,metrics:[{key:'system.selinux',status:'RESTRICTED'}]}:{})}}:
         p==='device-assets'?(q.has('summary')?{generatedAt:when,totals,distributions:{}}:{items:[{id:asset,label:'设备样本',model:'QA',reports:65,firstSeen:when,lastSeen:when}],totals}):
-        p==='report-count'?{total:set.length}:p==='reports'?{items:set.slice(start,start+30),nextCursor:start+30<set.length?String(start+30):''}: {items:[]};
+        p==='report-count'?{total:set.length}:
+        p==='report-facets'?{brand:[{value:'QA',count:set.length}],android:[{value:'10',count:set.length}]}:
+        p==='reports'?{items:set.slice(start,start+30),nextCursor:start+30<set.length?String(start+30):''}: {items:[]};
       return route.fulfill({json:data});
     });
     const go=hash=>page.goto(new URL('/'+hash,base).href);
@@ -62,6 +67,38 @@ async function run(){
     assert(Math.abs(gap)<1,'gap='+gap);await snap('assets-891');
 
     await go('#reports'+query);
+    const brand=page.getByRole('combobox',{name:'品牌',exact:true});
+    await brand.locator('option[value=QA]').waitFor({state:'attached'});
+    await brand.selectOption('QA');
+    await page.waitForURL(u=>u.searchParams.size===0&&u.hash.includes('brand=QA'));
+    await page.waitForFunction(()=>document.activeElement?.getAttribute('data-facet')==='brand');
+    assert.match(await page.getByRole('link',{name:'管理当前结果'}).getAttribute('href'),/brand=QA/);
+    await page.getByRole('button',{name:'清除品牌筛选：QA'}).click();
+    await page.waitForURL(u=>u.hash==='#reports'+query);
+    await page.getByRole('button',{name:'清除品牌筛选：QA'}).waitFor({state:'detached'});
+    await page.locator('#archive-read-'+id(1)).waitFor();
+    await snap('archive-891');
+    await page.setViewportSize({width:1440,height:1003});
+    const desktopNav=await page.evaluate(()=>{
+      const brand=document.querySelector('.rail-brand').getBoundingClientRect();
+      const nav=document.querySelector('.rail-nav').getBoundingClientRect();
+      const session=document.querySelector('.rail-session').getBoundingClientRect();
+      return [nav.left>=brand.right, session.right<=innerWidth,
+        Math.abs(brand.top+brand.height/2-nav.top-nav.height/2)<2];
+    });
+    assert.deepEqual(desktopNav,[true,true,true],'brand and navigation share one row');
+    await page.setViewportSize({width:320,height:740});
+    assert(await screenOK(),'archive overflows at 320px');
+    const navigation=page.getByRole('button',{name:'工作区',exact:true});
+    await navigation.focus();
+    await page.keyboard.press('Enter');
+    const rail=page.getByRole('navigation',{name:'工作区导航'});
+    assert.equal(await rail.getByRole('link',{name:'报告档案',exact:true}).getAttribute('aria-current'),'page');
+    await page.keyboard.press('Escape');
+    assert.equal(await navigation.getAttribute('aria-expanded'),'false');
+    assert(await navigation.evaluate(el=>document.activeElement===el));
+    await snap('archive-320');
+    await page.setViewportSize({width:891,height:1003});
     await page.getByRole('button',{name:'下一页',exact:true}).click();
     await page.getByText('第 2 页 · 每页 30 份',{exact:true}).waitFor();
     async function openAndCheck(origin,returnName,via){
@@ -70,13 +107,21 @@ async function run(){
       const hash=new URL(page.url()).hash;
       await origin.click();
       await page.getByLabel('搜索本报告参数').waitFor();
+      await page.getByRole('button',{name:'下载 JSON',exact:true}).waitFor();
+      await page.getByRole('button',{name:'采样条件',exact:true}).click();
+      await page.getByText('入库时间',{exact:true}).waitFor();
+      await page.getByRole('button',{name:/归档参数/}).click();
       assert.equal(await page.getByRole('region',{name:'报告列表'}).count(),0);
       if(via==='security'){
         await page.getByRole('link',{name:'单份安全分析'}).click();
+        const nav=page.getByRole('navigation',{name:'当前报告功能'});
+        await nav.getByRole('link',{name:'打开验收工作台'}).click();
+        await page.getByRole('navigation',{name:'报告路径'}).getByRole('link',{name:'验收工作台',exact:true}).waitFor();
+        assert.match(new URL(page.url()).hash,/batch=qa-reader/);
         await page.getByRole('link',{name:'返回报告详情'}).click();
       }
       if(via==='browser')await page.goBack();
-      else await page.getByRole('button',{name:returnName,exact:true}).click();
+      else await page.getByRole('link',{name:returnName,exact:true}).click();
       await page.waitForURL(u=>u.hash===hash);
       await origin.waitFor();
       await page.waitForFunction(id=>document.activeElement?.id===id,await origin.getAttribute('id'));
@@ -91,7 +136,7 @@ async function run(){
     await go('#assets');
     await page.getByText('65 份采样',{exact:true}).waitFor();
     assert.equal(await page.locator('.device-inventory > li').count(),1);
-    await page.getByRole('link',{name:'看全部报告'}).click();
+    await page.getByRole('link',{name:/在库报告.*管理报告/}).click();
     await page.getByRole('heading',{name:'在库报告',exact:true}).waitFor();
     await page.getByRole('link',{name:'设备档案',exact:true}).click();
     await page.getByRole('link',{name:'打开档案',exact:true}).click();
@@ -101,7 +146,7 @@ async function run(){
     await picks.nth(0).check();await picks.nth(1).check();
     await page.getByRole('link',{name:/对比所选两份/}).click();
     await page.getByRole('heading',{name:'报告对比'}).waitFor();
-    await page.getByRole('button',{name:'返回设备采样'}).click();
+    await page.getByRole('link',{name:'返回设备采样'}).click();
     await page.waitForFunction(id=>document.activeElement?.id===id,'samples-'+asset);
 
     calls.length=0;
@@ -145,7 +190,7 @@ async function run(){
       if(w===1024)assert(layout.width>760,'reader squeezed: '+layout.width);
       if([390,1024,1920].includes(w))await snap('reader-'+w);
     }
-    await page.getByRole('button',{name:'返回报告列表'}).click();
+    await page.getByRole('link',{name:'返回报告列表'}).click();
     await page.getByRole('region',{name:'报告列表'}).waitFor();
     await go('#reports?report=invalid');
     await page.getByRole('alert').filter({hasText:'报告编号无效'}).waitFor();

@@ -50,7 +50,7 @@ export function ReportFacets({filters,select,view='archive',showCounts=true}:{
     <legend>分类筛选</legend>
     {dimensions.map(([key,label])=>{
       const rows=options?.[key]??[];
-      return <label key={key}>{label}<select aria-label={label} value={filters[key]} onChange={e=>select(key,e.target.value)}>
+      return <label key={key}>{label}<select data-facet={key} aria-label={label} value={filters[key]} onChange={e=>select(key,e.target.value)}>
         <option value="">全部</option>
         {filters[key]&&!rows.some(row=>row.value===filters[key])&&<option value={filters[key]}>{display(filters[key])}</option>}
         {rows.map(row=><option key={row.value} value={row.value}>{display(row.value)}{showCounts?` · ${row.count}`:''}</option>)}

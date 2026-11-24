@@ -35,6 +35,8 @@ test('asset tab deep links are stable and do not pollute report scope',()=>{
   assert.equal(assetTab(reportWorkspaceLink('stats',scope)),'coverage');
   assert.equal(assetTab(reportWorkspaceLink('assets',undefined,{devices:true})),'devices');
   assert.equal(assetTab('#stats'),'devices');
+  assert.equal(assetTab('#identity'),'identity');
+  assert.equal(assetTab('#assets?tab=identity'),'identity');
   assert.deepEqual(reportScope(reportWorkspaceLink('assets',scope,{devices:true})),scope);
   const sample=reportWorkspaceLink('assets',undefined,{devices:true,sampleAsset:'device-1'});
   assert.equal(assetTab(sample),'devices');

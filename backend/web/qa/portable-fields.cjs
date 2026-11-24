@@ -23,19 +23,28 @@ async function run() {
     });
     await page.goto(base + '/#reports?report=' + reportId);
     const search = page.getByRole('searchbox', {name: '搜索本报告参数'});
-    for (const key of ['battery.cycleCount', 'cellular.dataSubscriptionService', 'cellular.carrierBandwidths']) {
+    for (const key of ['battery.cycleCount', 'cellular.dataSubscriptionService', 'cellular.carrierBandwidths', 'system.bootCount', 'system.mediaPerformanceClass']) {
       await search.fill(key);
       const field = page.locator('.field-evidence');
       await field.locator('summary').click();
       await field.getByText(key, {exact: true}).waitFor();
     }
     assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
-    await page.getByText('更多报告操作', {exact: true}).click();
     const pending = page.waitForEvent('download');
     await page.getByRole('button', {name: '下载 JSON', exact: true}).click();
     const data = JSON.parse(await readFile(await (await pending).path(), 'utf8'));
     assert.equal(data.id, reportId);
     assert.equal(data.report.fieldSetVersion, 20);
+    const values = new Map(data.report.parameters.map(p => [p.group + '.' + p.key, p.value]));
+    assert.equal(values.get('environment.capturePlan'), 'full');
+    assert.equal(values.get('media.avcFirstFrame'), 'pass');
+    assert.equal(values.get('runtime.glesProbeResult'), 'pass');
+    await page.getByRole('link',{name:'打开验收工作台',exact:true}).click();
+    const experiments=page.getByRole('region',{name:'实验步骤与归档结果'});
+    const avc=experiments.locator('details').filter({hasText:'AVC 首帧'});
+    await avc.getByText('达到判定条件',{exact:true}).waitFor();
+    await experiments.locator('details').filter({hasText:'GLES 离屏回读'}).getByText('达到判定条件',{exact:true}).waitFor();
+    await experiments.locator('details').filter({hasText:'USB 插拔实验'}).getByText('未运行此实验',{exact:true}).waitFor();
     for (const key of ['battery.present', 'battery.cycleCount', 'cellular.dataSubscriptionService', 'cellular.carrierBandwidths']) {
       const reading = data.report.parameters.find(p => p.group + '.' + p.key === key);
       assert(reading && reading.source);

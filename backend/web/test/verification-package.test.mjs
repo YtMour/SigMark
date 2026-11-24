@@ -92,3 +92,20 @@ test('field set 17 keeps the same 1×1 ROM comparison as field sets 12 through 1
   assert.equal(compareProbe(experiment(a,'gles'),experiment(b,'gles'),a,b),'regression');
   assert.equal(experiment(b,'gles').state,'failed');
 });
+
+test('overall capture compares local experiments with ROM captures while interactive experiments stay separate',()=>{
+  const run=(row,plan)=>({...row,report:{...row.report,fieldSetVersion:20,parameters:[
+    field('environment.capturePlan',plan),
+    field('media.avcFixture','sigmark-avc/1'),field('media.avcFirstFrame','pass'),
+    field('runtime.glesProbeResult','pass'),field('runtime.glesProbeStage','done'),field('runtime.glesProbeVersion','3.2'),
+  ]}});
+  const a=run(old,'rom'),b=run(newer,'full');
+  for(const probe of ['avc','gles']){
+    assert.equal(experiment(b,probe).state,'passed');
+    assert.equal(compareProbe(experiment(a,probe),experiment(b,probe),a,b),'both_pass');
+  }
+  for(const probe of ['usb','route','gnss'])assert.equal(experiment(b,probe).state,'not_run');
+  const noEvidence=(plan)=>({...b,report:{...b.report,parameters:[field('environment.capturePlan',plan)]}});
+  assert.equal(experiment(noEvidence('full'),'avc').state,'not_recorded');
+  assert.equal(experiment(noEvidence('standard'),'avc').state,'not_run');
+});

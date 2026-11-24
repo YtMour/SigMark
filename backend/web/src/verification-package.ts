@@ -8,7 +8,7 @@ import {regressionResult} from './regression.ts';
 import {gnssAudit,otherFieldQuality,qualityVersion} from './field-quality.ts';
 
 export type Objective='overview'|'rom'|'network'|'usb'|'gnss';
-export type FieldSpec={key:string;minSchemaVersion:number;sinceFieldSet?:number;unit?:string;minApi?:number;plan?:string;requires?:string[];
+export type FieldSpec={key:string;minSchemaVersion:number;sinceFieldSet?:number;unit?:string;minApi?:number;plan?:string;alsoPlans?:string[];requires?:string[];
   wireType?:string;valueKind?:string;temporal?:'configuration'|'snapshot'|'experiment';scope?:string;sensitivity?:string};
 export type FieldCatalog={schemaVersion:1;dictionaryVersion?:string;latestFieldSet:number;items:FieldSpec[];
   dynamic?:{pattern:string;minSchemaVersion:number;sinceFieldSet:number}};
@@ -29,14 +29,15 @@ function reading(p:Parameter|undefined){
 
 type ExperimentState='passed'|'failed'|'incomplete'|'not_recorded'|'not_run';
 export const experimentLabels:Record<ExperimentState,string>={passed:'达到判定条件',failed:'未达到判定条件',incomplete:'证据未齐',
-  not_recorded:'历史未保存',not_run:'未运行此实验'};
+  not_recorded:'报告未保存结果',not_run:'未运行此实验'};
+export const runsLocalExperiments=(plan:string|null|undefined)=>plan==='rom'||plan==='full';
 const probes = {
   avc:{title:'AVC 首帧',plan:'rom',since:9,
     keys:['media.avcFixture','media.avcFirstFrame','media.avcStage','media.avcDecoder','media.avcElapsed','media.avcStartAt','media.avcEndAt'],
-    steps:['在手机选择「ROM 验收」','解码内置 H.264 样片，记录首个非配置帧及阶段','手动上传报告']},
+    steps:['在手机点「整体获取」或「ROM 验收」','解码内置 H.264 样片，记录首个非配置帧及阶段','手动上传报告']},
   gles:{title:'GLES 离屏回读',plan:'rom',since:12,
     keys:['runtime.glesProbeResult','runtime.glesProbeVersion','runtime.glesProbeStage','runtime.glesStartAt','runtime.glesEndAt'],
-    steps:['在手机选择「ROM 验收」','对 1×1 离屏表面清色并回读','手动上传报告']},
+    steps:['在手机点「整体获取」或「ROM 验收」','对 1×1 离屏表面清色并回读','手动上传报告']},
   route:{title:'Wi-Fi → 蜂窝',plan:'network',since:10,
     keys:['network.checkStartTransport','network.checkEndTransport','network.checkStartValidated','network.checkEndValidated','network.checkElapsed',
       'network.checkStartAt','network.checkEndAt'],
@@ -60,7 +61,8 @@ export function experiment(row:Report, id:keyof typeof probes){
   const config=probes[id], map=archive(row), found=config.keys.some(k=>map.has(k));
   const read=(key:string)=>{const p=map.get(key);return p?.status==='AVAILABLE'?p.value:null;};
   const plan = acceptance(row).plan.value;
-  let state:ExperimentState = !found?((row.report.fieldSetVersion??0)<config.since||!plan||plan===config.plan?'not_recorded':'not_run'):'incomplete';
+  const expected=plan===config.plan||(config.plan==='rom'&&runsLocalExperiments(plan));
+  let state:ExperimentState = !found?((row.report.fieldSetVersion??0)<config.since||!plan||expected?'not_recorded':'not_run'):'incomplete';
   const validation=id==='route'?read('network.checkEndValidated'):null;
   const stamp=(key:string)=>{const value=read(key);return value&&/^\d{12,13}$/.test(value)?Number(value):null;};
   if(found){
@@ -114,12 +116,13 @@ export function compareProbe(before:Probe|null,after:Probe,beforeRow:Report|unde
   if(!['passed','failed'].includes(before.state)||!['passed','failed'].includes(after.state))return 'not_comparable';
   if(after.id==='usb'||after.id==='route'||after.id==='gnss')return 'observations_only';
   const fromPlan=acceptance(beforeRow).plan.value,toPlan=acceptance(afterRow).plan.value;
-  if(fromPlan!=='rom'||toPlan!=='rom')return 'different_conditions';
+  if(!runsLocalExperiments(fromPlan)||!runsLocalExperiments(toPlan))return 'different_conditions';
   if(after.id==='avc'){
     if(recorded(before,'media.avcFixture')!==recorded(after,'media.avcFixture'))return 'different_fixture';
   }else{
-    // Fields sets 12 through 17 use the same 1×1 test.
-    if(![12,13,14,15,16,17].includes(beforeRow.report.fieldSetVersion??0)||![12,13,14,15,16,17].includes(afterRow.report.fieldSetVersion??0))
+    // Field sets 12–20 share this 1×1 test. Check later sets before admitting them.
+    const sameGlesTest=(set:number|null|undefined)=>set!=null&&set>=12&&set<=20;
+    if(!sameGlesTest(beforeRow.report.fieldSetVersion)||!sameGlesTest(afterRow.report.fieldSetVersion))
       return 'not_comparable';
     const a=recorded(before,'runtime.glesProbeVersion'),b=recorded(after,'runtime.glesProbeVersion');
     if(a&&b&&a!==b)return 'different_conditions';

@@ -25,24 +25,6 @@ export function ReaderParameters({fields,fieldSet=0,capturedAt}:{fields:Paramete
   const {counts,matched,visible,sections}=useMemo(()=>groupReadings(expandedOnly?hardware.rows:fields,query,status),[fields,hardware,query,status,expandedOnly]);
   const prefix=useId(),search=useRef<HTMLInputElement>(null),directory=useRef<HTMLSelectElement>(null);
   return <>
-    <section className="capture-extension" aria-labelledby={prefix+'-expanded'}>
-      <div><h2 id={prefix+'-expanded'}>扩展采集</h2>
-        <p>{fieldSet?`字段集 v${fieldSet}`:'旧协议'} · 已归档 {hardware.rows.length} 项 · 有值 {hardware.available} 项</p></div>
-      <div className="actions">
-        {hardware.rows.length>0&&<button type="button" className="secondary" aria-pressed={expandedOnly} onClick={()=>{
-          setExpandedOnly(p=>!p);setQuery('');setStatus('');
-        }}>{expandedOnly?'返回全部参数':'只看扩展采集'}</button>}
-      </div>
-      <details><summary>查看各版本和采样条件</summary>
-        <ul>
-          <li>v11 架构与接口：{hardware.architecture}/{architectureFields.length} 项已归档。</li>
-          <li>v12 GNSS、输入、传感器、Camera2：{hardware.hardware}/{hardwareFields.length} 项已归档。</li>
-          <li>v12 图形回读：{hardware.graphics}/{graphicsFields.length} 项已归档，仅 ROM 验收运行。</li>
-        </ul>
-      </details>
-      {fieldSet<12?<small>这是历史快照：新字段不会补写。请用新版重新采集后上传新报告。</small>:
-        !hardware.graphics&&<small>{hardware.plan==='rom'?'当前报告没有图形实测记录。':'当前报告未记录图形实测；在 App 点「ROM 验收」获取。'}</small>}
-    </section>
     <div className="reader-controls">
       <div className="reader-search">
         <label>搜索本报告参数<input ref={search} type="search" value={query} placeholder="参数名、值、字段键、来源或 errno…" onChange={e=>setQuery(e.target.value)}/></label>
@@ -57,6 +39,24 @@ export function ReaderParameters({fields,fieldSet=0,capturedAt}:{fields:Paramete
         <small role="status">显示 {visible} / 已归档 {fields.length} 项</small>
       </div>
     </div>
+    <section className="capture-extension" aria-labelledby={prefix+'-expanded'}>
+      <div><h2 id={prefix+'-expanded'}>扩展采集</h2>
+        <p>{fieldSet?`字段集 v${fieldSet}`:'旧协议'} · 已归档 {hardware.rows.length} 项 · 有值 {hardware.available} 项</p></div>
+      <div className="actions">
+        {hardware.rows.length>0&&<button type="button" className="secondary" aria-pressed={expandedOnly} onClick={()=>{
+          setExpandedOnly(p=>!p);setQuery('');setStatus('');
+        }}>{expandedOnly?'返回全部参数':'只看扩展采集'}</button>}
+      </div>
+      <details><summary>查看各版本和采样条件</summary>
+        <ul>
+          <li>v11 架构与接口：{hardware.architecture}/{architectureFields.length} 项已归档。</li>
+          <li>v12 GNSS、输入、传感器、Camera2：{hardware.hardware}/{hardwareFields.length} 项已归档。</li>
+          <li>v12 图形回读：{hardware.graphics}/{graphicsFields.length} 项已归档。可用整体获取或 ROM 验收运行。</li>
+        </ul>
+      </details>
+      {fieldSet<12?<small>这是历史快照：新字段不会补写。请用新版重新采集后上传新报告。</small>:
+        !hardware.graphics&&<small>这份报告未记录图形实测。在 App 点「整体获取」或「ROM 验收」生成新采样。</small>}
+    </section>
     {!visible&&<div className="workspace-empty"><strong>没有匹配参数</strong>
       <div><button className="secondary" onClick={()=>{setQuery('');setStatus('');setExpandedOnly(false);search.current?.focus();}}>清除参数筛选</button></div></div>}
     <div className="parameter-sections" role="region" aria-label="报告参数">

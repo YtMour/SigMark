@@ -329,16 +329,21 @@ private fun SigMarkScreen(
                     if (snapshot == null && saved.isNotEmpty()) OutlinedButton(onClick = { showShelf = true }) { Text("上传报告") }
                     if (snapshot != null) {
                         Row(Modifier.fillMaxWidth().padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Button(enabled = !busy, onClick = { onCollectAll(CapturePlan.STANDARD) }, modifier = Modifier.weight(1f)) { Text("整体获取") }
+                            Button(enabled = !busy, onClick = { onCollectAll(CapturePlan.FULL) }, modifier = Modifier.weight(1f)) { Text("整体获取") }
                             if (lanEnabled) OutlinedButton(enabled = !busy, onClick = { showShelf = true }, modifier = Modifier.weight(1f)) {
                                 Text("上传报告")
                             }
+                        }
+                        if (state.fullStage == 0) {
+                            Text("整体获取包含密钥保护、AVC 首帧和 GLES 离屏回读自测。",
+                                color = Muted, fontSize = 12.sp)
                         }
                         Text(when (state.fullStage) {
                             1 -> "正在采集设备参数"
                             2 -> "正在进行密钥保护自测"
                             3 -> "正在验证固定样片首帧"
                             4 -> "正在进行图形离屏回读实测"
+                            5 -> "正在保存本次报告"
                             else -> if (!lanEnabled) "采集设备与安全信息，结果只在本机查看。"
                                 else saved.firstOrNull()?.let { "最近保存：" + networkLabel(it.network) + " · " +
                                     java.text.DateFormat.getTimeInstance().format(Date(it.time)) + "　待上传 " + saved.count { row -> !row.sent } + " 份" }
@@ -353,7 +358,7 @@ private fun SigMarkScreen(
                                 modifier = Modifier.fillMaxWidth()) {
                                 Text(if (hardwareOnly) "返回全部采集项" else "查看扩展采集 · ${hardware.size} 项")
                             }
-                            Text("扩展采集：${hardware.count { it.status == ValueStatus.AVAILABLE }} 项有值 / ${hardware.size} 项已记录；图形实测随 ROM 验收保存。",
+                            Text("扩展采集：${hardware.count { it.status == ValueStatus.AVAILABLE }} 项有值 / ${hardware.size} 项已记录。",
                                 color = Muted, fontSize = 12.sp)
                         }
                         TextButton(enabled = !busy, onClick = { showPlans = true }) { Text("选择验收方案") }

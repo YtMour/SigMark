@@ -23,19 +23,20 @@ type Dossier={schemaVersion:1;ruleVersion:string;assetId:string;reportId:string;
 
 const counts={available:'已取得',restricted:'受限',unavailable:'接口无可用值',errors:'读取异常'} as const;
 const kinds={configuration:'配置与能力',snapshot:'本次状态与实测'} as const;
-const plans:Record<string,string>={standard:'标准采集',rom:'ROM 验收',network:'网络切换实验',usb:'USB 插拔实验',gnss:'GNSS 读数核对'};
+const plans:Record<string,string>={full:'整体获取',standard:'标准采集',rom:'ROM 验收',network:'网络切换实验',usb:'USB 插拔实验',gnss:'GNSS 读数核对'};
 const access:Record<string,string>={granted:'已授权',not_granted:'未授权',precise:'精确',approximate:'仅大致',enabled:'已开',disabled:'已关'};
 const display=(value:string|undefined,map:Record<string,string>)=>value?(map[value]??value):'未记录';
 const statuses:Record<string,string>={AVAILABLE:'已取得',RESTRICTED:'受限',UNAVAILABLE:'接口无可用值',ERROR:'读取异常'};
 
 function gapMessage(g:Gap){
+  const planLabel=g.requiredPlan==='rom'?'整体获取或 ROM 验收':display(g.requiredPlan,plans);
   switch(g.code){
     case 'OLDER_FIELD_SET': return g.sinceFieldSet?(`从字段集 ${g.sinceFieldSet} 开始归档；这份旧报告未记录。`):
       `从报告协议 ${g.minSchemaVersion} 开始归档；这份旧报告未记录。`;
     case 'API_UNKNOWN': return `需要 API ${g.minApi}；报告未记录设备 API，适用性待确认。`;
     case 'API_BELOW_MINIMUM': return `需要 API ${g.minApi}；本次 Android 版本低于接口要求。`;
-    case 'PLAN_UNKNOWN': return `适用于「${display(g.requiredPlan,plans)}」；该报告未记录采样方案。`;
-    case 'OTHER_CAPTURE_PLAN': return `仅「${display(g.requiredPlan,plans)}」包含此项，本次方案不适用。`;
+    case 'PLAN_UNKNOWN': return `由「${planLabel}」采集。该报告未记录采样方案。`;
+    case 'OTHER_CAPTURE_PLAN': return `由「${planLabel}」采集。本次使用了其他方案。`;
     case 'CELLULAR_NOT_OBSERVED': return '本次 App 未观察到设备声明蜂窝能力，未进入小区采集流程。';
     case 'PRECISE_LOCATION_NOT_GRANTED': return '未归档，且采样时未授予精确位置。需要时可在 App 授权后重采。';
     case 'LOCATION_SWITCH_OFF': return '未归档，且采样时系统位置关闭。需要时可开启后重采。';
@@ -73,12 +74,14 @@ function DossierCategory({category,missingOnly}:{category:Category;missingOnly:b
   const {counts:totals,gaps,group,fields,checklistSaved,checklistScope}=category;
   const visible=missingOnly?fields.filter(f=>f.status!=='AVAILABLE'):fields;
   const legacy=gaps.filter(g=>g.code==='OLDER_FIELD_SET').length;
+  const signals:[string,number][]=[['取得',totals.available],['受限',totals.restricted],['无值',totals.unavailable],
+    ['异常',totals.errors],['旧报告',legacy],['其他缺行',gaps.length-legacy]];
   return <details className="dossier-group">
     <summary>
       <strong>{groups[group]??group}</strong>
-      <span className="dossier-summary"><span>取得 {totals.available}</span><span>受限 {totals.restricted}</span>
-        <span>无值 {totals.unavailable}</span><span>异常 {totals.errors}</span><span>旧报告 {legacy}</span>
-        <span>其他缺行 {gaps.length-legacy}</span></span>
+      <span className="dossier-summary">
+        {signals.filter(([label,count])=>label==='取得'||count>0).map(([label,count])=><span key={label}>{label} {count}</span>)}
+      </span>
     </summary>
     <div className="dossier-group-body">
       <p className="muted">适用清单：{checklistScope?`已归档 ${checklistSaved}/${checklistScope} 项`:'没有确认适用项'}。已归档可包含无值状态。</p>
@@ -143,7 +146,17 @@ export function DeviceDossier({asset,pages,onSettled}:{asset:string;pages:string
     </div>
     {loading&&!data&&<p role="status">正在读取最近采样…</p>}
     {error&&<p role="status" className="inset error">{data?'更新失败，当前保留上次成功读取的采样。':''}{error}</p>}
-    {data&&aggregate&&<>
+    {data&&aggregate&&<div className="dossier-content">
+      <div className="dossier-tools">
+        <div className="actions">
+          <a className="button-link primary" id="dossier-report" onClick={follow}
+            href={reportWorkspaceLink('reports',{...emptyReportFilters,q:'asset:'+asset},{report:data.reportId})}>查看这一份原报告</a>
+          <a className="button-link" id="dossier-lab" onClick={follow}
+            href={'#lab?'+new URLSearchParams({report:data.reportId,q:'asset:'+asset})}>到验收工作台对比同机采样</a>
+          {data.latestGnssReportId&&<a className="subtle-link" id="dossier-gnss" onClick={follow}
+            href={reportWorkspaceLink('reports',{...emptyReportFilters,q:'asset:'+asset},{report:data.latestGnssReportId})}>查看最近一份 GNSS 核对报告 →</a>}
+        </div>
+      </div>
       <dl className="dossier-meta">
         <div><dt>采样 · 接收</dt><dd>{data.capturedAtEpochMs?date(data.capturedAtEpochMs):'采样时间未记录'}<small>接收 {date(data.receivedAt)} · {data.batch}</small></dd></div>
         <div><dt>系统与构建</dt><dd>{[data.android&&'Android '+data.android,data.androidApi&&'API '+data.androidApi,data.buildId].filter(Boolean).join(' · ')||'未记录'}
@@ -160,23 +173,17 @@ export function DeviceDossier({asset,pages,onSettled}:{asset:string;pages:string
       <ConfigurationEvidence code={data.configurationCode} fields={data.categories.flatMap(category=>category.fields)}
         previousLink={data.configurationCode?.previousReportId?
           reportWorkspaceLink('reports',{...emptyReportFilters,q:'asset:'+asset},{report:data.configurationCode.previousReportId}):undefined}/>
-      <div className="dossier-tools">
-        <div className="actions">
-          <a className="button-link secondary" id="dossier-report" onClick={follow}
-            href={reportWorkspaceLink('reports',{...emptyReportFilters,q:'asset:'+asset},{report:data.reportId})}>查看这一份原报告</a>
-          <a className="subtle-link" id="dossier-lab" onClick={follow}
-            href={'#lab?'+new URLSearchParams({report:data.reportId})}>到验收工作台对比同机采样 →</a>
-          {data.latestGnssReportId&&<a className="subtle-link" onClick={follow}
-            href={reportWorkspaceLink('reports',{...emptyReportFilters,q:'asset:'+asset},{report:data.latestGnssReportId})}>查看最近一份 GNSS 核对报告 →</a>}
-        </div>
-        <label className="build-check"><input type="checkbox" checked={missingOnly} onChange={e=>setMissingOnly(e.target.checked)}/>仅看缺项</label>
-      </div>
-      <p className="muted">App 观察视角。前四项只计已归档字段；“清单未归档”单独计数，包含旧协议、接口版本、方案或授权不适用等情况，不代表手机故障。
-        适用清单只算已归档或按当次条件确定适用的代表字段，不是设备全部能力。</p>
       <section aria-labelledby="dossier-category-title" className="dossier-categories">
-        <h4 id="dossier-category-title">12 类设备参数</h4>
+        <header className="dossier-category-head">
+          <h4 id="dossier-category-title">{data.categories.length} 类设备参数</h4>
+          <label className="build-check"><input type="checkbox" checked={missingOnly} onChange={e=>setMissingOnly(e.target.checked)}/>仅看缺项</label>
+        </header>
+        <details className="dossier-scope">
+          <summary>查看统计口径</summary>
+          <p className="muted">前四项统计本报告已归档的 App 字段。「清单未归档」包括旧协议或本次接口、方案和授权条件未覆盖的字段。适用清单只统计已归档或按本次条件确认适用的代表字段。</p>
+        </details>
         {data.categories.map(category=><DossierCategory key={category.group} category={category} missingOnly={missingOnly}/>)}
       </section>
-    </>}
+    </div>}
   </section>;
 }

@@ -59,7 +59,9 @@ async function run(){
 
     await page.goto(new URL('/#identity',base).href);
     await page.getByRole('heading',{name:'身份分布',exact:true}).waitFor();
-    assert.equal(await page.getByRole('link',{name:/身份分布/}).getAttribute('aria-current'),'page');
+    await page.getByRole('region',{name:'身份分布概览'}).waitFor();
+    const assets=page.getByRole('navigation',{name:'资产工作区'});
+    assert.equal(await assets.getByRole('link',{name:'身份分布',exact:true}).getAttribute('aria-current'),'page');
     for (const label of ['在库报告','已归组设备','多身份资产','跨资产同身份','内部冲突报告'])
       assert.equal(await page.getByText(label,{exact:true}).count()>0,true,label);
     await page.getByRole('heading',{name:'多身份资产'}).waitFor();
@@ -71,6 +73,10 @@ async function run(){
     await page.setViewportSize({width:390,height:1003});
     assert(await screenOK());
     await snap('identity-390');
+    await page.getByRole('button',{name:/内部冲突报告.*查看冲突/}).click();
+    await page.waitForFunction(()=>document.activeElement?.id==='identity-conflicts');
+    assert.equal(new URL(page.url()).hash,'#identity');
+    assert.equal(await page.locator('.identity-table tbody tr').first().evaluate(el=>getComputedStyle(el).display),'grid');
 
     const pending=page.waitForEvent('download');
     await page.getByRole('button',{name:'导出身份分布 JSON'}).click();
@@ -79,6 +85,9 @@ async function run(){
     assert.equal(exported.ruleVersion,'sigmark-identity/1');
     assert.equal(exported.multiIdentityAssets[0].identities.length,2);
     assert.equal(exported.conflictSamples[0].pairs[0].right,'gs101');
+    await page.getByRole('link',{name:'打开报告',exact:true}).click();
+    await page.getByRole('link',{name:'返回身份分布',exact:true}).click();
+    await page.waitForFunction(()=>document.activeElement?.id.startsWith('identity-conflict-'));
 
     await page.goto(new URL('/#reports?report='+id(2),base).href);
     await page.getByRole('heading',{name:'身份声明不一致'}).waitFor();

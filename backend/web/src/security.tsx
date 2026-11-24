@@ -1,7 +1,7 @@
 import {DeviceProfilePanel} from './device-profile';
 import {RiskPanel} from './risk-panel';
 import {assessRisk,registeredUnlock} from './risk-assessment';
-import {labLink} from './lab';
+import {ReportFlow} from './report-flow';
 import {AcceptanceComparison,AcceptancePanel} from './acceptance-panel';
 import {ObservationPanel} from './observation-panel';
 import {useEffect,useState} from 'react';
@@ -13,7 +13,7 @@ import {BaselineDialog,BaselineLibrary,useBaselines,type Baseline} from './basel
 import {regressionResult} from './regression';
 import {hashParams,relationToAsset,reportScope,reportWorkspaceLink} from './workspace-route';
 import {ReportPicker} from './report-picker';
-import {navigateReader,followReadLink} from './reader-history';
+import {navigateReader} from './reader-history';
 import {PageHead} from './workspace-ui';
 
 const labels={observed:'有读数',review:'建议复核',unknown:'证据不足',context:'环境线索'};
@@ -104,7 +104,6 @@ export function SecurityPage(){
     setNotice('');setShowCurrentPicker(false);setShowHistoryPicker(false);setShowOtherBaselines(false);
     changeSelection(value===baseline?{id:value,baseline:'',saved:'',expectUnlock:false}:{id:value});
   };
-  const goToArchive=reportWorkspaceLink('reports',selection.filters,{report:id});
   const baselineChoices=(items:Baseline[])=><ul className="baseline-choices">{items.map(item=>
     <li key={item.id}>
       <div><strong>{item.name}</strong><small>{item.model} · {item.batch} · {item.reportId.slice(0,8)}{item.assetId&&asset&&item.assetId!==asset?' · 跨设备对照':''}</small></div>
@@ -143,11 +142,18 @@ export function SecurityPage(){
     </details>)}</div>
   </section>;
   return <main className="workspace security-workspace">
-    <PageHead section="security" title={retest?'安全复测':undefined}
-      description={retest?'对照复测前后的证据，区分预期变化与待复核项。':'查看启动链、保护状态和调试线索。这些证据不等于硬件认证。'}>
+    {inspected?<ReportFlow report={inspected} view="security"/>:
+      <PageHead section="security" title={retest?'安全复测':undefined}
+        description="选择报告，查看启动链、保护状态和调试证据。">
+        <a className="button-link" href={reportWorkspaceLink('reports',selection.filters)}>浏览报告档案</a>
+      </PageHead>}
+    <div className="analysis-actions actions">
+      {inspected&&!retest&&<button type="button" onClick={()=>changeSelection({retest:true})}>与基线复测</button>}
+      {inspected&&<button type="button" className="secondary" aria-expanded={showCurrentPicker}
+        onClick={()=>setShowCurrentPicker(open=>!open)}>更换当前报告</button>}
       <button type="button" className="secondary" aria-expanded={libraryOpen} aria-controls={libraryOpen?'baseline-library':undefined}
-        onClick={()=>{if(!libraryOpen)library.reload();setLibraryOpen(open=>!open);}}>已保存的基线{library.items.length?` · ${library.items.length}`:''}</button>
-    </PageHead>
+        onClick={()=>{if(!libraryOpen)library.reload();setLibraryOpen(open=>!open);}}>已保存的基线{library.items.length?' · '+library.items.length:''}</button>
+    </div>
     {(!id||libraryOpen)&&<section className="panel" aria-label="选择安全分析样本">
       <div className="pane-title"><div><h2>{id?'管理回归基线':'选择待分析报告'}</h2><p className="muted">{baseline?
         (profile?`当前基线：${profile.name}`:`已选基线 · ${baseline.slice(0,8)}`):'单份检查不需要基线。'}</p></div>
@@ -159,21 +165,9 @@ export function SecurityPage(){
     </section>}
     {id&&(error?<p className="panel inset error" role="alert">{error} <a className="subtle-link" href="#security">选择其他报告</a></p>:!inspected?
       <p className="panel empty" role="status">正在读取归档证据…</p>:<>
-        <section className="panel security-context"><div>
-          <p className="eyebrow">当前报告</p>
-          <h2>{inspected.report.model} · API {inspected.report.androidApi||'—'}</h2>
-          <p className="muted">{inspected.batch} · App {inspected.report.appVersion} · 采样 {date(inspected.report.capturedAtEpochMs)}</p>
-          <code>{inspected.id}</code>
-        </div>
-          <div className="actions">
-            <a className="primary-link" href={labLink(inspected.id)} onClick={followReadLink}>打开验收工作台 →</a>
-            {!retest&&<button type="button" onClick={()=>changeSelection({retest:true})}>与基线复测</button>}
-            <button type="button" className="secondary" aria-expanded={showCurrentPicker} onClick={()=>setShowCurrentPicker(open=>!open)}>更换当前报告</button>
-            <a className="subtle-link" onClick={followReadLink} href={goToArchive}>返回报告详情</a>
-          </div>
-          {showCurrentPicker&&<ReportPicker label="分析样本" value={id} select={chooseCurrent} exclude={baseline}
-            fallback={inspected.report.model}/>}
-        </section>
+        {showCurrentPicker&&<section className="panel inset">
+          <ReportPicker label="分析样本" value={id} select={chooseCurrent} exclude={baseline} fallback={inspected.report.model}/>
+        </section>}
         {assessment&&<RiskPanel key={inspected.id} data={assessment}/>}
         {notice&&<p className="panel inset" role="status">{notice}</p>}
         {retest&&<section className="panel security-change" aria-label="安全变化对比">

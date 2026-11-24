@@ -6,7 +6,7 @@ import (
 )
 
 const latestFieldSet = 20
-const dictionaryVersion = "sigmark-lan-fields/10"
+const dictionaryVersion = "sigmark-lan-fields/11"
 
 type dictionaryField struct {
 	Key           string   `json:"key"`
@@ -20,6 +20,7 @@ type dictionaryField struct {
 	Sensitivity   string   `json:"sensitivity,omitempty"`
 	MinAPI        int      `json:"minApi,omitempty"`
 	Plan          string   `json:"plan,omitempty"`
+	AlsoPlans     []string `json:"alsoPlans,omitempty"`
 	Requires      []string `json:"requires,omitempty"`
 	Observer      string   `json:"observer,omitempty"`
 	Path          string   `json:"path,omitempty"`
@@ -54,6 +55,9 @@ func describeField(f *dictionaryField, requirements map[string]dossierRule) {
 	}
 	if f.Plan != "" {
 		f.Temporal = "experiment"
+	}
+	if f.Plan == "rom" {
+		f.AlsoPlans = []string{"full"}
 	}
 	switch f.Key {
 	case "battery.present":

@@ -555,6 +555,29 @@ func TestReportSchemaRejectsExcessData(t *testing.T) {
 	}
 }
 
+func TestOverallCapturePlan(t *testing.T) {
+	value := func(group, key, text string) Parameter {
+		return Parameter{Group: group, Key: key, Value: &text, Label: key, Source: "fixture", Status: "AVAILABLE"}
+	}
+	plan := value("environment", "capturePlan", "full")
+	if plan.valid(4, 19) || !plan.valid(4, 20) {
+		t.Fatal("full plan is accepted starting at field set 20")
+	}
+	local := []Parameter{plan, value("media", "avcStartAt", "1790000000000"), value("runtime", "glesEndAt", "1790000000001")}
+	if !validTimedExperiment(local) {
+		t.Fatal("full plan must accept local experiment timings")
+	}
+	for _, interactive := range []Parameter{
+		value("network", "checkStartAt", "1790000000000"),
+		value("runtime", "usbStartAt", "1790000000000"),
+		value("system", "gnssCheckStartAt", "1790000000000"),
+	} {
+		if validTimedExperiment(append(local, interactive)) {
+			t.Fatalf("full plan unexpectedly accepts interactive experiment %s", interactive.Key)
+		}
+	}
+}
+
 func TestLanSeparation(t *testing.T) {
 	s := server{token: "test-token", batch: "lan-direct"}
 	h := s.routes()

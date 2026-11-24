@@ -6,6 +6,7 @@ import {reportWorkspaceLink,emptyReportFilters} from './workspace-route';
 import {listPages,openFromList,useRestoreList} from './reader-history';
 import {DeviceDossier} from './device-dossier';
 import {MergeAudit,MergeDevice} from './asset-merge';
+import {MetricCards} from './workspace-ui';
 
 type DeviceRow={id:string;label:string;model:string;reports:number;firstSeen:string;lastSeen:string};
 type Inventory={items:DeviceRow[];nextCursor:string;totals:{devices:number;reports:number;unassigned:number;trash:number}};
@@ -44,14 +45,12 @@ export function InventorySummary({revision}:{revision:number}){
           new Blob([JSON.stringify(overview,null,2)],{type:'application/json'}),'SigMark-仓库统计.json')}>导出统计</button>
         <button type="button" className="secondary" disabled={loading} onClick={()=>setRetry(n=>n+1)}>{loading?'读取统计…':'刷新统计'}</button></div>
     </div>
-    <div className="asset-overview">
-      {[
-        {label:'已归组设备',value:totals?.devices,action:<a className="subtle-link" href="#assets?tab=devices">查看设备档案 →</a>},
-        {label:'在库报告',value:totals?.reports,action:<a className="subtle-link" href={reportWorkspaceLink('assets',undefined,{view:'archive'})}>看全部报告</a>},
-        {label:'未归组报告',value:totals?.unassigned,action:<a className="subtle-link" href={assetReports('unassigned')}>处理未归组报告</a>},
-        {label:'回收站报告',value:totals?.trash,action:<a className="subtle-link" href="#assets?view=trash">打开回收站</a>},
-      ].map(({label,value,action})=><div key={label}><span>{label}</span><strong>{value?.toLocaleString('zh-CN')??'—'}</strong>{action}</div>)}
-    </div>
+    <MetricCards label="仓库统计" items={[
+      {label:'已归组设备',value:totals?.devices,hint:'按设备去重'},
+      {label:'在库报告',value:totals?.reports,href:reportWorkspaceLink('assets',undefined,{view:'archive'}),hint:'管理报告'},
+      {label:'未归组报告',value:totals?.unassigned,href:assetReports('unassigned'),hint:'处理归组'},
+      {label:'回收站报告',value:totals?.trash,href:'#assets?view=trash',hint:'打开回收站'},
+    ]}/>
     <details className="overview-details"><summary>分类统计 <small>品牌、型号、Android、API 与批次</small></summary>
     <div className="overview-distribution">
       <label>报告分布<select aria-label="报告分布" value={dimension} onChange={e=>setDimension(e.target.value as DistributionKey)}>
@@ -215,9 +214,7 @@ function AssetTimeline({row,close}:{row:DeviceRow;close:()=>void}){
       <div>{[report.android&&'Android '+report.android,report.buildId,report.romHint].filter(Boolean).join(' · ')||'构建信息未归档'}
         <small>API {report.androidApi||'—'} · App {report.appVersion} · {report.fieldSetVersion?'字段集 '+report.fieldSetVersion:'旧协议'}</small></div>
       <div className="actions"><a className="subtle-link" id={'sample-read-'+id} onClick={e=>openFromList(e,visited.current,'返回设备采样')}
-        href={reportWorkspaceLink('reports',{...emptyReportFilters,q:'asset:'+row.id},{report:id})}>查看报告 →</a>
-        <a className="subtle-link" id={'sample-lab-'+id} onClick={e=>openFromList(e,visited.current,'返回设备采样')}
-          href={'#lab?'+new URLSearchParams({report:id})}>验收工作台 →</a></div>
+        href={reportWorkspaceLink('reports',{...emptyReportFilters,q:'asset:'+row.id},{report:id})}>查看报告 →</a></div>
     </li>)}</ul>
     <div className="pages"><span>{loading?'正在读取…':`已载入 ${entries.length} 份`}</span>
       {next&&<button disabled={loading} className="secondary" type="button" onClick={()=>{setError('');setLoading(true);setCursor(next);}}>加载更早采样</button>}</div>

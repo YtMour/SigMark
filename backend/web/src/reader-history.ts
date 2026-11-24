@@ -19,16 +19,30 @@ export function openFromList(e:MouseEvent<HTMLAnchorElement>,pages:string[],labe
   const m:Mark={hash:location.hash,pages:[...pages],target:link.id,top:link.getBoundingClientRect().top,label,fallback};
   e.preventDefault();
   history.replaceState({...history.state,sigmarkList:m},'');
-  route(link.hash,{sigmarkOrigin:m,readerDepth:1});
+  route(link.hash,{sigmarkOrigin:m,readerDepth:1,sigmarkAncestors:[location.hash]});
 }
 export function navigateReader(hash:string){
   if(location.hash===hash)return;
-  const {sigmarkOrigin,readerDepth}=history.state??{};
-  route(hash,sigmarkOrigin?{sigmarkOrigin,readerDepth:readerDepth+1}:{});
+  const {sigmarkOrigin,readerDepth,sigmarkAncestors}=history.state??{};
+  const state={sigmarkAncestors:[...(sigmarkAncestors??[]),location.hash]};
+  route(hash,sigmarkOrigin?{...state,sigmarkOrigin,readerDepth:readerDepth+1}:state);
 }
 export function followReadLink(e:MouseEvent<HTMLAnchorElement>){
-  if(!history.state?.sigmarkOrigin||e.defaultPrevented||e.button!==0||e.metaKey||e.ctrlKey||e.shiftKey||e.altKey)return;
-  e.preventDefault();navigateReader(e.currentTarget.hash);
+  if(e.defaultPrevented||e.button!==0||e.metaKey||e.ctrlKey||e.shiftKey||e.altKey)return;
+  e.preventDefault();
+  navigateReader(e.currentTarget.hash);
+}
+export function followReaderParent(e:MouseEvent<HTMLAnchorElement>){
+  if(e.defaultPrevented||e.button!==0||e.metaKey||e.ctrlKey||e.shiftKey||e.altKey)return;
+  const target=e.currentTarget.hash;
+  const ancestors:string[]=history.state?.sigmarkAncestors??[];
+  const index=ancestors.lastIndexOf(target);
+  e.preventDefault();
+  if(index>=0)history.go(index-ancestors.length);
+  else navigateReader(target);
+}
+export function readerOrigin(){
+  return history.state?.sigmarkOrigin as Mark|undefined;
 }
 export function returnFromReader(fallback:string){
   if(history.state?.sigmarkOrigin&&history.state.readerDepth>0){history.go(-history.state.readerDepth);return;}

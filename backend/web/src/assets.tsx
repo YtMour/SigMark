@@ -30,7 +30,7 @@ export function AssetsWorkspace(){
   const coverage=reportWorkspaceLink('stats',filters);
   const sampleAsset=hashParams(route).get('sampleAsset')??'';
   return <main className="workspace assets-workspace">
-    <PageHead section="assets" description="按设备归组、管理报告，查看全库字段与身份声明。">
+    <PageHead section="assets">
       <a className="button-link secondary" href={reportWorkspaceLink('reports',tab==='devices'?undefined:filters)}>查看报告档案 →</a>
     </PageHead>
     {tab==='devices'&&!sampleAsset&&<InventorySummary revision={inventoryVersion}/>}

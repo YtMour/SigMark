@@ -38,25 +38,29 @@ async function main(){
     const visit=()=>page.goto(origin+'/#security?report='+id);
     const risk=page.locator('.risk-panel'),h=risk.getByRole('heading',{level:2});
     const level=value=>risk.locator('[data-level='+value+']').waitFor();
+    async function openReadings(code){
+      const rule=risk.locator(`[data-risk-rule="${code}"]`);
+      const additional=risk.locator('.risk-all-checks').filter({has:rule});
+      if(await additional.count()&&await additional.getAttribute('open')===null)await additional.locator(':scope > summary').click();
+      await rule.locator(':scope > summary').focus();
+      await page.keyboard.press('Enter');
+      const evidence=rule.locator('.risk-rule-evidence');
+      assert.equal(await evidence.getAttribute('open'),null);
+      await evidence.locator('summary').click();
+      return evidence;
+    }
     await visit();
     if(archive){
       await h.waitFor();
       assert(['red','yellow','gray','blue'].includes(await h.getAttribute('data-level')));
-      await risk.locator('[data-risk-rule=SELINUX_MODE] summary').focus();
-      await page.keyboard.press('Enter');
-      await risk.getByText('system.selinux',{exact:true}).waitFor();
+      await (await openReadings('SELINUX_MODE')).getByText('system.selinux',{exact:true}).waitFor();
     }else{
       await level('blue');
       architecture=true;await page.reload();await level('yellow');
-      const architectureRule=risk.locator('[data-risk-rule=RUNTIME_ARCHITECTURE]');
-      await architectureRule.locator('summary').focus();
-      await page.keyboard.press('Enter');
-      await architectureRule.getByText('cpu.kernelMachine',{exact:true}).waitFor();
+      await (await openReadings('RUNTIME_ARCHITECTURE')).getByText('cpu.kernelMachine',{exact:true}).waitFor();
       architecture=false;
       restricted=true;await page.reload();await level('gray');
-      await risk.locator('[data-risk-rule=SELINUX_MODE] summary').focus();
-      await page.keyboard.press('Enter');
-      await risk.getByText(/errno=13/).waitFor();
+      await (await openReadings('SELINUX_MODE')).getByText(/errno=13/).waitFor();
       const download=page.waitForEvent('download');
       await risk.getByRole('button',{name:'导出风险依据 JSON'}).click();
       const doc=JSON.parse(await readFile(await (await download).path(),'utf8'));

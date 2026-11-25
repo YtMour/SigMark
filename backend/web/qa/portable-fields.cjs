@@ -39,8 +39,8 @@ async function run() {
     assert.equal(values.get('environment.capturePlan'), 'full');
     assert.equal(values.get('media.avcFirstFrame'), 'pass');
     assert.equal(values.get('runtime.glesProbeResult'), 'pass');
-    await page.getByRole('link',{name:'打开验收工作台',exact:true}).click();
-    const experiments=page.getByRole('region',{name:'实验步骤与归档结果'});
+    await page.getByRole('navigation',{name:'当前报告功能'}).getByRole('link',{name:'验收工作台',exact:true}).click();
+    const experiments=page.getByRole('region',{name:'实验结果'});
     const avc=experiments.locator('details').filter({hasText:'AVC 首帧'});
     await avc.getByText('达到判定条件',{exact:true}).waitFor();
     await experiments.locator('details').filter({hasText:'GLES 离屏回读'}).getByText('达到判定条件',{exact:true}).waitFor();

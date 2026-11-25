@@ -12,7 +12,7 @@ async function run(){
       return route.fulfill({response:await route.fetch({headers:{...req.headers(),authorization:'Bearer '+token},maxRedirects:0})});
     });
     await page.goto(base+'/#lab?report='+process.argv[2]+'&objective=usb');
-    const experiments=page.getByRole('region',{name:'实验步骤与归档结果'});
+    const experiments=page.getByRole('region',{name:'实验结果'});
     await experiments.getByText('USB 插拔实验',{exact:true}).waitFor();
     const summary=experiments.locator('summary');
     const expected={no_change:'未达到判定条件',incomplete:'证据未齐',increase:'达到判定条件',decrease:'达到判定条件'};

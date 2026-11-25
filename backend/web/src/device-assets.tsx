@@ -1,6 +1,6 @@
 import {useEffect,useRef,useState} from 'react';
 import {errorMessage,request} from './console';
-import {useVisiblePoll,refreshSeconds} from './live';
+import {useVisiblePoll} from './live';
 import {date,saveDownload,type Page,type Row} from './reports';
 import {reportWorkspaceLink,emptyReportFilters} from './workspace-route';
 import {listPages,openFromList,useRestoreList} from './reader-history';
@@ -128,8 +128,7 @@ export function DeviceInventory({changed,sampleAsset}:{changed:()=>void;sampleAs
     </section>;
   return <>
     <section className="panel stats-analysis" aria-labelledby="devices-title">
-      <div className="pane-title"><div><h2 id="devices-title">设备档案</h2>
-        <p className="muted">每部已归组手机只显示一行。打开档案可检查最近一次采样的缺项和历次报告。</p></div>
+      <div className="pane-title"><h2 id="devices-title">设备档案</h2>
         <div className="actions"><button type="button" className="secondary" aria-expanded={audit} onClick={()=>setAudit(!audit)}>
           {audit?'收起合并记录':'查看合并记录'}</button>
           <button type="button" className="secondary" onClick={()=>refresh(n=>n+1)}>刷新</button></div></div>
@@ -142,8 +141,8 @@ export function DeviceInventory({changed,sampleAsset}:{changed:()=>void;sampleAs
         !current.items.length?<p className="empty">没有匹配的已归组设备。可为历史报告手动归组，或在新版 App 上传时开启「关联到同一设备资产」。</p>:
         <ul className="device-inventory">
           {current.items.map(row=><li key={row.id}>
-            <div><strong>{row.label||row.model}</strong><small>{row.label?row.model+' · ':''}<code>{row.id}</code></small></div>
-            <div><strong>{row.reports} 份采样</strong><small>首次 {date(row.firstSeen)} · 最近 {date(row.lastSeen)}</small></div>
+            <div><strong>{row.label||row.model}</strong>{row.label&&row.label!==row.model&&<small>{row.model}</small>}</div>
+            <div><strong>{row.reports} 份采样</strong><small>最近入库 {date(row.lastSeen)}</small></div>
             <div className="actions"><a id={'history-'+row.id} className="button-link secondary" href={devicePage(row.id)}>打开档案</a>
               <a className="subtle-link" href={assetReports(row.id)}>管理报告 →</a>
               <button type="button" className="secondary" onClick={()=>setMerge(row)}>合并到另一设备</button></div>
@@ -151,7 +150,7 @@ export function DeviceInventory({changed,sampleAsset}:{changed:()=>void;sampleAs
         </ul>}
       <nav className="pages" aria-label="设备分页">
         <button type="button" className="secondary" disabled={!current||pages.length===1} onClick={()=>setPages(p=>p.slice(0,-1))}>上一页</button>
-        <span>第 {pages.length} 页{pages.length===1&&refreshSeconds()? ' · 自动同步':''}</span>
+        <span>第 {pages.length} 页</span>
         <button type="button" className="secondary" disabled={!current?.nextCursor} onClick={()=>current&&setPages(p=>[...p,current.nextCursor])}>下一页</button>
       </nav>
     </section>

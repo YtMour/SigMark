@@ -20,10 +20,10 @@ async function run(){
       return route.fulfill({response});
     });
     await page.goto(base+'/#reports?report='+current);
-    await page.getByRole('link',{name:'打开验收工作台',exact:true}).click();
+    await page.getByRole('navigation',{name:'当前报告功能'}).getByRole('link',{name:'验收工作台',exact:true}).click();
     await page.getByRole('heading',{name:'验收工作台',exact:true}).waitFor();
     assert.equal(await page.getByLabel('同一资产的基线').inputValue(),baseline);
-    const avc=page.getByRole('region',{name:'实验步骤与归档结果'}).locator('details').filter({hasText:'AVC 首帧'});
+    const avc=page.getByRole('region',{name:'实验结果'}).locator('details').filter({hasText:'AVC 首帧'});
     await avc.locator('summary').click();
     await avc.getByText(/由通过变为未达到/).waitFor();
     await avc.getByText(/基线 pass/).waitFor();
@@ -49,9 +49,9 @@ async function run(){
     await page.getByLabel('验收目标').selectOption('network');
     await page.getByLabel('同一资产的基线').selectOption('saved:'+named);
     await page.getByRole('button',{name:'应用基线'}).click();
-    const workbench=page.getByRole('region',{name:'设备证据与风险验收'});
+    const workbench=page.getByRole('region',{name:'本次验收'});
     await workbench.getByText(/登记基线：ROM baseline/).waitFor();
-    const experiments=workbench.getByRole('region',{name:'实验步骤与归档结果'});
+    const experiments=workbench.getByRole('region',{name:'实验结果'});
     assert.equal(await experiments.locator('details').count(),1);
     await experiments.locator('summary').focus();await page.keyboard.press('Enter');
     await experiments.getByText(/起止墙钟未记录/).waitFor();
@@ -66,12 +66,41 @@ async function run(){
     assert.equal(packet.experiments[0].current.state,'incomplete');
     assert.equal(packet.strength.independentVerification,'not_performed');
     assert(!JSON.stringify(packet).includes('assetId'));
+    const labHash=new URL(page.url()).hash;
+    const risk=workbench.locator('.verification-risk');
+    assert.equal(await risk.getAttribute('open'),null);
+    await risk.locator(':scope > summary').focus();
+    await page.keyboard.press('Enter');
+    await risk.getByText('查看风险依据',{exact:true}).waitFor();
+    assert.equal(await risk.getAttribute('open'),'');
+    assert.equal(await risk.getByText(packet.risk.ruleVersion,{exact:true}).count(),0);
+    assert.equal(new URL(page.url()).hash,labHash,'disclosure changed the report route');
+    assert.equal(await risk.getAttribute('data-risk-level'),packet.risk.level);
+    for(const code of packet.risk.triggered){
+      const rule=packet.risk.rules.find(r=>r.code===code);
+      const proof=risk.locator(`[data-risk-rule="${code}"]`);
+      await proof.locator(':scope > summary').click();
+      await proof.getByText(rule.finding,{exact:true}).waitFor();
+      const facts=proof.locator('.risk-rule-evidence');
+      assert.equal(await facts.getAttribute('open'),null);
+      await facts.locator('summary').click();
+      for(const field of rule.evidence){
+        assert.equal(await proof.locator(`[data-risk-field="${field.key}"]`).getAttribute('data-status'),field.status);
+      }
+    }
     assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+    const views=page.getByRole('navigation',{name:'当前报告功能'});
+    await views.getByRole('link',{name:'指纹安全',exact:true}).click();
+    await page.waitForURL(url=>url.hash.startsWith('#security?')&&url.hash.includes('saved='+named));
+    await views.getByRole('link',{name:'验收工作台',exact:true}).click();
+    await page.waitForURL(url=>url.hash===labHash);
+    assert.equal(await page.getByLabel('同一资产的基线').inputValue(),'saved:'+named);
+    assert.equal(await page.getByLabel('验收目标').inputValue(),'network');
     await page.getByLabel('同一资产的基线').selectOption('');
     await page.getByRole('button',{name:'应用基线'}).click();
     await page.getByRole('region',{name:'当前受限原因'}).waitFor();
     assert.deepEqual(errors,[]);
-    console.log('PASS lab browser: automatic/registered same-asset baseline, target selector, experiments, weakness provenance, combined export and 390 px.');
+    console.log('PASS lab browser: baseline, experiments, in-place risk provenance matching export, round-trip report navigation, and 390 px.');
   }finally{await browser.close();}
 }
 run().catch(err=>{console.error(err);process.exitCode=1;});

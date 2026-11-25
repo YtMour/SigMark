@@ -6,7 +6,7 @@ import {AcceptanceComparison,AcceptancePanel} from './acceptance-panel';
 import {ObservationPanel} from './observation-panel';
 import {useEffect,useState} from 'react';
 import {errorMessage,request} from './console';
-import {compareSecurity,compareSummary,evaluateSecurity,releaseQuery,ruleVersion,type ReleaseReference,type Evidence} from './security-rules';
+import {compareSecurity,compareSummary,evaluateSecurity,releaseQuery,type ReleaseReference,type Evidence} from './security-rules';
 import {caption,date,saveDownload,type Report} from './reports';
 import {parameterKey} from './compare';
 import {BaselineDialog,BaselineLibrary,useBaselines,type Baseline} from './baselines';
@@ -125,9 +125,8 @@ export function SecurityPage(){
   const reviewRows=changes.filter(row=>row.verdict==='review').length;
   const categoryOutline=Object.entries(summary.byCategory).map(([category,counts])=>
     `${changeCategories[category]} 一致 ${counts.unchanged} / 变化 ${counts.changed} / 受限 ${counts.restricted} / 未归档 ${counts.notArchived} / 证据不足 ${counts.insufficient}`).join('；');
-  const evidencePanel=<section className="security-results" aria-label="安全检查结果">
-    <div className="pane-title"><div><h2>当前样本证据</h2>
-      <p className="muted">{checks.filter(c=>c.state==='review').length} 项建议复核 · {checks.filter(c=>c.state==='unknown').length} 项证据不足 · 未进行硬件证明 · {ruleVersion}</p></div></div>
+  const evidencePanel=<details className="panel security-card" data-section="security-evidence">
+    <summary>更多安全读数</summary>
     <div className="security-readings">
     {checks.map(check=><details key={id+check.id} className="panel security-card" data-card={check.id}>
       <summary><strong>{check.title}</strong> <span className={'tag security-'+check.state}>{labels[check.state]}</span><span className="security-finding">{check.finding}</span></summary>
@@ -140,7 +139,7 @@ export function SecurityPage(){
         })}{check.id==='signer'&&publication?.query===query&&publication.result.state==='registered'&&
           <div><dt>对应发布证书 SHA-256 · 内网发布登记</dt><dd><code>{publication.result.signerSha256}</code></dd></div>}</dl>
     </details>)}</div>
-  </section>;
+  </details>;
   return <main className="workspace security-workspace">
     {inspected?<ReportFlow report={inspected} view="security"/>:
       <PageHead section="security" title={retest?'安全复测':undefined}

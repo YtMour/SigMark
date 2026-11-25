@@ -42,7 +42,6 @@
 .rail-group a[aria-current=page] { background: #1c3734; border-color: #3a615b; }
 .rail-group + .rail-group { padding-inline-start: .65rem; border-inline-start: 1px solid var(--border); }
 .rail-session { padding: 0; margin: 0 0 0 auto; border: 0; gap: .65rem; }
-.rail-session .lan { padding: .26rem .5rem; border: 1px solid var(--line-subtle); border-radius: 1rem; }
 
 .workspace { align-content: start; }
 .workspace-heading, .report-flow {
@@ -54,16 +53,13 @@
 .workspace-heading {
   @apply grid items-end gap-4;
   grid-template-columns: minmax(0, 1fr) auto;
-  padding: clamp(1.15rem, 2.65vw, 2.5rem);
+  padding: clamp(1rem, 2vw, 1.75rem);
 }
-.heading-context { @apply inline-flex items-center gap-2 font-semibold; color: var(--mint); }
-.heading-context svg { inline-size: 1.15rem; block-size: 1.15rem; }
 .heading-copy h1, .report-flow-title h1 {
   font-size: clamp(2rem, 1.45rem + 1.65vw, 3rem);
   letter-spacing: -.045em;
   line-height: 1.1;
 }
-.heading-copy h1 { margin-block-start: .45rem; }
 .heading-copy p { margin-block-start: .6rem; }
 .heading-actions { align-self: end; }
 .workspace-tabs { @apply flex-wrap gap-1; padding: .4rem; border: 1px solid var(--border); border-radius: .8rem; background: var(--panel); }
@@ -78,10 +74,6 @@
 .report-flow { @apply grid gap-4; padding: clamp(.95rem, 2.2vw, 1.85rem); }
 .report-flow-title { @apply flex flex-wrap items-end justify-between gap-4; }
 .report-flow-title p { margin-block-start: .45rem; }
-.report-stamps { @apply flex flex-wrap gap-2; margin: 0; }
-.report-stamps > div { padding: .45rem .7rem; background: #0b1619; border: 1px solid var(--border); border-radius: .55rem; }
-.report-stamps dt { font-size: .79rem; color: var(--muted); }
-.report-stamps dd { margin: 0; font-variant-numeric: tabular-nums; font-weight: 700; }
 .report-flow-views { gap: .3rem; }
 .report-flow-views a { gap: .4rem; }
 .report-flow-views a svg { inline-size: 1.1em; block-size: 1.1em; flex: none; }
@@ -106,7 +98,6 @@
   .archive-columns span:last-child { text-align: end; }
 }
 .archive-browse .report-row:hover { border-inline-start-color: var(--mint); }
-.archive-browse .report-row .row-tags span { background: var(--surface-recessed); }
 .device-reader-heading, .assets-workspace .dossier-category-head { gap: .75rem; }
 .security-workspace > .analysis-actions { padding: .65rem .8rem; border: 1px solid var(--line-subtle); border-radius: .8rem; background: var(--panel); }
 .console-panel, .build-status-strip, .release-front { padding: clamp(1rem, 2vw, 1.6rem); }
@@ -129,8 +120,6 @@
 }
 @media (max-width: 28rem) {
   .report-flow-views a { font-size: .9rem; }
-  .report-stamps { gap: .35rem; }
-  .report-stamps > div { padding: .35rem .45rem; }
 }
 
 .verification-workspace { container: verification / inline-size; }
@@ -141,6 +130,16 @@
 .verification-workspace .verification-grid > div { background: var(--surface-recessed); }
 .verification-workspace .verification-grid .verification-result { background: linear-gradient(135deg,#1d3b35,#162b2a); border-color: #40665d; }
 .verification-comparison { grid-column: 1 / -1; }
+.verification-workspace > .verification-risk {
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface-recessed);
+}
+.verification-risk > summary { min-block-size: 2.75rem; padding: .6rem .75rem; }
+.verification-risk-content { padding: .65rem .75rem .85rem; border-block-start: 1px solid var(--line-subtle); }
+.verification-risk-content .security-readings { margin-block-start: .65rem; }
+.verification-risk-content .security-card > summary { color: inherit; }
 .verification-context { padding: .55rem .7rem; border: 1px solid var(--line-subtle); border-radius: var(--radius-control); }
 .verification-context summary { padding-block: .25rem; cursor: pointer; }
 .verification-context p { margin-block: .3rem; }

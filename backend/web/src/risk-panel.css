@@ -3,7 +3,6 @@
 .risk-level[data-level=yellow] { color: #f7cd88; }
 .risk-level[data-level=gray] { color: #bec8cc; }
 .risk-level[data-level=blue] { color: #a5d8ff; }
-.risk-meta { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(100%,13rem),1fr)); gap: .65rem; }
-.risk-meta div { border-inline-start: 2px solid var(--border); padding-inline-start: .55rem; }
-.risk-meta dt { color: var(--muted); }
-.risk-meta dd { margin: .2rem 0 0; }
+.risk-rule-status { margin-inline-start: .35rem; color: var(--muted); font-size: .875rem; }
+.risk-all-checks, .risk-rule-evidence { margin-block-start: .65rem; }
+.risk-all-checks > summary, .risk-rule-evidence > summary { cursor: pointer; color: var(--mint); padding-block: .35rem; }

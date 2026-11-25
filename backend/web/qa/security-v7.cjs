@@ -26,6 +26,8 @@ async function main(){
     });
     await page.goto(origin+'/#security?report='+id);
     const signer=page.locator('[data-card=signer]');
+    const more=page.locator('[data-section=security-evidence] > summary');
+    await more.click();
     await signer.getByText('匹配对应渠道与版本的发布证书。').waitFor();
     await signer.locator('summary').focus();await page.keyboard.press('Enter');
     await signer.getByText(/对应发布证书 SHA-256/).waitFor();
@@ -33,9 +35,9 @@ async function main(){
     await page.locator('[data-card=partitions] summary').click();
     await page.getByText('vendor-build',{exact:true}).waitFor();
     assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
-    cert='b'.repeat(64);await page.reload();await signer.getByText(/发布证书不匹配/).waitFor();
-    registered=false;await page.reload();await signer.getByText(/无已知发布记录/).waitFor();
-    ver=6;await page.reload();await page.locator('[data-card=boot]').waitFor();assert.equal(await signer.count(),0);
+    cert='b'.repeat(64);await page.reload();await more.click();await signer.getByText(/发布证书不匹配/).waitFor();
+    registered=false;await page.reload();await more.click();await signer.getByText(/无已知发布记录/).waitFor();
+    ver=6;await page.reload();await more.click();await page.locator('[data-card=boot]').waitFor();assert.equal(await signer.count(),0);
     assert.deepEqual(errors,[]);console.log('PASS: v7 signer match/mismatch/unregistered, v6 archive, boot conflict, partition disclosure and narrow layout.');
   }finally{await browser.close();}
 }

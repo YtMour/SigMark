@@ -44,7 +44,6 @@
 .experiment-card > summary::before { content: "▸" / ""; color: var(--mint); }
 .experiment-card[open] > summary::before { content: "▾" / ""; }
 .experiment-card > summary:hover { background: var(--alt); }
-.experiment-mode { font-size: .86rem; color: var(--muted); }
 .experiment-status { margin-inline-start: auto; font-size: .85rem; padding: .08rem .45rem; border: 1px solid var(--border); border-radius: .35rem; }
 .experiment-status[data-result=passed] { color: var(--mint); }
 .experiment-status:is([data-result=failed],[data-result=incomplete]) { color: var(--amber); }

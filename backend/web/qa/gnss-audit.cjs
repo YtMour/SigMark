@@ -28,8 +28,8 @@ async function run(){
     await row.getByText('GNSS_CALLBACK_OBSERVED',{exact:true}).waitFor();
     await row.getByText('GNSS_NO_INDEPENDENT_PROOF',{exact:true}).waitFor();
     assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
-    await page.getByRole('link',{name:'打开验收工作台',exact:true}).click();
-    const workbench=page.getByRole('region',{name:'设备证据与风险验收'});
+    await page.getByRole('navigation',{name:'当前报告功能'}).getByRole('link',{name:'验收工作台',exact:true}).click();
+    const workbench=page.getByRole('region',{name:'本次验收'});
     await workbench.locator('.experiment-card').filter({hasText:'GNSS 读数核对'})
       .getByText('达到判定条件',{exact:true}).waitFor();
     assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));

@@ -16,7 +16,7 @@ Object.assign(params[0],{key:'selinux',label:'SELinux 模式'});
 Object.assign(params[12],{key:'release',label:'Android 版本',value:'10',source:'Build.VERSION.RELEASE'});
 const rows=Array.from({length:65},(_,i)=>({id:id(i+1),batch:'qa-reader',receivedAt:when,assetId:asset,report:{
   model:'QA 设备 '+(i+1),schemaVersion:4,androidApi:29,appVersion:'0.17.0',network:'wifi',assetId:asset,
-  fieldSetVersion:6,collectorVersion:'0.17.0',capturedAtEpochMs:Date.parse(when)
+  fieldSetVersion:6,collectorVersion:'0.17.0',capturedAtEpochMs:i===1?0:Date.parse(when)-1000
 }}));
 const query='?batch=qa-reader';
 const coverage=groups.map(group=>{
@@ -77,6 +77,10 @@ async function run(){
     await page.waitForURL(u=>u.hash==='#reports'+query);
     await page.getByRole('button',{name:'清除品牌筛选：QA'}).waitFor({state:'detached'});
     await page.locator('#archive-read-'+id(1)).waitFor();
+    const currentRow=page.locator('#archive-read-'+id(1));
+    assert.equal(await currentRow.locator('time').getAttribute('datetime'),new Date(Date.parse(when)-1000).toISOString());
+    assert.doesNotMatch(await currentRow.innerText(),/API 29|App 0\.17\.0|入库/);
+    assert.match(await page.locator('#archive-read-'+id(2)).locator('time').innerText(),/^入库 /);
     await snap('archive-891');
     await page.setViewportSize({width:1440,height:1003});
     const desktopNav=await page.evaluate(()=>{
@@ -100,7 +104,7 @@ async function run(){
     await snap('archive-320');
     await page.setViewportSize({width:891,height:1003});
     await page.getByRole('button',{name:'下一页',exact:true}).click();
-    await page.getByText('第 2 页 · 每页 30 份',{exact:true}).waitFor();
+    await page.getByText('第 2 页',{exact:true}).waitFor();
     async function openAndCheck(origin,returnName,via){
       await origin.waitFor();await origin.evaluate(el=>el.scrollIntoView({block:'center'}));
       const before=await origin.evaluate(el=>el.getBoundingClientRect().top);
@@ -110,15 +114,20 @@ async function run(){
       await page.getByRole('button',{name:'下载 JSON',exact:true}).waitFor();
       await page.getByRole('button',{name:'采样条件',exact:true}).click();
       await page.getByText('入库时间',{exact:true}).waitFor();
+      assert.equal(await page.getByText('报告编号',{exact:true}).isVisible(),false);
+      await page.getByText('报告技术详情',{exact:true}).click();
+      await page.getByText('报告编号',{exact:true}).waitFor();
       await page.getByRole('button',{name:/归档参数/}).click();
       assert.equal(await page.getByRole('region',{name:'报告列表'}).count(),0);
       if(via==='security'){
-        await page.getByRole('link',{name:'单份安全分析'}).click();
         const nav=page.getByRole('navigation',{name:'当前报告功能'});
-        await nav.getByRole('link',{name:'打开验收工作台'}).click();
-        await page.getByRole('navigation',{name:'报告路径'}).getByRole('link',{name:'验收工作台',exact:true}).waitFor();
+        await nav.getByRole('link',{name:'指纹安全',exact:true}).click();
+        await nav.getByRole('link',{name:'验收工作台',exact:true}).click();
+        await page.getByRole('region',{name:'本次验收'}).waitFor();
         assert.match(new URL(page.url()).hash,/batch=qa-reader/);
-        await page.getByRole('link',{name:'返回报告详情'}).click();
+        assert.equal(await page.locator('.report-flow .report-return').count(),1);
+        assert.equal(await page.getByRole('link',{name:'返回报告详情',exact:true}).count(),0);
+        assert.equal(await nav.getByRole('link',{name:'验收工作台',exact:true}).getAttribute('aria-current'),'page');
       }
       if(via==='browser')await page.goBack();
       else await page.getByRole('link',{name:returnName,exact:true}).click();

@@ -93,8 +93,8 @@ function LabSheetView({sheet,savedId,selected,objective}:{sheet:LabSheet;savedId
     ['失去读数',result.counts.lost],['恢复读数',result.counts.restored],['值变化',result.counts.changed],['仅一侧归档',result.counts.not_comparable],
   ]:[['需用户授权',r.permission],['位置未开',r.location],['系统拒读',r.policy],['其他受限',r.other]];
   return <>
-    <ReportFlow report={current} view="lab"/>
-    <VerificationPanel packet={packet} pending={!catalog||signer?.state==='loading'} securityLink={securityLink}
+    <ReportFlow report={current} view="lab" securityHref={securityLink}/>
+    <VerificationPanel packet={packet} pending={!catalog||signer?.state==='loading'}
       conditions={<section className="lab-hero" aria-labelledby={uid+'-run'}>
       <div><h2 id={uid+'-run'}>验收条件</h2>
         <p className="muted">选择目标和同设备基线，更新下方证据。</p>

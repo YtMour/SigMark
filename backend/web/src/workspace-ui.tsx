@@ -1,5 +1,5 @@
 import {useEffect,useId,useRef,useState,type ReactNode} from 'react';
-import {Archive, ArrowRight, Download, Fingerprint, FlaskConical, LockKeyhole, Menu, Settings2, ShieldCheck, Smartphone, SquareTerminal} from 'lucide-react';
+import {Archive, ArrowLeft, ArrowRight, Download, Fingerprint, FlaskConical, LockKeyhole, Menu, Settings2, ShieldCheck, Smartphone, SquareTerminal} from 'lucide-react';
 
 export const workspaces=[
   {id:'reports',label:'报告档案',icon:'archive',group:'collection'},
@@ -16,13 +16,9 @@ const navigationGroups={
   collection:'设备仓库',
   tools:'发布与设置',
 } as const;
-const pageContext:Record<Section,string>={
-  reports:'设备采样',assets:'仓库管理',identity:'仓库管理',security:'报告分析',lab:'报告分析',
-  builds:'版本发布',downloads:'版本发布',settings:'工作区管理',
-};
-type IconName=typeof workspaces[number]['icon']|'lock'|'menu'|'arrow';
+type IconName=typeof workspaces[number]['icon']|'lock'|'menu'|'arrow'|'back';
 const icons={archive:Archive,devices:Smartphone,shield:ShieldCheck,identity:Fingerprint,lab:FlaskConical,
-  build:SquareTerminal,download:Download,settings:Settings2,lock:LockKeyhole,menu:Menu,arrow:ArrowRight};
+  build:SquareTerminal,download:Download,settings:Settings2,lock:LockKeyhole,menu:Menu,arrow:ArrowRight,back:ArrowLeft};
 export function Icon({name}:{name:IconName}){
   const Glyph=icons[name];
   return <Glyph aria-hidden="true" size={19} strokeWidth={1.8}/>;
@@ -42,8 +38,7 @@ export function WorkspaceNav({section,active,busy,lock}:{section:Section;active:
     if(event.key==='Escape'&&expanded){event.preventDefault();expand(false);trigger.current?.focus();}
   }}>
     <a className="rail-brand" href="#reports"><img src="/sigmark-icon.png" alt="" width="36" height="36"/>
-      <span><strong>SigMark <span>印迹</span></strong>
-        <small className="rail-caption">设备报告工作台</small></span></a>
+      <strong>SigMark <span>印迹</span></strong></a>
     <button ref={trigger} className="secondary rail-trigger" type="button" aria-expanded={expanded}
       aria-controls={navigationId} onClick={()=>expand(!expanded)}>
       <Icon name="menu"/><span>工作区</span>
@@ -57,20 +52,20 @@ export function WorkspaceNav({section,active,busy,lock}:{section:Section;active:
           </a>
         </li>)}</ul>
       </div>)}
-      <div className="rail-session"><span className="lan"><i/>局域网</span>
-        {active&&<button type="button" className="secondary" onClick={lock} disabled={busy}><Icon name="lock"/>{busy?'正在锁定…':'锁定'}</button>}</div>
+      {active&&<div className="rail-session">
+        <button type="button" className="secondary" onClick={lock} disabled={busy}><Icon name="lock"/>{busy?'正在锁定…':'锁定'}</button>
+      </div>}
     </nav>
   </header>;
 }
 
 export function PageHead({section,title,description,children,className=''}:{
-  section:Section;title?:string;description:string;children?:ReactNode;className?:string;
+  section:Section;title?:string;description?:string;children?:ReactNode;className?:string;
 }){
   const info=workspaces.find(item=>item.id===section)!;
   return <header className={'workspace-heading '+className}>
     <div className="heading-copy min-w-0">
-      <span className="heading-context"><Icon name={info.icon}/>{pageContext[section]}</span>
-      <h1>{title??info.label}</h1><p>{description}</p>
+      <h1>{title??info.label}</h1>{description&&<p>{description}</p>}
     </div>
     {children&&<div className="heading-actions">{children}</div>}
   </header>;

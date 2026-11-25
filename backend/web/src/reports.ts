@@ -12,7 +12,7 @@ const labels:Record<string,string>={AVAILABLE:'可用',RESTRICTED:'受限',UNAVA
   'system.selinux':'SELinux 实时模式','cpu.kernelFull':'内核编译信息','network.wifiFrequency':'Wi-Fi 频率','network.internetValidation':'互联网验证','cellular.dataRat':'蜂窝制式','cellular.cellDiagnostics':'小区无线参数'};
 export const caption=(value:string)=>labels[value]??value;
 export const date=(value:string|number)=>new Date(value).toLocaleString('zh-CN',{hour12:false});
-export const shortDate=(v:string)=>new Date(v).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false});
+export const shortDate=(v:string)=>new Date(v).toLocaleString('zh-CN',{year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false});
 
 export function saveJson(data:Report){
   saveDownload(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}),'SigMark-'+data.id+'.json');

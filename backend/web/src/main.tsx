@@ -178,7 +178,7 @@ function ReportIndex({filters,baseline,clearBaseline,rememberFilter}:{
     }
   }
   return <main className="workspace report-workspace archive-browse">
-    <PageHead section="reports" className="archive-heading" description="选择一份采样，查看参数、做单份安全分析或进入验收。">
+    <PageHead section="reports" className="archive-heading">
       <a className="button-link secondary" href={reportWorkspaceLink('assets',filters,{view:'archive'})}>管理当前结果 <span aria-hidden="true">→</span></a>
     </PageHead>
     <div className="panel archive-filters">
@@ -189,24 +189,30 @@ function ReportIndex({filters,baseline,clearBaseline,rememberFilter}:{
       </ReportFiltersBar>
     </div>
     <section className="panel report-index" aria-label="报告列表">
-        <div className="pane-title archive-list-head"><div><h2>采样记录</h2>
-          <small role="status">{total===undefined?(busy?'正在统计报告':`本页 ${data?.items.length??0} 份`):`${total.toLocaleString('zh-CN')} 份匹配报告`}</small></div>
-          <div className="archive-sync"><small>{cursor?'历史页保持当前位置':refreshInterval?`每 ${refreshInterval} 秒同步`:'自动刷新已关闭'}</small>
+        <div className="pane-title archive-list-head">
+          <div role="status">{total===undefined?(data?`本页 ${data.items.length} 份`:''):`${total.toLocaleString('zh-CN')} 份报告`}</div>
+          <div className="archive-sync">
             <button type="button" className="secondary" disabled={busy} onClick={()=>setRevision(value=>value+1)}>{busy&&data?'刷新中…':'刷新'}</button></div></div>
-        {baseline&&<div className="baseline compact-baseline"><span><b>基线</b>{baseline.report.model} · <code>{baseline.id.slice(0,8)}</code></span>
+        {baseline&&<div className="baseline compact-baseline"><span><b>基线</b>{baseline.report.model} · {baseline.report.capturedAtEpochMs>0?
+          date(baseline.report.capturedAtEpochMs):'入库 '+date(baseline.receivedAt)}</span>
           <button className="secondary" onClick={clearBaseline}>移除</button></div>}
         {error&&<p role="alert" className="error inset">{error}</p>}
         {busy&&!data?<EmptyState title="正在读取报告…" loading/>:!error&&!data?.items.length?<EmptyState title="没有匹配报告">试试调整或清除上方筛选条件。</EmptyState>:null}
-        {!!data?.items.length&&<div className="archive-columns" aria-hidden="true"><span>设备</span><span>批次与版本</span><span>入库时间 / 报告编号</span></div>}
-        <ul className="report-list" aria-busy={busy}>{data?.items.map(row=><li key={row.id}><a className="report-row"
+        {!!data?.items.length&&<div className="archive-columns" aria-hidden="true"><span>设备</span><span>批次</span><span>采样时间</span></div>}
+        {/* Old reports may only have an intake time. Label the fallback so it is not read as capture time. */}
+        <ul className="report-list" aria-busy={busy}>{data?.items.map(row=>{
+          const capturedAt=row.report.capturedAtEpochMs;
+          const hasCaptureTime=typeof capturedAt==='number'&&capturedAt>0;
+          const time=hasCaptureTime?new Date(capturedAt).toISOString():row.receivedAt;
+          return <li key={row.id}><a className="report-row"
           id={'archive-read-'+row.id} onClick={e=>openFromList(e,pages,'返回报告列表')} href={reportWorkspaceLink('reports',filters,{report:row.id})}>
           <span className="archive-device"><strong>{row.report.model}</strong>
-            <span className="device-dimensions">{[row.report.brand,row.report.device,row.report.android&&'Android '+row.report.android].filter(Boolean).join(' · ')}</span></span>
-          <span className="row-tags"><span>{row.batch}</span><span>API {row.report.androidApi||'—'}</span><span>App {row.report.appVersion}</span></span>
-          <span className="archive-received"><time dateTime={row.receivedAt}>入库 {shortDate(row.receivedAt)}</time><code>{row.id.slice(0,8)}</code></span>
+            <span className="device-dimensions">{[row.report.brand,row.report.android&&'Android '+row.report.android].filter(Boolean).join(' · ')}</span></span>
+          <span className="archive-batch">{row.batch}</span>
+          <span className="archive-time"><time dateTime={time}>{hasCaptureTime?'':'入库 '}{shortDate(time)}</time></span>
           <span className="archive-arrow" aria-hidden="true">›</span>
-        </a></li>)}</ul>
-        <nav className="pages" aria-label="报告分页"><button className="secondary" disabled={busy||pages.length===1} onClick={()=>setPages(p=>p.slice(0,-1))}>上一页</button><span>第 {pages.length} 页 · 每页 30 份</span><button className="secondary" disabled={busy||!data?.nextCursor} onClick={()=>{if(data?.nextCursor)setPages(p=>[...p,data.nextCursor]);}}>下一页</button></nav>
+        </a></li>})}</ul>
+        <nav className="pages" aria-label="报告分页"><button className="secondary" disabled={busy||pages.length===1} onClick={()=>setPages(p=>p.slice(0,-1))}>上一页</button><span>第 {pages.length} 页</span><button className="secondary" disabled={busy||!data?.nextCursor} onClick={()=>{if(data?.nextCursor)setPages(p=>[...p,data.nextCursor]);}}>下一页</button></nav>
       </section>
   </main>;
 }
@@ -276,7 +282,6 @@ function Details({row,filters,pin,isBaseline,hasBaseline,startCompare}:{row:Repo
         <button className="secondary" onClick={()=>setSaveBaseline(true)}>保存回归基线</button>
         {!!fields.length&&<button className="secondary" onClick={pin} disabled={isBaseline}>{isBaseline?'已设临时对比基线':'设为临时对比基线'}</button>}
         {hasBaseline&&<button className="secondary" onClick={startCompare}>对比全部参数</button>}
-        <small>批次 {row.batch} · {row.report.fieldSetVersion?`字段集 v${row.report.fieldSetVersion} · 采集器 ${row.report.collectorVersion??'未记录'}`:`历史协议 v${row.report.schemaVersion}`} · 编号 <code>{row.id}</code></small>
       </div></details>
     </div>
     {savedId&&<p className="inset" role="status">已保存回归基线。 <a className="subtle-link" href={reportWorkspaceLink('security',filters,{baseline:row.id,saved:savedId,retest:true})}>用这条基线复测 →</a></p>}
@@ -295,14 +300,21 @@ function Details({row,filters,pin,isBaseline,hasBaseline,startCompare}:{row:Repo
       {panel==='followup'&&<ObservationPanel key={row.id} report={row} showGaps/>}
       {panel==='context'&&<div className="reader-context">
         <dl className="release-data">
-          <dt>采样时间</dt><dd>{date(row.report.capturedAtEpochMs)}</dd>
+          <dt>采样时间</dt><dd>{row.report.capturedAtEpochMs>0?date(row.report.capturedAtEpochMs):'未记录'}</dd>
           <dt>入库时间</dt><dd>{date(row.receivedAt)}</dd>
           <dt>批次</dt><dd>{row.batch}</dd>
           <dt>采样网络</dt><dd>{caption(row.report.network)}</dd>
-          <dt>采集器</dt><dd>{row.report.collectorVersion??'未记录'}</dd>
-          <dt>字段集</dt><dd>{row.report.fieldSetVersion?`v${row.report.fieldSetVersion}`:'未记录'}</dd>
-          <dt>报告编号</dt><dd><code>{row.id}</code></dd>
+          <dt>App 版本</dt><dd>{row.report.appVersion||'未记录'}</dd>
         </dl>
+        <details>
+          <summary>报告技术详情</summary>
+          <dl className="release-data">
+            <dt>Android API</dt><dd>{row.report.androidApi||'未记录'}</dd>
+            <dt>采集器</dt><dd>{row.report.collectorVersion??'未记录'}</dd>
+            <dt>字段集</dt><dd>{row.report.fieldSetVersion?`v${row.report.fieldSetVersion}`:'未记录'}</dd>
+            <dt>报告编号</dt><dd><code>{row.id}</code></dd>
+          </dl>
+        </details>
         {row.report.feedback&&<p><b>测试反馈：</b>{row.report.feedback}</p>}
         <ReportRecoveredPanel fields={fields}/>
         {(row.report.fieldSetVersion??0)>=9&&<AcceptancePanel row={row}/>}

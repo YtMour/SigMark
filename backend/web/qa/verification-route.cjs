@@ -13,7 +13,7 @@ async function run(){
       return route.fulfill({response});
     });
     await page.goto(base+'/#lab?report='+process.argv[2]+'&objective=network');
-    const experiments=page.getByRole('region',{name:'实验步骤与归档结果'});
+    const experiments=page.getByRole('region',{name:'实验结果'});
     await experiments.locator('summary').getByText(/Wi-Fi → 蜂窝/).waitFor();
     const text=await experiments.locator('.experiment-status').innerText();
     if(process.argv[3]==='yes')assert.equal(text,'达到判定条件');

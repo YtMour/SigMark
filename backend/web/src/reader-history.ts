@@ -44,6 +44,12 @@ export function followReaderParent(e:MouseEvent<HTMLAnchorElement>){
 export function readerOrigin(){
   return history.state?.sigmarkOrigin as Mark|undefined;
 }
+export function readerAncestor(matches:(hash:string)=>boolean){
+  const ancestors:string[]=history.state?.sigmarkAncestors??[];
+  for(let index=ancestors.length-1;index>=0;index--){
+    if(matches(ancestors[index]))return ancestors[index];
+  }
+}
 export function returnFromReader(fallback:string){
   if(history.state?.sigmarkOrigin&&history.state.readerDepth>0){history.go(-history.state.readerDepth);return;}
   location.hash=fallback;

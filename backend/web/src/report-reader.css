@@ -7,18 +7,22 @@
   border: 1px solid var(--border);
   border-radius: var(--radius-panel);
 }
-.report-breadcrumb ol {
-  display: flex;
-  flex-wrap: wrap;
-  gap: .3rem .7rem;
-  padding: 0;
-  margin: 0;
-  list-style: none;
+.report-return {
+  display: inline-flex;
+  align-items: center;
+  justify-self: start;
+  gap: .4rem;
+  min-block-size: 2.35rem;
+  padding: .3rem .65rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  color: #d6e8e4;
+  background: var(--surface-recessed);
+  font-size: .9rem;
+  text-decoration: none;
 }
-.report-breadcrumb li { min-inline-size: 0; display: flex; gap: .7rem; }
-.report-breadcrumb li + li::before { content: "›" / ""; color: var(--muted); }
-.report-breadcrumb a { color: var(--muted); font-size: .9rem; text-underline-offset: .18em; }
-.report-breadcrumb a[aria-current=page] { color: inherit; font-weight: 700; text-decoration: none; }
+.report-return:hover { color: var(--mint); background: var(--alt); }
+.report-return svg { inline-size: 1em; block-size: 1em; flex: none; }
 .report-flow-title { display: flex; align-items: baseline; flex-wrap: wrap; gap: .4rem 1rem; }
 .report-flow-title h1 { overflow-wrap: anywhere; }
 .report-flow-title p { color: var(--muted); font-size: .92rem; overflow-wrap: anywhere; }

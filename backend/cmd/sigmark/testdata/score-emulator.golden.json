@@ -1,6 +1,6 @@
 {
-  "version": "sigmark-score/4",
-  "value": null,
+  "version": "sigmark-score/5",
+  "value": 80,
   "band": "D",
   "bandLabel": "高度可疑",
   "coverage": 0.67,
@@ -19,7 +19,7 @@
       "code": "behavior",
       "label": "行为风险",
       "weight": 35,
-      "score": null,
+      "score": 65,
       "coverage": 0.83,
       "deductions": [
         {
@@ -40,7 +40,7 @@
       "code": "usage",
       "label": "使用真实性",
       "weight": 25,
-      "score": null,
+      "score": 100,
       "coverage": 1,
       "deductions": []
     }

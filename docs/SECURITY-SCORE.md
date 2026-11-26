@@ -1,10 +1,26 @@
-# 设备安全打分（sigmark-score/4）设计与实现
+# 设备安全打分（sigmark-score/5）设计与实现
 
-> 状态：**已实现并上线**（2026-11-26，`sigmark-score/4` + `sigmark-profile/9`）。后端 `backend/cmd/sigmark/score.go` 是唯一投影实现（版本常量在 [score.go:51](../backend/cmd/sigmark/score.go#L51)），前端 `backend/web/src/score-view.ts` 负责渲染，**146 个顶层 Go 测试**（`go test -v -count=1 ./cmd/sigmark` 实测：**143 PASS / 3 SKIP / 0 FAIL**，共 216 个 `RUN` 行含子测试；3 个 SKIP 是 `TestIdentitySummaryPostgres` / `TestRepositoryStatsPostgres` / `TestAssetOverviewPostgres`，需要真实库）+ **103 项 Web 测试**锁住契约，五份黄金文件（Pixel 6 / MI 8 / 仿真器基准 / 仿真器改装两个变体）逐字节冻结真机结论。`go test -count=1 ./...` 全绿、`gofmt -l` 与 `go vet` 干净。
+> ## 铁律：SigMark 是 App
+>
+> **产品形态是普通应用在普通用户手机上采集。**
+>
+> **`adb` / shell 读数只是开发期的辅助观察，不是产品能力，不得与 App 采集结果混为一谈。**
+>
+> **任何判据、任何样例、任何结论，都必须以 App 视角的采集结果为准。**
+>
+> 三条直接后果，逐条落到下面的口径里：
+>
+> 1. **同一个属性，`adb` 与 App 可能读到不同的值。** Pixel 6 实测：`ro.board.platform` 用 `adb` 读是 `gs101`（`ADB`），App 读是 `mt6985`（`APP`）。**产品只认 App 读到的那个**——判据比对的两侧必须同视角，不能一边 shell 一边 App。这也意味着**任何只做过 `adb` 验证的判据，都还没有被产品视角验证过**。
+> 2. **判据的「成本」要按 App 能读到什么来算**，不是按 root/shell 能改什么来算。一条 `setprop` 改掉的值，App 读到的是改后的值——所以「App 读得到」不等于「对手改不动」；反过来，`/proc` 透传这类 App 读得到、`resetprop` 改不掉的东西，才是真正的成本台阶（§13 F17）。
+> 3. **本文所有实测数据必须标注视角：`APP` 或 `ADB`。** 没标注的一律按 `APP` 处理，因为那是产品口径；`ADB` 数据只出现在「开发期观察」的语境里，并且必须写明它不代表产品能力。
+>
+> 这条铁律不是新增限制，而是**把一直隐含的假设显式写出来**：§13 F16 的「非空≠对」、§4 R10 的「没看过不等于一致」，前提都是「看到的是 App 看到的东西」。视角一旦混用，那两条规则会同时失效。
+
+> 状态：**已实现并上线**（2026-11-26，`sigmark-score/5` + `sigmark-profile/9`）。后端 `backend/cmd/sigmark/score.go` 是唯一投影实现（版本常量在 [score.go:67](../backend/cmd/sigmark/score.go#L67)），前端 `backend/web/src/score-view.ts` 负责渲染，**167 个顶层 Go 测试**（`go test -v -count=1 ./cmd/sigmark` 实测：**164 PASS / 3 SKIP / 0 FAIL**，共 237 个 `RUN` 行含子测试；3 个 SKIP 是 `TestIdentitySummaryPostgres` / `TestRepositoryStatsPostgres` / `TestAssetOverviewPostgres`，需要真实库）+ **103 项 Web 测试**锁住契约，五份黄金文件（Pixel 6 / MI 8 / 仿真器基准 / 仿真器改装两个变体）逐字节冻结真机结论。`go test -count=1 ./...` 全绿、`gofmt -l` 与 `go vet` 干净。
 >
 > **本文的定位**：定义口径与契约。凡是「文档声称、代码没有」的地方，§13 的 F 系列逐条记录；上一版收敛到只剩 U2 一项，**U2 已于 `sigmark-score/2` 落地**，F12 现在没有遗留项。凡是「代码有、文档没写」的地方，同样在 §13 里点出来。这不是一次性的设计稿，而是随实现同步维护的契约。
 >
-> 依赖：画像规则 `sigmark-profile/9`（[device_profile.go:25](../backend/cmd/sigmark/device_profile.go#L25)）、字段集 25、字段词典 `sigmark-lan-fields/16`、打分规则 `sigmark-score/4`。
+> 依赖：画像规则 `sigmark-profile/9`（[device_profile.go:25](../backend/cmd/sigmark/device_profile.go#L25)）、字段集 26、字段词典 `sigmark-lan-fields/17`、打分规则 `sigmark-score/5`。
 >
 > 结论先行：分数是**归档数据的只读投影**；`band` 才是结论，`value` 只用于排序；覆盖不足时不给数字；决定性命中直接把结论压到 D；打分**不能证明设备是真的**。
 
@@ -41,6 +57,26 @@
 | 不能表达确信 | 三态里 `insufficient` 只说明「没判」 | 7 个标签证据不足与 7 个标签确认无异常，在顶部看起来一样干净 |
 
 打分体系只回答这四件事；它**不**回答「设备是否原厂」「ROM 是否被篡改」「使用者是否做过危险操作」。
+
+### 1.3 视角铁律：本文所有数据都是 App 视角（见文首）
+
+这一节是文首那条铁律在本章的具体化，因为它决定**「现在有什么」这句话的含义**。
+
+**产品能力 = 普通 App 在普通用户手机上能读到的值。** 不是 root 能读到的，不是 `adb shell getprop` 能读到的，不是开发机上模拟器里能读到的。三者经常不一致：
+
+| 数据源 | 能不能作为判据输入 | 说明 |
+| --- | --- | --- |
+| App 内 `Build.*` / `SystemProperties` / `/proc` 读取 | **能** | 唯一的产品口径；本文所有判据都以它为准 |
+| `adb shell getprop` | **不能**（只作开发期辅助观察） | Pixel 6 实测：`ro.board.platform` 走 `adb` 读 `gs101`，走 App 读 `mt6985`。**同一台机器、同一个属性、两个值** |
+| root / `resetprop` 之后的读数 | **不能** | 那是攻击者视角，用来评估成本，不是用来定义判据 |
+
+**为什么这件事会直接改变结论**：
+
+1. **判据的「成本」不能用 `adb` 的改写能力来估。** 一条 `setprop` 能改掉的值，App 读到的是改后的值——所以「App 读得到」不等于「对手改不动」。反过来，`/proc/cpuinfo` 这类 App 读得到、`resetprop` 改不掉的通道，才是真正的成本台阶（§13 F17）。
+2. **判据的两侧必须同视角。** 「App 侧值 vs 同名属性值」这种比较（`identity_conflict`）只有在两侧都来自 App 采集时才成立。一边 shell 一边 App，比出来的是**采集环境的差异**，不是设备的矛盾。
+3. **样例必须标视角。** 本文出现的每个实测值都带 `APP` 或 `ADB` 标注；没标的按 `APP` 处理。§13 F17 与 §10.9 的雷神数据是 `APP`（真跑 App 采集上传）；VIRTUALIZATION-MATRIX 里的改写命令是 `ADB`（开发期观察，**不代表产品能力**）。
+
+> 一句话：**「我能在 shell 里证明它是模拟器」不等于「产品能判出它是模拟器」。** 后者才是这份文档要交付的东西。
 
 ---
 
@@ -165,7 +201,7 @@ R1–R9 是规格原文；R10、R11 与 R7 的薄轴例外是**回算当轮 22 �
 
 **实现约束**：`keys` 从该标签的 `evidence` 行里取，不新造 key；`detail` 用模板生成（`{实测} 与 {画像} 一致` / `{左} 与 {右} 不一致`），避免自由发挥。黄金测试对 `code/label/points/keys` 做结构断言，对 `detail` 做文本快照（§9.4）。
 
-> 已知例外：`fresh_boot_on_aged_rom` 是派生标签，没有对应的 `profileSignals()` 行。它的 label 由 `sigmark-score/4` 的派生标签表定义，R1 其余要求不变。这是规格「usage 轴有 25 权重但没有标签」的直接后果，见 §13 F1。
+> 已知例外：`fresh_boot_on_aged_rom` 是派生标签，没有对应的 `profileSignals()` 行。它的 label 由 `sigmark-score/5` 的派生标签表定义，R1 其余要求不变。这是规格「usage 轴有 25 权重但没有标签」的直接后果，见 §13 F1。
 
 ### R2 同一 label 内多条命中取 max，不求和
 
@@ -219,13 +255,13 @@ R1–R9 是规格原文；R10、R11 与 R7 的薄轴例外是**回算当轮 22 �
 
 它**不改判定、不降 coverage、不升版**：`not_observed` 该保持还是保持，只是缺口从「静默」变成「有名有姓」。真机验证：MI 8（`sdm845`）的 `memory.cmaTotal` 现在报 `PROFILE_UNSET`，`band` 仍是 A/100。见 §13 F12。
 
-**第六个原因 `UNMAPPED_SDK_LEVEL`（`sigmark-score/2` 新增）**：`system.initialSdk` 读到了，但它的值不在年份表 `usageSdkYears` 里（[score.go:217](../backend/cmd/sigmark/score.go#L217)）。比如将来某台机器报 `initialSdk=36`，而表只登记到 35。
+**第六个原因 `UNMAPPED_SDK_LEVEL`（`sigmark-score/2` 新增）**：`system.initialSdk` 读到了，但它的值不在年份表 `usageSdkYears` 里（[score.go:246](../backend/cmd/sigmark/score.go#L246)）。比如将来某台机器报 `initialSdk=36`，而表只登记到 35。
 
-为什么必须单独一个值：**「不知道」不能渲染成「没问题」**。若把表外 SDK 当作「不存在」，`usageAxis` 会退回旧口径（只有分区日期可判），管理员看到的是一个没有缺口的 `not_observed`；若把它当作「新世代」，就等于凭空断定这台设备是近年出厂的——而它可能是一台 2016 年、API 级别更老的机器被塞了别的 ROM。两种猜测都会把「我们没查懂」伪装成结论。表本身是**查表不是算术**：`2017 + (sdk − 26)` 这种写法在每次发布节奏变化处都会差一年，然后静默地把一整代设备标错（[score.go:194](../backend/cmd/sigmark/score.go#L194) 的注释写了这个理由）。
+为什么必须单独一个值：**「不知道」不能渲染成「没问题」**。若把表外 SDK 当作「不存在」，`usageAxis` 会退回旧口径（只有分区日期可判），管理员看到的是一个没有缺口的 `not_observed`；若把它当作「新世代」，就等于凭空断定这台设备是近年出厂的——而它可能是一台 2016 年、API 级别更老的机器被塞了别的 ROM。两种猜测都会把「我们没查懂」伪装成结论。表本身是**查表不是算术**：`2017 + (sdk − 26)` 这种写法在每次发布节奏变化处都会差一年，然后静默地把一整代设备标错（[score.go:224](../backend/cmd/sigmark/score.go#L224) 的注释写了这个理由）。
 
 **第七个原因 `UNPARSEABLE_PARTITION_DATES`（`sigmark-score/2` 新增）**：`system.partitionBuildDates` 读到了、格式也能切分，但从中解析不出年份。
 
-为什么必须单独一个值：它和 `UNAVAILABLE` 是两件事。`UNAVAILABLE` 是「采样时没值」，`UNPARSEABLE_PARTITION_DATES` 是「有值，但我们的解析器读不懂」。混成一个，会让「ROM 改了日期格式」看起来和「设备没提供日期」完全一样——而前者恰恰是需要人看一眼的信号。当前实现里 `oldestPartitionYear` 返回 not-ok 就落到这个值（[score.go:1161](../backend/cmd/sigmark/score.go#L1161)），不猜年份、不按「今天」兜底。
+为什么必须单独一个值：它和 `UNAVAILABLE` 是两件事。`UNAVAILABLE` 是「采样时没值」，`UNPARSEABLE_PARTITION_DATES` 是「有值，但我们的解析器读不懂」。混成一个，会让「ROM 改了日期格式」看起来和「设备没提供日期」完全一样——而前者恰恰是需要人看一眼的信号。当前实现里 `oldestPartitionYear` 返回 not-ok 就落到这个值（[score.go:1260](../backend/cmd/sigmark/score.go#L1260)），不猜年份、不按「今天」兜底。
 
 **R4 的实现前置条件：标签必须公布自己的分支（`basis`）**。`hardware_declaration_conflict` 可以用六条不同的通道达到同一个 `hit`，而「哪一条」决定了它是不是决定性的。在加 `basis` 之前，打分层只能拿证据行去**重问一次** `hardwareFactsLabel`（限制可见字段）来猜分支——那是同一问题的第二份实现，只要 `hardware_facts.go` 新增一条规则就会漂移。
 
@@ -322,17 +358,29 @@ value    = round_half_up( Σ_{a∈included} weight(a) × score(a) / Σ_{a∈incl
 
 R10 有两层，**不是同一套口径**。这一点必须写清楚，因为「盲轴怎么办」和「盲轴出不出数字」是两个问题。
 
-**第一层：声明轴全盲 → 完全不出版数字（严格形态，保留不变）**
+**第一层：声明轴全盲 → 不出版数字，但决定性命中时例外（严格形态，`sigmark-score/5` 收紧）**
 
-**规则**：declaration 轴 `coverage < 0.5` **且** `deductions` 为空时，即使总体 coverage ≥ 0.5，也输出 `value = null`、`band = "?"`、`axes[].score = null`（coverage 照实保留）。实现见 `declarationBlind` 循环与出版前的 `if out.Coverage < scoreCoverageFloor || weights == 0 || declarationBlind` 分支（[score.go:427](../backend/cmd/sigmark/score.go#L427)、[:433](../backend/cmd/sigmark/score.go#L433)）。
+**规则**：declaration 轴 `coverage < 0.5` **且** `deductions` 为空时，即使总体 coverage ≥ 0.5，也输出 `value = null`、`band = "?"`、`axes[].score = null`（coverage 照实保留）。**唯一例外**：若 `decisive == true`，`value` **照常出版**，`band` 仍为 `D`。
+
+即抑制条件是 **`declarationBlind && !out.Decisive`**，不再是裸的 `declarationBlind`。实现见 `declarationBlind` 循环（[score.go:464](../backend/cmd/sigmark/score.go#L464)）与出版前的 `if out.Coverage < scoreCoverageFloor || weights == 0 || (declarationBlind && !out.Decisive)` 分支（[score.go:470](../backend/cmd/sigmark/score.go#L470)）。
 
 **为什么**：declaration 轴回答的是「这台设备有没有如实描述自己」。40% 权重的那条轴一条通道都没读到，不代表「一致」，只代表**没看**。把行为轴与使用轴的满分平均过去，会让 40% 的盲区换来一个 A——这是 §7.1「没采到不能等于安全」在总分层面的同一个错误。
 
+**为什么决定性命中要例外（这是设计依据，不是权宜）**：
+
+1. R10 这一层的**全部依据**是「别为一个没人看过的画面出版一个**舒服**的结果」。一旦决定性 cap 已经把 `band` 钉在 `D`，就**没有「舒服」可保护**了——D 是这套体系里最不舒服的结论，它已经出版出去了。
+2. 而 §13 **F5 本来就要求**决定性命中保留 `value` 当排序键：`band` 是结论，`value` 只用于排序。两份都是 D 的报告，如果没有数字就**无法排序**，趋势图也只能断开——而这正是 `value` 存在的唯一理由。
+3. **R8（总体 coverage 低于地板）与 `weights == 0` 仍然无条件吞数字。** 那两处不是「保护结论的体面」，而是「**没有数字本身就是结论**」——证据基础不足一半时，任何数字都是假精度（§4 R8）。两者不能混为一谈：一个是不该给，一个是不必藏。
+
 **反例（真实数据）**：字段集 20 的四份伪装报告，declaration 轴 coverage = 0、`undetermined` 里 9 个 key 全是 `NOT_ARCHIVED`，旧口径给出 **100 / A**。这正是 R10 要拦的形状。
+
+**反例（过度抑制，本轮修复）**：雷电报告 `6642e350`（字段集 25）：declaration 轴 coverage **0.33**（三路通道全 `UNAVAILABLE`，一条都没读到，也没找到扣分）、总体 coverage **0.73**（**高于地板**）、`decisive = true`。修复前输出 `band = D` **但 `value = null`**——`?` 不是它该有的样子，D 才是；而数字的缺席让审计员问不出下一个问题：「到底扣了多少分？」修复后 `value = 71`（§5.6、§10.2）。
+
+**这条修复改变了归档结论，所以升 `/5`**：同一份报告从 `value: null` 变成 `value: 71`，两份 D 报告从「无法比较」变成「可以比较」。
 
 **第二层：行为轴或使用轴全盲 → 数字照常出版，但禁止评为 A（窄形态，`sigmark-score/2` 新增）**
 
-**规则**：behavior 或 usage 轴 `coverage < 0.5` **且** `deductions` 为空（即「盲」而不是「薄」）时，`value` 照常算出并出版，但 `band` **不得为 A**，强制降到 **B**。实现见 `axisBlind` 循环（[score.go:411](../backend/cmd/sigmark/score.go#L411)）与出版后的 `if out.Band == bandA && axisBlind != ""` 块（[score.go:481](../backend/cmd/sigmark/score.go#L481)）。
+**规则**：behavior 或 usage 轴 `coverage < 0.5` **且** `deductions` 为空（即「盲」而不是「薄」）时，`value` 照常算出并出版，但 `band` **不得为 A**，强制降到 **B**。实现见 `axisBlind` 循环（[score.go:433](../backend/cmd/sigmark/score.go#L433)）与出版后的 `if out.Band == bandA && axisBlind != ""` 块（[score.go:532](../backend/cmd/sigmark/score.go#L532)）。
 
 **为什么**：R7 会把低覆盖的轴整条剔出加权平均，权重随即重新归一化到「答了话」的轴上——于是**删掉证据能让分数变高**。红队实测在真实 MI 8 上拿到确切形状：保留 usage 输入得 **97/B**，删掉得 **100/A**，同机同日高 3 分、跨一个 band。这是「攻击者只要隐藏证据就能升级」的方向性漏洞，必须堵。
 
@@ -436,8 +484,10 @@ coverage(total) = (40 × c_declaration + 35 × c_behavior + 25 × c_usage) / 100
 3. axes   ← 每轴 applied=min(Σpoints, 100)；score；coverage
 4. caps   ← decisive 分支扫描（从证据重算，不读字符串）
 5. coverage(total)                                     // 三轴加权，与给不给分正交
-6. if coverage(total) < 0.5: value=null, band="?"       // R8
-   if declaration.coverage < 0.5 && 声明轴无扣分: value=null, band="?"  // R10 严格形态
+6. if coverage(total) < 0.5: value=null, band="?"       // R8，无条件
+   if weights == 0:          value=null, band="?"       // 无任何轴有权重，无条件
+   if declaration.coverage < 0.5 && 声明轴无扣分 && !decisive:
+                             value=null, band="?"       // R10 严格形态（/5 收紧）
    else: included = axes where (coverage>=0.5 OR deductions 非空)        // R7 + 薄轴例外
          value = weighted_mean(included)
          band  = thresholds(value)
@@ -448,11 +498,26 @@ coverage(total) = (40 × c_declaration + 35 × c_behavior + 25 × c_usage) / 100
 10. 排序、取整、输出
 ```
 
-第 6 步的两条闸门都要输出 `axes[].score = null`，但 `axes[].coverage` **照实保留**——coverage 回答「这一轴读到了多少」，与「给不给分」正交，把 coverage 也置 0 就把不给分的原因抹掉了。
+第 6 步的三条闸门都要输出 `axes[].score = null`，但 `axes[].coverage` **照实保留**——coverage 回答「这一轴读到了多少」，与「给不给分」正交，把 coverage 也置 0 就把不给分的原因抹掉了。
 
-第 8 步只覆盖 band，不覆盖 value：低覆盖 + decisive 的输出是 `value:null, band:"D", decisive:true, caps:[...]`。前端必须先看 `caps` 与 `band`，不能因为 `value` 是 null 就把整块当「未知」。
+第 8 步只覆盖 band，不覆盖 value：**低覆盖** + decisive 的输出是 `value:null, band:"D", decisive:true, caps:[...]`。前端必须先看 `caps` 与 `band`，不能因为 `value` 是 null 就把整块当「未知」。
+
+**注意第 6 步与第 8 步不再矛盾**（`sigmark-score/5`）：修复前，一个「总体覆盖够、只是声明轴盲」的 decisive 报告会同时得到 `value=null` 与 `band=D`——**抑制和压档各自都对，合起来却出版了一个自相矛盾的文档**。修复后，第 6 步的第三条闸门带上了 `&& !decisive`，于是：
+
+| 形状 | `value` | `band` | 理由 |
+| --- | --- | --- | --- |
+| 总体 coverage < 0.5（R8） | `null` | `D`（若 decisive） | **数字缺席本身就是结论**：证据不足一半，任何数字都是假精度 |
+| `weights == 0` | `null` | `D`（若 decisive） | 同上，没有轴参与平均 |
+| 声明轴盲 **且** 非 decisive | `null` | `?` | R10 的原意：不给没人看过的画面一个舒服结论 |
+| 声明轴盲 **但** decisive | **有数字** | `D` | **已经没有「舒服」可保护**；数字只剩排序键这一个用途（§13 F5） |
 
 R11（第 7 步）必须在 R5（第 8 步）之前，否则会把 D 抬成 B。
+
+**R7 排除的轴不出版 `score`（`sigmark-score/5` 补上）**：第 6 步算出 `value` 之后，还要把**被 R7 排除**的轴（`coverage < 0.5` 且无扣分）的 `axes[].score` 置 `null`。否则文档**不可复算**：三轴印出来的分数加权算回去，等于不出那个 `value`。
+
+实测（雷电 `6642e350`）：declaration 轴 coverage 0.33 被 R7 排除，若不置 `null` 就会印出 `declaration: 100`，于是三轴可见分给出 `(40×100 + 35×50 + 25×100)/100 = 82.5`，而出版的 `value` 是 **71**——审计员没有办法判断哪个数字是错的。置 `null` 之后规则统一为「**把有分的轴按权重加总，除以它们的权重**」，两种闸门下的读法完全一致。
+
+（同一个形状在仿真器基准样本上是 `87.75` vs `80`：declaration 被排除、behavior 65、usage 100。两个样本的差额都来自同一条被 R7 剔除的轴。**另记一笔**：`score.go` 与 `score_ldplayer_test.go` 的注释里都写 `82.75`，这个数字**对不上任何一个样本**（雷电应为 `82.5`，仿真器基准应为 `87.75`）。本轮只改文档、未改代码，已记入 §13.1 待修。）
 
 ### 5.7 一个可复算的轴分例子
 
@@ -621,7 +686,7 @@ R10 落地后的结果是 `value=null`、`band="?"`、`coverage=0.60`——「�
 
 - **87 与 88 没有意义**。v1 只有 10 个布尔标签、3 个状态、3 条轴；分数落在一个粗糙的离散格点上。1 分 ≈ 一次「某个标签从 insufficient 变成 not_observed」带来的 coverage 抖动。把 87/88 做成两个颜色，等于把噪声当信号。
 - **规则是公开的**。仓库里的阈值、标签、分支 code 都能被读到；导出的画像 JSON 还带 `detail`。有动机的对手可以按规则逐项满足（尤其 usage）。打分是**分诊工具**，不是对抗性证明。不要声称它「防作弊」。
-- **权重会漂移**。今天为了两个锚点调 5 分，明天为了一个新样本再调 5 分，分数就失去可比性。所以权重必须版本化：`sigmark-score/4` 固定当前这一套；任何权重、阈值、决定性清单、覆盖公式、轴归属的改动都升 `sigmark-score/5`，并让黄金测试表现为**显式 diff**，而不是静默漂移。
+- **权重会漂移**。今天为了两个锚点调 5 分，明天为了一个新样本再调 5 分，分数就失去可比性。所以权重必须版本化：`sigmark-score/5` 固定当前这一套；任何权重、阈值、决定性清单、覆盖公式、轴归属的改动都升 `sigmark-score/6`，并让黄金测试表现为**显式 diff**，而不是静默漂移。
 - **界面只给结论**。band + coverage + decisive 是主产物；`value` 放小字或排序控件里；不要给 87 和 88 两种颜色。
 
 ---
@@ -634,7 +699,7 @@ R10 落地后的结果是 `value=null`、`band="?"`、`coverage=0.60`——「�
 
 ```json
 "score": {
-  "version": "sigmark-score/4",
+  "version": "sigmark-score/5",
   "value": 77,
   "band": "B",
   "bandLabel": "有疑点",
@@ -701,7 +766,7 @@ R10 落地后的结果是 `value=null`、`band="?"`、`coverage=0.60`——「�
 | 路径 | 类型 | 空值 | 语义与稳定性 |
 | --- | --- | --- | --- |
 | `score.version` | string | 否 | 打分规则版本；与 `ruleVersion`（`sigmark-profile/9`）独立 |
-| `score.value` | int | 可 null | 0–100；仅总体 coverage ≥ 0.5 时有值 |
+| `score.value` | int | 可 null | 0–100；**三种情况为 `null`**：① R8（总体 coverage < `scoreCoverageFloor`）② `weights == 0`（没有任何轴有权重）③ 声明轴盲 **且** 非决定性（R10 严格形态）。**决定性命中不再是 `null` 的理由**（`/5` 改） |
 | `score.band` | enum | 否 | `A` / `B` / `C` / `D` / `?`；**结论** |
 | `score.bandLabel` | string | 否 | 一致 / 有疑点 / 可疑 / 高度可疑 / 未知 |
 | `score.coverage` | number | 否 | 0–1，两位小数；标签可判率，不是字段完整率 |
@@ -711,7 +776,7 @@ R10 落地后的结果是 `value=null`、`band="?"`、`coverage=0.60`——「�
 | `axes[].code` | enum | 否 | `declaration` / `behavior` / `usage` |
 | `axes[].label` | string | 否 | 中文名，仅展示 |
 | `axes[].weight` | int | 否 | 40 / 35 / 25；同一 score 版本内不变 |
-| `axes[].score` | int | 可 null | `null` 当且仅当该轴 coverage < 0.5 |
+| `axes[].score` | int | 可 null | `null` 有两种来源：① 该轴 `coverage < 0.5` **且** `deductions` 为空（R7 排除 + R10 盲轴）② 整份文档走了不给分的闸门（R8 / `weights == 0` / R10 声明轴盲）。**带扣分的薄轴不置 `null`**——它进了总分，就必须有分 |
 | `axes[].coverage` | number | 否 | 0–1，两位小数 |
 | `axes[].deductions` | array | 否 | 每标签最多 1 条（R2） |
 | `deductions[].code` | enum | 否 | 分支 code，见 §2.3 |
@@ -741,6 +806,31 @@ R10 落地后的结果是 `value=null`、`band="?"`、`coverage=0.60`——「�
 - `coverage` 的语义精度是两位小数；JSON 数值不保留尾零（`0.70` 会序列化成 `0.7`），测试按数值比较而不是字符串比较；——**已实现**（`roundScore`）
 - 所有数值用整数 + half-up，禁止浮点不确定行为。——**已实现**
 
+#### 8.3.1 文档必须可复算：R7 排除的轴不出版 `score`（`sigmark-score/5` 修复）
+
+**不变量**：把 `axes[]` 里**有 `score` 的轴**按权重加总、除以这些轴的权重之和，必须等于 `value`。这条不变量是「确定性」的一部分——一份不可复算的文档，读者无法判断是分数错了还是账本错了。
+
+**修复前这条不变量被破了两次，第二次只在模拟器数据上可见**：
+
+行为轴的 `finalizeScoreAxis` 原本在**结构通道追加之前**调用。于是那条 35 分的 `STRUCTURAL_VIRTUAL_EVIDENCE` 被追加到账本之后，**轴分早已算完、再没重算**：
+
+| 字段 | `/4` | `/5` |
+| --- | --- | --- |
+| behavior `deductions` 合计 | 35 + 15 = **50** | 35 + 15 = **50**（账本没变） |
+| behavior `score` | **85**（= 100 − 15，只减了 SELinux） | **50**（= 100 − 50） |
+| usage `score` | **88**（U2 又收了 12 分） | **100**（§10.2.1） |
+| `value` | **`null`**（被 R10 吞掉，见 §4 R10） | **71** |
+
+也就是说 `/4` 的归档报告**自己打自己**：账本列出 50 分的扣分，轴分却写 85。修复方式是把 `finalizeScoreAxis(&axis, ...)` 移到结构通道追加**之后**（[score.go:1092](../backend/cmd/sigmark/score.go#L1092)），声明轴与使用轴的调用点不变（[score.go:958](../backend/cmd/sigmark/score.go#L958)、[:1315](../backend/cmd/sigmark/score.go#L1315)）。
+
+**两个缺陷互相掩盖，这一点必须记下来**：`/4` 时期这份报告的 `value` 是 `null`，所以「轴分算错」**在总分上根本看不出来**——没有数字可以对比。它唯一的表现形式是**文档内部矛盾**（账本 50、轴分 85）。也就是说：如果只修 `finalizeScoreAxis` 而不修 R10，总分仍然印不出来，这个顺序错误会继续隐身；如果只修 R10 而不修 `finalizeScoreAxis`，报告就会出版一个**从自己的轴复算不出来**的 91。**两处必须一起修**，`/5` 才是自洽的。
+
+（`/5` 的 71 可复算：`(35×50 + 25×100)/60 = 70.83 → 71`。`/4` 若把两处都按错的状态硬算，会得到 `(35×85 + 25×88)/60 = 86.25 → 86`——但这个数字从来没有被出版过，因为 R10 把 `value` 吞了。记在这里是为了说明：**「修复前的总分是多少」这个问题没有答案**，`/4` 根本没给数。）
+
+**这个缺陷在真机上完全不可见。** 真机永远不触发结构通道（`cpu.cpuInfo` 报的是 ARM 手机 SoC、`system.boardPlatform` 不是通用串），所以那条 append 永远不发生，`finalizeScoreAxis` 的调用位置也就无所谓。只有**模拟器数据**才把这个顺序错误暴露出来。
+
+> **方法论（值得单列）**：这是「**测试样本必须包含攻击样本**」的活例证。五份黄金文件里有 Pixel 6 和 MI 8 两台真机，它们在这条缺陷上永远是绿的——不是因为代码对，是因为它们走不到那段代码。一个只由正常样本组成的回归集，会把「只在异常样本上出现」的 bug 保护起来，而不是抓住它。红队样本（雷电 / AVD）不是「额外的保险」，它们是**唯一能看见这类缺陷的眼睛**。
+
 ### 8.4 兼容与降级
 
 | 情况 | 行为 |
@@ -754,6 +844,8 @@ R10 落地后的结果是 `value=null`、`band="?"`、`coverage=0.60`——「�
 **为什么「不上色」而不是「换一套颜色」**：颜色是「我们按当前阈值认为它属于哪一档」的判断，不是数据本身。阈值可能已经变了，硬染就是用一个过期结论覆盖一个更新的事实。反过来，数字和 `band` 是后端当场算的，前端改写它们同样是撒谎。所以降级的正确形态是**保留数据、撤掉判断、明说原因**——三者缺一不可。
 
 测试锁在 `backend/web/test/score-view.test.mjs` 的四个 case：未知版本停色、缺字段按未知、当前版本不受影响（防止「降级逻辑」退化成「永远降级」）、真实仿真器样本仍走正常路径。
+
+> **当前状态警告（`sigmark-score/5` 落地时）**：前端常量仍是 `'sigmark-score/4'`（[score-view.ts:78](../backend/web/src/score-view.ts#L78)），后端已出版 `/5`。所以**此刻每一份新报告都会走「未知版本」路径**：不上色、`versionWarning` 置顶，`band` 与 `value` 仍原样透出。四个 Web 测试**全部通过**，因为它们引用的是同一个常量——**两边一起错，测试证明的只是自洽**。这不是设计问题，是常量没跟上；见 §13.1 第 13 项。
 
 ### 8.5 命名冲突提醒
 
@@ -779,7 +871,7 @@ R10 落地后的结果是 `value=null`、`band="?"`、`coverage=0.60`——「�
 
 ### 8.7 版本对应与升版规则
 
-`sigmark-score/4` 对应 `sigmark-profile/9` 与字段集 25。两者独立升版：
+`sigmark-score/5` 对应 `sigmark-profile/9` 与字段集 26。两者独立升版：
 
 | 变更 | 升 `sigmark-score` | 说明 |
 | --- | --- | --- |
@@ -789,7 +881,7 @@ R10 落地后的结果是 `value=null`、`band="?"`、`coverage=0.60`——「�
 | 新增判定信号但全库零命中（`/2` 的 U2） | **是** | 口径变了就要升版，哪怕当前数据上没翻档 |
 | **已有信号的触发条件收紧 / 放宽但全库零命中**（`/3` 的一侧身份不对称） | **是** | 同上：契约与命中数无关。全库 23 份零漂移，照样升版 |
 | **新增一条绕开标签表、直接读 `parameters` 的扣分通道**（`/4` 的结构性虚拟证据） | **是**，但**不必**升 `sigmark-profile` | 标签层一个字没改（10 个标签、三态、证据行形状全不变），所以 `profileVersion` 不动；但它新增 35 分 + 决定性 cap，会移动 band |
-| 字段集新增，但 `sigmark-score/4` 不读 | 否 | 例如 v26 的新 usage 字段未启用 |
+| 字段集新增，但 `sigmark-score/5` 不读 | 否 | 例如 v26 的 `system.bootQemu`（已归档，尚无判据读它） |
 | `detail` 文案润色 | 否 | 语义黄金不变；文本快照更新并在 PR 说明 |
 | 旧报告缺字段 | 否 | 这是 `NOT_ARCHIVED` 的正常结果，不是规则变更 |
 
@@ -850,6 +942,25 @@ Pixel 6 的预期数字（按 R1–R11，行为轴干净、使用轴干净）：
 
 **第四次为什么必须升 `sigmark-score` 却不必升 `sigmark-profile`**：`STRUCTURAL_VIRTUAL_EVIDENCE` 不是新标签，也不是既有标签的状态映射变了——它是一条**在标签表之外、直接读 `parameters` 的扣分通道**。`profileSignals` 的 10 个标签、三态定义、证据行形状**一个字都没改**，所以 `profileVersion` 保持 `/9`。这条区分很重要：**升版看的是「哪一层变了」，不是「这次改得大不大」。**
 
+**第五次复核：升 `sigmark-score/5` 后（2026-11-26）**：报告库仍是 **24 份**，全部返回 `version=sigmark-score/5`，`ruleVersion` 仍 `sigmark-profile/9`。**两台真机（Pixel 6 `867ad26e`、MI 8 `77e577c1`）逐份零漂移**——这正是这两处修复应当有的形状，因为它们只碰模拟器数据。
+
+**漂移集中在雷电报告 `6642e350`（字段集 25）**，逐项实测：
+
+| 字段 | `/4` | `/5` | 变化原因 |
+| --- | --- | --- | --- |
+| `value` | `null` | **71** | R10 收紧为 `declarationBlind && !Decisive` |
+| `band` | D | **D** | 未变——决定性 cap 本来就钉在 D |
+| `coverage` | 0.73 | **0.73** | 未变——U2 抑制不动可判性 |
+| declaration 轴 | `score=null`, cov 0.33 | `score=null`, cov 0.33 | 未变（R7 排除，`/5` 只是确保它不印分） |
+| behavior 轴 | **85**（账本却是 50） | **50** | `finalizeScoreAxis` 移到结构通道追加之后 |
+| usage 轴 | **88**（U2 扣 12） | **100** | 虚拟化已确认，`FRESH_BOOT_ON_AGED_ROM` 不重复计费 |
+
+`/4` 时期这份报告**自相矛盾**：账本列出 35 + 15 = 50 分的扣分，轴分却写 85（= 100 − 15）。`/5` 之后账本与轴分一致，`value` 也可从印出来的轴复算：`(35×50 + 25×100)/60 = 70.83 → 71`。**`band` 一次都没有变**——所以 `/5` 修的是「账本与分数的一致性」，不是判级标准。
+
+**另一份雷电报告 `ce1bdc7f`（字段集 20）只受 `finalizeScoreAxis` 顺序影响**：它的结构通道同样命中，所以行为轴分同样比 `/4` 低 35 分（一条 35 分的扣分从「没进计算」变成「进了计算」）。`band` 仍是 D、`decisive` 仍是 true，这两项都不动。
+
+**为什么 `sigmark-score/5` 仍然不升 `sigmark-profile`**：两处修复都不碰标签层。R10 的例外读的是 `out.Decisive`（score 层已有的事实）；U2 抑制读的是 `virtualEvidenceConfirmed`，它复用**已有的**黑名单标签与**已有的**结构通道读数函数，没有新增标签、没有改三态语义。字段层也没有新增必需键——`system.bootQemu` 是字段集 26 的新增，但 `/5` 的判据**不读它**（见 §13 F19）。
+
 **U2 在生产报告库的命中数 = 0**，原因有据可查：Pixel 6 的 `initialSdk=33`（2022）但 `bootCount=86`；MI 8 的 `initialSdk=27`（2017）但 `bootCount=56`。两台真机的开机次数都远大于 `usageFreshBootCeiling(2)`，所以 U2 正确地没有触发。**U2 是新增覆盖，不是收紧口径**——这也是它对现有 23 份样本零影响的原因。**但「生产库 0 命中」不等于「没有阳性样本」**：仿真器上已实测到 1 份，且它暴露了真实的误报风险，见 §9.5 与 §10.2。
 
 **关键结论**：没有任何一份伪装报告落 A，没有任何一份干净报告落 C/D。旧字段集落 `?` 是因为当时确实没采到声明通道，这是诚实降级，不是误判。
@@ -896,7 +1007,7 @@ Pixel 6 的预期数字（按 R1–R11，行为轴干净、使用轴干净）：
 2. **看分布**：各标签的 hit / not_observed / insufficient 比例；有多少报告能凑够「声明 + 行为」两轴 coverage ≥ 0.5；旧字段集报告的 `?` 占比。
 3. **定约束**：把 §9.2 的 9 条作为不等式，求一组标称分。若不止一组解，取最接近规格建议值的那组。
 4. **敏感性**：每个标称分 ±5，检查约束是否翻转。翻转说明该数字没有被数据支撑，标记为「待标定」。
-5. **冻结当前版本**（`sigmark-score/4`），生成黄金测试，最后才接 UI。
+5. **冻结当前版本**（`sigmark-score/5`），生成黄金测试，最后才接 UI。
 
 回算是只读批处理：分页读 `reports`，逐份计算，输出 JSON/CSV，不写库、不改报告。注意 `backend/scripts/qa_device_profile.py` 目前是过期的（断言字段集 21 / `sigmark-profile/5`，[HANDOFF.md:106](HANDOFF.md)），回算脚本不能复用它，得先修或另写。
 
@@ -1015,8 +1126,8 @@ Pixel 6 的预期数字（按 R1–R11，行为轴干净、使用轴干净）：
 
 | 信号 | 判定 | keys | 实现状态 |
 | --- | --- | --- | --- |
-| `U1` 计数 vs 镜像年龄 | `bootCount ≤ 2` 且 `captureYear − min(partitionBuildDates 的年份) ≥ 3` | `system.bootCount`、`system.partitionBuildDates` | **已实现**（`usageAxis`，[score.go:1184](../backend/cmd/sigmark/score.go#L1184)） |
-| `U2` 计数 vs 世代年龄 | `bootCount ≤ 2` 且 `initialSdk` 对应年份 ≤ `captureYear − 3` | `system.bootCount`、`system.initialSdk` | **已实现**（`sigmark-score/2`；比较在 [score.go:1185](../backend/cmd/sigmark/score.go#L1185) 的 `agedDevice`，年份映射的失败分支在 [score.go:1167](../backend/cmd/sigmark/score.go#L1167)） |
+| `U1` 计数 vs 镜像年龄 | `bootCount ≤ 2` 且 `captureYear − min(partitionBuildDates 的年份) ≥ 3` | `system.bootCount`、`system.partitionBuildDates` | **已实现**（`usageAxis`，[score.go:1288](../backend/cmd/sigmark/score.go#L1288)） |
+| `U2` 计数 vs 世代年龄 | `bootCount ≤ 2` 且 `initialSdk` 对应年份 ≤ `captureYear − 3` | `system.bootCount`、`system.initialSdk` | **已实现**（`sigmark-score/2`；比较在 [score.go:1289](../backend/cmd/sigmark/score.go#L1289) 的 `agedDevice`，年份映射的失败分支在 [score.go:1254](../backend/cmd/sigmark/score.go#L1254)） |
 
 **两个信号是两条独立的检查，不是互斥分支。** 这一条必须写死，因为写错会静默废掉 U2：早先的实现用 `else if` 把它们串起来，于是「分区日期可读」时 U2 永远不触发——而那正是 U2 存在的场景（镜像很新、设备很老）。现在的写法是两条独立的布尔量：
 
@@ -1035,9 +1146,9 @@ case agedDevice: …  // 只在 U1 不成立时用 U2
 
 历史背景：`/1` 要求 `bootCount` 与 `partitionBuildDates` 两个字段都 AVAILABLE。只读到一个字段是 0.5，正好等于 R7 的下界，那会给一条判不了任何东西的轴发一个未挣得的 100——这是 §5.2 与 §13 F0 R-3 明确修掉的。
 
-日期比较用采样时间 `capturedAtEpochMs` 的 UTC 日期，**按年份粒度**：`cutoff = captureYear − usageAgedRomYears(3)`（[score.go:1219](../backend/cmd/sigmark/score.go#L1219) 的 `usageAgedRomCutoff`），再要求最早分区年份（U1）或出厂 API 年份（U2）`≤ cutoff`。所以「3 年」是**年差 ≥ 3**，不是 1095 天——闰年与月日不参与比较。报告没有可用采样时间时回落到固定年份 2021（`usageAgedRomFallbackYear`，[score.go:190](../backend/cmd/sigmark/score.go#L190)），让历史 fixture 的落点不因窗口改成相对而翻档。`partitionBuildDates` 的格式是 `system 2021-03-01 · vendor 2021-03-01`（[protocol.go:218](../backend/cmd/sigmark/protocol.go#L218)），取最早日期，不按分区名加权；解析失败就记 `UNPARSEABLE_PARTITION_DATES`（见 §4 R4），不猜。
+日期比较用采样时间 `capturedAtEpochMs` 的 UTC 日期，**按年份粒度**：`cutoff = captureYear − usageAgedRomYears(3)`（[score.go:1327](../backend/cmd/sigmark/score.go#L1327) 的 `usageAgedRomCutoff`），再要求最早分区年份（U1）或出厂 API 年份（U2）`≤ cutoff`。所以「3 年」是**年差 ≥ 3**，不是 1095 天——闰年与月日不参与比较。报告没有可用采样时间时回落到固定年份 2021（`usageAgedRomFallbackYear`，[score.go:219](../backend/cmd/sigmark/score.go#L219)），让历史 fixture 的落点不因窗口改成相对而翻档。`partitionBuildDates` 的格式是 `system 2021-03-01 · vendor 2021-03-01`（[protocol.go:219](../backend/cmd/sigmark/protocol.go#L219)），取最早日期，不按分区名加权；解析失败就记 `UNPARSEABLE_PARTITION_DATES`（见 §4 R4），不猜。
 
-**`initialSdk` 的年份对照表已经实现了**（`sigmark-score/2`）。表在 `usageSdkYears`（[score.go:217](../backend/cmd/sigmark/score.go#L217)），解析函数是 `usageSdkYear`（[score.go:223](../backend/cmd/sigmark/score.go#L223)）：
+**`initialSdk` 的年份对照表已经实现了**（`sigmark-score/2`）。表在 `usageSdkYears`（[score.go:246](../backend/cmd/sigmark/score.go#L246)），解析函数是 `usageSdkYear`（[score.go:252](../backend/cmd/sigmark/score.go#L252)）：
 
 | `initialSdk` | 26、27 | 28 | 29 | 30 | 31、32 | 33 | 34 | 35 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -1062,8 +1173,35 @@ case agedDevice: …  // 只在 U1 不成立时用 U2
 - `bootCount = 1200` + 分区建于 2018 → **正常**，0 分。
 - `bootCount = 2` + 分区建于 2021 → **可疑但不违法**：可能是刚恢复出厂。使用轴扣 **12** 分（轴分 88），总分 **97/B**，`detail` 写「先核对是否恢复出厂或刷机」。
 - `bootCount = 2` + 分区建于 2024（新）+ `initialSdk = 33`（2022）→ 两个信号都不老，**判了且干净**，0 分。这是 `/2` 放宽可判集带来的新结论，`/1` 时代它也是 0 分，但当时是「判不了」。
-- **全新 AVD / 刚重置的真机 + 老镜像** → **U2 会命中并扣 12 分，而这不是伪装**。仿真器上已实测（android-34 AVD，`first_api_level=34`、`boot_count=2`、2026 采集年 → usage 轴 88 分）；真机上同样形状只是推理。**这一条不能当成「隐藏使用痕迹」的证据**，详见 §9.5「已知误报风险：老镜像新实例」。
+- **全新 AVD / 刚重置的真机 + 老镜像** → **U2 会命中并扣 12 分，而这不是伪装**。仿真器上已实测（android-34 AVD，`first_api_level=34`、`boot_count=2`、2026 采集年 → usage 轴 88 分）；真机上同样形状只是推理。**这一条不能当成「隐藏使用痕迹」的证据**，详见 §9.5「已知误报风险：老镜像新实例」。**`sigmark-score/5` 起，这一格被单向抑制，见 §10.2.1。**
 - `bootCount` 在同资产历史里从 900 掉到 2，且分区日期没变 → **真正的矛盾**（计数器被打回）。v1 的 30 天窗口与「只算采样前」的 SQL（[device_profile.go:353](../backend/cmd/sigmark/device_profile.go#L353)）不一定能覆盖到，列为 v2。
+
+#### 10.2.1 虚拟设备上不计这 12 分（`sigmark-score/5` 新增）
+
+上面那条「全新 AVD / 老镜像 → U2 命中扣 12 分」在 `/5` 里被**单向抑制**掉了。
+
+**规则**：`FRESH_BOOT_ON_AGED_ROM` 在**虚拟化已被独立通道确认**时不再计分。判定函数 `virtualEvidenceConfirmed(labels, parameters)`（[score.go:1103](../backend/cmd/sigmark/score.go#L1103)），**任一**通道确认为真即可：
+
+| 通道 | 判据 | 出处 |
+| --- | --- | --- |
+| 黑名单标签 | `virtual_build_markers` 标签 `state == "hit"` | `scoreLabelByCode` 读**已算好的标签**，不重新推导 |
+| 结构通道 | `STRUCTURAL_VIRTUAL_EVIDENCE` 命中（`cpu.cpuInfo` 或 `system.boardPlatform`） | [score.go:1113](../backend/cmd/sigmark/score.go#L1113) 的 `structuralVirtualRead`，与扣分通道**共用同一个读数函数** |
+
+**为什么**（一因一果，R2）：
+
+> 「镜像的 `first_api_level` 与系统镜像不一致」**就是**模拟器的定义，不是伪装。
+>
+> 雷电 `6642e350`：`initialSdk = 28`（Android 9 世代）配 android-14 镜像、`bootCount = 2`。这不是「有人把老机器的计数器打回去了」，而是 **AVD 的正常形态**——`ro.product.first_api_level` 由构建镜像决定，新实例本来就从 `bootCount` 1–2 开始。
+>
+> 同一个「这是模拟器」的事实，behavior 轴已经用 35 分 + 决定性 cap 收过费了。**不能再收一次 12 分**——否则模拟器因为「看起来像刚装的系统」被扣分，而它本来就是刚装的。
+
+**三条关键约束（防滥用的核心，缺一条就变漏洞）**：
+
+1. **单向**：只看「虚拟化是否已被独立通道确认」。**声称自己是模拟器要付 35 分 + D 档**，所以没有攻击者能靠这条路逃掉 12 分——他要先接受 35 分的 D。
+2. **抑制的是定价，不是可判性**：`decided` 仍为 1、usage `coverage` 仍为 **1.00**、`undetermined` 一行不变。否则模拟器的 coverage 会被悄悄拉低，可能掉到 `scoreCoverageFloor` 以下，**变成借修复之名改形状**。「说得出」和「收了钱」是两件事，只抑制后者。
+3. **真机上这条规则照常工作**：`TestUsageFreshBootStillFiresOnRealHardware` 用**与雷电完全相同的 usage 读数**（`bootCount 2` / `initialSdk 28` / 同一批分区日期）配一颗真机 SoC 画像，断言 12 分**照扣**。双向测试是这条修复能被接受的前提。
+
+**实测**（雷电 `6642e350`）：usage 轴 **88 → 100**，`deductions` 清空，`coverage` 仍是 **1.00**（没有被压低）。
 
 ### 10.3 为什么它单独到不了 C/D
 
@@ -1075,15 +1213,19 @@ value = (40×100 + 35×100 + 25×88) / 100 = 97 → 97 落在 A 区间，但有�
 
 即使另外两轴全 100，最多 **97/B**。要落 C/D，必须声明轴或行为轴也有命中。这是「只能佐证」的算术表达。
 
+**`/5` 之后这条算术仍然成立，但适用范围要收窄一句**：上面这 12 分只在**未被确认为虚拟设备**时收。一台已被确认为模拟器的机器，usage 轴直接 100——**这不是给它加分，是不重复收同一笔钱**（§10.2.1）。
+
 > 注意：这里**不能**写成 `100×(25−15)/25 = 40` 那种按轴权重归一化的算法。那是 §13 F3 明文否掉的读法（会把一条 hook 命中放大成轴分 29），本节曾经留着它，现已删除。
 
-### 10.4 v1 不加字段；v26 的候选
+### 10.4 v1 不加字段；v27 的候选
 
 v1 只读三个已归档字段：`system.bootCount`（字段集 20，[protocol.go:88](../backend/cmd/sigmark/protocol.go#L88)）、`system.partitionBuildDates`（字段集 17，[protocol.go:99](../backend/cmd/sigmark/protocol.go#L99)）、`system.initialSdk`（字段集 18）。这些已经在 v25 的 235 个静态键里，**不需要客户端改动**。
 
 已归档但 v1 不启用的第三个信号：`battery.cycleCount`（字段集 16 起归档，[protocol.go:87](../backend/cmd/sigmark/protocol.go#L87)；Android 14+ 才有值，[field_dictionary.go:65](../backend/cmd/sigmark/field_dictionary.go#L65)）。它不会随恢复出厂归零（换电池可能改变），比 `bootCount` 更抗重置；但目前只有 API 34+ 有值，覆盖率不够，先留作 v2 候选，不改字段集。
 
-v26 的候选必须逐项单独决策，不能因为「能采」就采：
+> **字段集 26 已经落地**（本轮），但**不是这一节加的**：它只新增了 `system.bootQemu`（[protocol.go:96](../backend/cmd/sigmark/protocol.go#L96) 的 `{"system", "bootQemu", 26}`，`maxFields` 新增 `>= 26 → 260` 档，[protocol.go:578](../backend/cmd/sigmark/protocol.go#L578)），词典随之升到 `sigmark-lan-fields/17`。**`sigmark-score/5` 不读这个键**——它的判据仍然是结构通道与黑名单。所以「字段集升版」与「打分升版」在这里是两件独立的事：前者是采集面，后者是判据面。`bootQemu` 进归档但没人读它，这件事记在 §13.1 第 1a 项。
+
+**v27 的候选**必须逐项单独决策，不能因为「能采」就采：
 
 | 候选 | 采集方式 / 成本 | 暴露什么 | 为什么必须单独决策 |
 | --- | --- | --- | --- |
@@ -1292,8 +1434,8 @@ v26 的候选必须逐项单独决策，不能因为「能采」就采：
   3. **§8.4 前端 `version` 降级**。`scoreView()` 之前完全不读 `version`。现在不认识就**不上色**（`tone` 强制为 `unknown`）、数字和 band 原样透出（那是后端算的，前端不许改写）、并给出 `versionWarning`，`score-panel.tsx` 置顶显示。缺 `version` 字段同样按未知处理——旧后端不写这个字段，默认它和当前前端一致是错误假设。
 
 - **第四处：U2 已落地（`sigmark-score/2`，2026-11-26）**：
-  - **实现了什么**：`usageSdkYears` 年份表 + `usageSdkYear()` 解析（[score.go:217](../backend/cmd/sigmark/score.go#L217)、[:223](../backend/cmd/sigmark/score.go#L223)）；`usageAxis` 里 U1/U2 改成两条独立检查（[score.go:1184](../backend/cmd/sigmark/score.go#L1184)、[:1185](../backend/cmd/sigmark/score.go#L1185)，合并处 [score.go:1186](../backend/cmd/sigmark/score.go#L1186) 的 `switch`）；可判条件放宽为「`bootCount` 可用 且（分区日期可用 或 SDK 世代可用）」（[score.go:1106](../backend/cmd/sigmark/score.go#L1106)）；新增两个 reason `UNMAPPED_SDK_LEVEL` / `UNPARSEABLE_PARTITION_DATES`（[score.go:1184](../backend/cmd/sigmark/score.go#L1184)、[:1161](../backend/cmd/sigmark/score.go#L1161)）。详见 §10.1 与 §4 R4。
-  - **升版**：`/1` → `/2`（[score.go:51](../backend/cmd/sigmark/score.go#L51)）。口径变了就要升版，哪怕当前数据上零翻档。
+  - **实现了什么**：`usageSdkYears` 年份表 + `usageSdkYear()` 解析（[score.go:246](../backend/cmd/sigmark/score.go#L246)、[:252](../backend/cmd/sigmark/score.go#L252)）；`usageAxis` 里 U1/U2 改成两条独立检查（[score.go:1288](../backend/cmd/sigmark/score.go#L1288)、[:1289](../backend/cmd/sigmark/score.go#L1289)，合并处 [score.go:1290](../backend/cmd/sigmark/score.go#L1290) 的 `switch`）；可判条件放宽为「`bootCount` 可用 且（分区日期可用 或 SDK 世代可用）」（[score.go:1279](../backend/cmd/sigmark/score.go#L1279)）；新增两个 reason `UNMAPPED_SDK_LEVEL` / `UNPARSEABLE_PARTITION_DATES`（[score.go:1270](../backend/cmd/sigmark/score.go#L1270)、[:1260](../backend/cmd/sigmark/score.go#L1260)）。详见 §10.1 与 §4 R4。
+  - **升版**：`/1` → `/2`（[score.go:67](../backend/cmd/sigmark/score.go#L67)）。口径变了就要升版，哪怕当前数据上零翻档。
   - **落地时修掉一个自己写的缺陷（值得记下来）**：第一版用 `else if` 把 U1、U2 串起来，于是「分区日期可读」时 U2 **永不触发**——而那正是 U2 存在的场景（镜像新、设备老）。改判定不是「加个分支」，而是先想清楚两个信号是**独立检查**还是**互斥备选**；这里必须是独立检查，再在合并处用 `switch` 保证一因一果只扣一次。同一类错误在 §4 R4 的 `unset` 抢跑里已经犯过一次，两次都是「顺序写错，静默废掉一条通道」。
   - **验证到哪一步**：23 份生产库全库回算，`version` 全为 `/2`，band/value/coverage 逐份未变，**生产库 U2 命中 0**（理由见 §9.1.1）；**仿真器上 1 份实测阳性**（android-34 AVD，`first_api_level=34`→2023、`boot_count=2`、2026 采集年，`cutoff=2023`，正好压边界，usage 轴 100 → **88**）。测试：`score_usage_u2_test.go` 9 个 + `score_emulator_u2_test.go` 2 个 + 5 份黄金文件（diff 只有 `version` 一行）。
   - **仍未验证的部分（两件事，不要合成一句）**：① **真机阳性样本一份都没有**——仿真器能命中是因为它是「新实例 + 老镜像」，那是最容易造的形状，不是最需要验的形状；② **老镜像新实例存在误报面**（全新 AVD / 刚重置的真机会被扣 12 分，且真机上没有决定性 cap 兜底）。详见 §9.5「已知误报风险：老镜像新实例」。
@@ -1357,7 +1499,7 @@ v26 的候选必须逐项单独决策，不能因为「能采」就采：
 | 3 | 两侧都不可用（都空 / 都是占位符） | 真的读不到，是设备或采集的限制，不是篡改。**攻击者清空一侧时，另一侧仍然可读**——所以「两侧都空」不是这个攻击的形状 |
 | 4 | 以上都不满足才判 `hit` | 只有「两侧 AVAILABLE + 恰一侧为空」这一种组合算证据 |
 
-命中时附一行证据 `identity_asymmetry`（[device_profile.go:266](../backend/cmd/sigmark/device_profile.go#L266)），值为「**N 对身份读数只有一侧可读（共 M 对在档）**」；cap 的 reason 也用这句（`identityAsymmetryDetail`，[score.go:953](../backend/cmd/sigmark/score.go#L953)；消费点 [score.go:854](../backend/cmd/sigmark/score.go#L854)）。
+命中时附一行证据 `identity_asymmetry`（[device_profile.go:266](../backend/cmd/sigmark/device_profile.go#L266)），值为「**N 对身份读数只有一侧可读（共 M 对在档）**」；cap 的 reason 也用这句（`identityAsymmetryDetail`，[score.go:1004](../backend/cmd/sigmark/score.go#L1004)；消费点 [score.go:892](../backend/cmd/sigmark/score.go#L892)）。
 
 **措辞是有意的**：只写**观察到了什么**，不写「被篡改」。打分不能知道那是 ROM 的怪癖还是一个被删掉的属性——它能说的只有「同一份声明的两侧都被读成功了，但只有一侧给出了值」。剩下那一步留给读报告的人。
 
@@ -1408,25 +1550,25 @@ v26 的候选必须逐项单独决策，不能因为「能采」就采：
 - **同一个病在同一轮里出现了五次**，五次都靠**换判据**才修好，一次也没靠「再检查一遍」：
   1. **行号只查非空** → 6 处指向同文件另一条语句。换成「该行是不是那个东西」。
   2. **洗白实验用了自带噪声的基线**（`score_redteam_overlay_test.go` 用 `pixel6Evidence()`）→ 得出「82/D，洗白无效」，**结论作废**：Pixel 6 自带 `FOREIGN_PROFILE`(30) 与 overlay 不一致(15)，那 82/D 跟洗白无关。换成「基线是否真的干净」。
-  3. **测试计数没写清口径** → `^=== RUN   Test` 把子测试 `TestXxx/sub` 也算进顶层，得出 197 个「顶层测试」（真实是 146 顶层 + 70 子测试 = 216 个 `RUN` 行），又手算出 201。换成「数 `--- PASS/SKIP/FAIL` 行」才对齐。
+  3. **测试计数没写清口径** → `^=== RUN   Test` 把子测试 `TestXxx/sub` 也算进顶层，得出 197 个「顶层测试」（真实是 146 顶层 + 70 子测试 = 216 个 `RUN` 行（`/4` 时代口径；`/5` 后为 167 顶层 + 70 子测试 = 237 个 `RUN` 行）），又手算出 201。换成「数 `--- PASS/SKIP/FAIL` 行」才对齐。
   4. **结果自洽 ≠ 基线干净**（最隐蔽的一次）。第二次洗白实验拿到 88/B → 78/D → 88/B，三个数字互相自洽、变化方向也合理，看着完全可信。但基线**本来就不是干净的**：`kernelMemTotal=7.44 GiB` 对 `totalRam=12.00 GiB` 是 **38% 离散度**，超过 8% 阈值，触发 `ram_dispersion` 的 `HARDWARE_CHANNEL_CONFLICT` 30 分。基线带着一条声明轴扣分，R11 就**保证它永远到不了 A**——所以「洗白只到 B」是**fixture 决定的**，不是规则挡住的。这个结论是红队**从 value 反推权重**发现的：`88 = 40×70/100 + 35 + 25`，那个 70 分只能来自一条 30 分扣分。判据换成「**基线必须先独立验证干净**」——现在决定性实验的第一句断言就是 `if clean.Band != bandA || *clean.Value != 100 { Fatalf }`。
-  5. **链接能打开 ≠ 标签说的是同一件事**（本轮新发现，也是本文积了四轮的旧账）。每次行号重定位都只改了 href，**方括号里的可见数字没跟着改**——于是全文有 **80 余处** 形如 `[score.go:33](…#L51)` 的引用：「点进去是对的，但读者看到的是旧行号」。它一直没被发现，因为**验证脚本只检查 href 能否解析**，从来没人读标签。换成「**标签必须等于 href**」之后，用一条正则一次性对齐（现在 0 处不一致）。**这条特别值得记：文档的读者看的是标签，不是 href。**
+  5. **链接能打开 ≠ 标签说的是同一件事**（本轮新发现，也是本文积了四轮的旧账）。每次行号重定位都只改了 href，**方括号里的可见数字没跟着改**——于是全文有 **80 余处** 形如 `[score.go:33]` 指向 `#L51` 的引用：「点进去是对的，但读者看到的是旧行号」。它一直没被发现，因为**验证脚本只检查 href 能否解析**，从来没人读标签。换成「**标签必须等于 href**」之后，用一条正则一次性对齐（现在 0 处不一致）。**这条特别值得记：文档的读者看的是标签，不是 href。**
 - **五条其实是同一条**：**用了一个不足以支撑结论的判据，然后把它当成验证**。非空≠对、有样本≠干净、有数字≠有口径、自洽≠干净、可点击≠已同步。
 - **第四条最隐蔽，第五条最普遍**：第四条的错误**没有外部症状**（长得和正确结果一模一样，只能从结果反推原因）；第五条的错**有症状但没人看**（每一处都在正文里明晃晃地错着，四轮都没人发现，因为所有人——包括验证脚本——只看 href）。**当一个实验的结果恰好符合预期时，最该问的是「这个结果有没有可能被别的东西决定」；当一处引用点得开时，最该问的是「读者看到的那个数字对了吗」。**
 
 - **因此定四条硬规矩**（前两条已写进 §14）：
-  1. **口径必须写在数字旁边**：写「**146 个顶层测试（含子测试共 216 个 `RUN` 行）**」，不写「216 个测试」。只写一个数字，下一个人无法判断它是哪种口径——第 3 次出错就是这么来的。
+  1. **口径必须写在数字旁边**：写「**167 个顶层测试（含子测试共 237 个 `RUN` 行）**」，不写「237 个测试」。只写一个数字，下一个人无法判断它是哪种口径——第 3 次出错就是这么来的。
   2. **测试数字必须来自一条可复现的命令，不是某次运行的记忆**。本文所有测试数字的口径固定为：
 
      ```
      go test -v -count=1 ./cmd/sigmark
      ```
 
-     **数 `--- PASS:` / `--- SKIP:` / `--- FAIL:` 行**（顶层测试，各自只出现一次），**不数 `=== RUN`**（含子测试，会多算）。本文当前口径：143 PASS + 3 SKIP = **146 个顶层测试**，`RUN` 行 216 个（146 顶层 + 70 子测试）。
+     **数 `--- PASS:` / `--- SKIP:` / `--- FAIL:` 行**（顶层测试，各自只出现一次），**不数 `=== RUN`**（含子测试，会多算）。本文当前口径：164 PASS + 3 SKIP = **167 个顶层测试**，`RUN` 行 237 个（167 顶层 + 70 子测试）。
   3. **任何「对照实验」必须先证明对照组是干净的，再谈差异**。而且这个证明要写成测试里的**前置断言**，不能写在实验者的脑子里——第 4 次出错时，实验者本人是相信基线干净的。
   4. **改行号时必须同时改标签，并用脚本校验「标签 == href」**。人眼读的是方括号里的字，href 只是跳转目标——只对一半等于没对。
 
-- **为什么这条值得单列一节**：**测试数字是本文唯一会被别人直接引用、且不会被重新推导的东西**。规则写错了会有人算一遍，行号漂了会有人打开看，但「146 个测试」别人只会照抄。它错了，错误会原样传播下去，而且永远不会被发现。
+- **为什么这条值得单列一节**：**测试数字是本文唯一会被别人直接引用、且不会被重新推导的东西**。规则写错了会有人算一遍，行号漂了会有人打开看，但「167 个测试」别人只会照抄。它错了，错误会原样传播下去，而且永远不会被发现。
 
 ### F17 35 分的决定性规则被三行属性改写绕过 —— **已修（`sigmark-score/4` 的结构性证据）**
 
@@ -1505,9 +1647,9 @@ ro.product.brand     = realme，但四个 fingerprint 全是 Xiaomi/unicorn/unic
 
 #### 计分：同分、同决定性、与黑名单互斥
 
-- `structuralVirtualPoints = 35`（[score.go:150](../backend/cmd/sigmark/score.go#L150)），与 `VIRTUAL_BUILD_MARKERS` 同分、同决定性。
-- **互斥**：`structuralVirtualDeduction(parameters, markerHit)` 在 `markerHit == true` 时直接返回 false（[score.go:1044](../backend/cmd/sigmark/score.go#L1044)）。理由是一因一果（R2）——同一次「这是模拟器」不该收两次钱，而且黑名单命中时它的 detail 更直白，留给它。
-- 扣分码 **`STRUCTURAL_VIRTUAL_EVIDENCE`**，走同一个 **`DECISIVE_VIRTUAL_BUILD`** cap（[score.go:1031](../backend/cmd/sigmark/score.go#L1031)）。
+- `structuralVirtualPoints = 35`（[score.go:179](../backend/cmd/sigmark/score.go#L179)），与 `VIRTUAL_BUILD_MARKERS` 同分、同决定性。
+- **互斥**：`structuralVirtualDeduction(parameters, markerHit)` 在 `markerHit == true` 时直接返回 false（[score.go:1133](../backend/cmd/sigmark/score.go#L1133)）。理由是一因一果（R2）——同一次「这是模拟器」不该收两次钱，而且黑名单命中时它的 detail 更直白，留给它。
+- 扣分码 **`STRUCTURAL_VIRTUAL_EVIDENCE`**，走同一个 **`DECISIVE_VIRTUAL_BUILD`** cap（[score.go:1069](../backend/cmd/sigmark/score.go#L1069)）。
 - 扣分挂在行为轴（`axisBehavior`），因为它是**对设备自述的实测反驳**，不是声明轴的自我矛盾。
 
 #### detail 只写观察，不写结论
@@ -1586,7 +1728,7 @@ cma_total      (memory.cmaTotal)
 
 `unregistered_soc:` 条目和真实冲突 basis **共用同一个 `Basis` 切片**，而 `declarationAxis` 对非 overlay 的 basis 按 **30 分**（`HARDWARE_CHANNEL_CONFLICT`）计价。如果不在那里排除这个前缀，**每一台未登记设备都会开始为一次从未发生的比较付 30 分**——正好是所修 bug 的反面，而且更坏：前者是「少报了」，后者是「凭空扣分」。
 
-所以 `nonOverlayBasis`（[score.go:698](../backend/cmd/sigmark/score.go#L698)）新增排除 `unregistered_soc:` 前缀（[score.go:709](../backend/cmd/sigmark/score.go#L709)）。**省略不是矛盾**——这一句就是排除的全部理由。
+所以 `nonOverlayBasis`（[score.go:749](../backend/cmd/sigmark/score.go#L749)）新增排除 `unregistered_soc:` 前缀（[score.go:760](../backend/cmd/sigmark/score.go#L760)）。**省略不是矛盾**——这一句就是排除的全部理由。
 
 #### 验证
 
@@ -1603,16 +1745,61 @@ cma_total      (memory.cmaTotal)
 
 注册表还是只有 6 条 SoC。修完之后，一台未登记设备的硬件轴仍然**什么都没比**——只是现在它会**自己说出这一点**。所以这条的定位必须写准：**它把「静默的盲区」变成了「可见的盲区」，盲区本身还在。** 见 §13 未决清单第 2 条。
 
+### F19 两条「文档自相矛盾」类缺陷 —— **已修（`sigmark-score/5`）**
+
+这两条与 F17/F18 不是同一类。F17/F18 修的是**判据被绕过**（漏判），F19 修的是**出版出来的文档不可信**（自相矛盾）。后者更隐蔽：它不影响「这台设备该判几档」，只影响「读者能不能相信这份报告」。
+
+#### F19-a：决定性命中仍然吞掉 `value`
+
+见 §4 R10 第一层。抑制条件从裸的 `declarationBlind` 收紧为 `declarationBlind && !out.Decisive`（[score.go:470](../backend/cmd/sigmark/score.go#L470)）。
+
+**判据依据**：R10 的目的是「别给没人看过的画面一个**舒服**的结论」。决定性 cap 已经把 band 钉在 D，舒服的东西不存在了；此时 `value` 的唯一用途是排序键（§13 F5 明文要求决定性命中保留它）。
+
+**没有放宽的部分**：R8（总体 coverage < 地板）与 `weights == 0` 仍然无条件吞数字。那两处「没有数字」本身就是结论。
+
+#### F19-b：`FRESH_BOOT_ON_AGED_ROM` 对模拟器重复计费
+
+见 §10.2.1。虚拟化被独立通道确认时不再收这 12 分（[score.go:1287](../backend/cmd/sigmark/score.go#L1287) 的 `&& !virtualized`）。
+
+**判据依据**：一因一果（R2）。「镜像 `first_api_level` 与系统镜像不一致」是模拟器的**定义**，不是伪装；同一个「这是模拟器」的事实已经由 behavior 轴 35 分 + 决定性 cap 收过费。
+
+**三条防滥用约束**：单向（声称是模拟器要付 35 分 + D）、只抑制定价不抑制可判性（`decided` 仍 1、coverage 仍 1.00）、真机不受影响（`TestUsageFreshBootStillFiresOnRealHardware` 双向锁）。
+
+#### F19-c：`finalizeScoreAxis` 的顺序让 35 分没进轴分
+
+见 §8.3.1。行为轴的 `finalizeScoreAxis` 原本在结构通道追加**之前**调用，于是那 35 分进了账本、没进轴分：账本写 50、轴分写 85。修复是把调用移到追加之后（[score.go:1092](../backend/cmd/sigmark/score.go#L1092)）。
+
+**为什么这一条最值得记**：**它在真机上永远不可见**。真机不触发结构通道，那段 append 从不发生。五份黄金文件里的 Pixel 6 与 MI 8 在这条缺陷上永远是绿的——不是因为代码对，是因为它们走不到那行。**一个只由正常样本组成的回归集，会保护「只在异常样本上出现」的 bug。**
+
+#### F19 的方法论：两条缺陷互相掩盖
+
+`/4` 时期，F19-a 把 `value` 吞掉了，于是 F19-c 造成的「轴分算错」**在总分上根本看不出来**——没有数字可以对比。F19-c 唯一的表现形式是文档内部矛盾（账本 50、轴分 85）。
+
+推论很硬：
+
+- 只修 F19-c 不修 F19-a → 总分仍然印不出来，顺序错误继续隐身；
+- 只修 F19-a 不修 F19-c → 报告会出版一个**从自己的轴复算不出来**的数字。
+
+**所以「修一个最明显的」是错的策略。** 当一个缺陷把另一个缺陷的**症状**遮住时，逐个修会让修复看起来成功、实际只是换了一个症状。判断标准不是「这个 bug 还在不在」，而是「**这份文档现在能不能被读者独立复算**」。
+
+#### 为什么只升 `sigmark-score/5`
+
+两处修复都不碰标签层（`sigmark-profile` 保持 `/9`），也不新增必需字段。`value` 与轴分都变了，所以 `sigmark-score` 必须升——**判级标准一个字没改，改的是出版出来的数字**。
+
+#### 验证
+
+`score_ldplayer_test.go`（462 行）以归档实测值为 fixture，逐项断言：`value == 71`、`band == D`、declaration 轴 `score == nil`、`recomputeValue` 与出版值一致；另有反向测试断言 R8 仍然吞数字（`TestScoreDecisiveStillWithholdsTheNumberUnderTheCoverageFloor`）。usage 侧由 `TestUsageFreshBootStillFiresOnRealHardware` 反向锁住真机行为。
+
 ### 13.1 未决清单（按优先级，2026-11-26 更新）
 
 F 系列记的是**已经发生并处理过**的缺口。下面是**还没处理**的，按「能被攻击者利用的便宜程度」排序，不按工作量。
 
 | # | 未决项 | 断在哪一层 | 为什么这个优先级 |
 | --- | --- | --- | --- |
-| 1a | **`ro.boot.qemu` / `ro.kernel.qemu` 压根没采** | **采集层**：`SafeReader.Property` 的枚举里两个都没有。`qemu` 在**生产代码**（采集器 / 投影 / 白名单 / 规则）中**零命中**；全仓唯一出现处是 `score_redteam_emulator_test.go`（第 11 行注释、第 49 行 fixture `"ro.boot.qemu": "1"`），**那是本轮红队故意留下的雷神实测证据**——它恰好证明这条属性在设备上真实存在，只是采集链路没接 | 雷神那份报告里 `ro.boot.qemu=1` **就在设备上**，是最便宜的直接证据，而我们一次都没读。F17 用结构性推断绕了一大圈才判出 D，而这条属性一行就能判。改法要动**采集器**（新增两条属性读取 + 走一遍 §14 第 44 项的三层登记）。**第一优先级。** |
+| 1a | **`ro.boot.qemu` 已采（字段集 26），`ro.kernel.qemu` 仍未采；且打分规则还没读它** | **采集层已通，规则层未接**：`DeviceCollectors.kt:139` 有 `declaredProperty("bootQemu", "ro.boot.qemu", ...)`，`LanDetails.kt` 两个投影集合都含 `bootQemu`（第 14 行 / 第 30 行），`protocol.go:96` 白名单有 `{"system", "bootQemu", 26}`，`maxFields` 新增 `>= 26 → 260` 档（[protocol.go:578](../backend/cmd/sigmark/protocol.go#L578)）。**`ro.kernel.qemu` 仍然没有。** 三层登记缺第三层的一个旁证：`field_dictionary.go` 里 `bootQemu` **零命中**——白名单收它，词典没给它条目 | 雷神那份报告里 `ro.boot.qemu=1` 就在设备上，是最便宜的直接证据。**现在它进得来归档了，但没有任何判据读它**（`score.go` / `device_profile.go` / `hardware_facts.go` 对 `bootQemu` 零引用）。这是「字段到位、规则缺席」，和 1b 正好相反。**第一优先级：先加判据，再谈别的。** |
 | 1b | **`Build.FINGERPRINT` 采了但没上传** | **投影 + 白名单层**：`DeviceCollectors.kt:108` 已经采到（key `fingerprint`），但 `LanDetails.kt` 的两个投影集合（`system` 组，第 14 行推送集 / 第 28 行本地集）**都没有 `fingerprint`**，`protocol.go` 的 `parameterKeys["system"]` **也没有**（`partitionField` 正则只放行 `partition_*`，没有旁路） | 这条比 1a 更值得记，因为**采集是对的、规则也没漏读，断在中间**。雷神那份报告 `brand=realme` 而四个 partition fingerprint 写 `Xiaomi/unicorn/unicorn`，这处现成的矛盾**在归档报告里根本不存在这个字段**——195 个 key 里 `fingerprint` 零命中。改法只动**投影和白名单**，不动采集器。 |
 | 2 | **SoC 注册表只有 6 条**（`gs101` / `mt6985` / `sm8550` / `sm8450` / `sm8250` / `sdm845`） | 打分层的**知识面**（不是链路断了） | 覆盖面短板。F18 已让未登记设备**自报缺口**，但四个通道仍然全是空的——修的是「漏了要说」，不是「不漏」。 |
-| 3 | **`FRESH_BOOT_ON_AGED_ROM` 在模拟器上误报 12 分** | 打分层的**判据**（`first_api_level=28` + `bootCount=1` 会命中 U2） | 这是**误报**，方向和上面几条相反：它会给干净的旧镜像设备扣分。已在 §9.5 记录误报面，缓解方案（`uptime < 3 天`）未实现。 |
+| 3 | **`FRESH_BOOT_ON_AGED_ROM` 在模拟器上误报 12 分** | 打分层的**判据**（`first_api_level=28` + `bootCount=1` 会命中 U2） | **一半已修（`/5`）**：虚拟化被独立通道确认时不再计这 12 分（§10.2.1）。**剩下的另一半仍在**：**真机**刚恢复出厂、或真机刷了老 ROM，同样形状仍然会被扣 12 分——那不是模拟器，`virtualEvidenceConfirmed` 返回 false，扣分照旧。缓解方案（`uptime < 3 天`）仍未实现。 |
 | 4 | **桌面 CPU 族名是人工枚举**；ARM 服务器芯片（如 Ampere Altra）若出现在 `cpuInfo` 会被误判 | 打分层的**知识面**（`desktopCpuMarkers` 是手写清单） | 两个方向都未验证：新桌面厂商会漏（漏报）；Ampere Altra 这类**真 ARM 服务器芯片**出现在手机报告的 `cpuInfo` 里会被当成桌面芯片（误报）。 |
 | 5 | **单观察者通道是否也能被删一侧擦除**（overlay / SELinux / `virtual_build`） | 打分层的**判据形态**（没有「另一侧」可比） | F15 修的是身份通道的「两侧可读一侧空」。这三条都是**单观察者**通道，F15 的判据套不上。它们能不能被同样的手法擦掉，一次都没测过。 |
 | 6 | **`system.socManufacturer` 上传了但没有判据读它** | 链路**已通**（采集、投影、白名单三层齐全），缺的是**规则** | 雷神那份报告 `socManufacturer=AOSP` 而 `manufacturer=realme`、`brand=realme`。AOSP 是 AOSP 构建的合法值，真机零售 SoC 报的是厂商名（Qualcomm / MediaTek / Google）——「宣称零售机」与「SoC 厂商是 AOSP」不能同时为真。**已核实**：Go 侧除 `protocol.go` 白名单和一处 AVD fixture 外**没有任何代码读它**，所以这是一条**现成可用、零成本、还没接上**的通道。 |
@@ -1622,6 +1809,8 @@ F 系列记的是**已经发生并处理过**的缺口。下面是**还没处理
 | 10 | **arm64-v8a 在 x86 宿主的速度：未测** | **验证路线** | 镜像下载已取消，所以连速度数据都没有。它影响的是「用 arm64 AVD 做真机近似」这条路线可不可行，不影响现有规则。 |
 | 11 | **其它虚拟化平台属性：未测**（Android-x86 / Bliss / Waydroid / redroid） | **样本面** | 目前只有 **AOSP AVD 与雷神两类样本**。这两类都属于「Android 官方/商业模拟器」，而 redroid / Waydroid 是**容器方案**，属性面完全不同——现有实测规律不能外推。 |
 | 12 | **老 API 镜像：已完成**（android-30） | **已验证，非未决** | 结论：Google 官方重发的老 API 镜像天然构成「**老设备 + 新镜像**」，U2（`FRESH_BOOT_ON_AGED_ROM`）的触发条件在官方镜像上**自动成立**。这是**误报面**，不是攻击证据——真机刷老 ROM 也会命中。保留在此只为让清单完整，不需要再动。 |
+| 13 | **前端版本常量还停在 `sigmark-score/4`** | **前端契约层**（[score-view.ts:78](../backend/web/src/score-view.ts#L78) 的 `export const scoreVersion = 'sigmark-score/4'`） | 后端已出版 `/5`，前端只认得 `/4`。按 §8.4 的降级规则，**每一份新报告都会走「未知版本」路径**：不上色（`tone` 强制 `?`）、`versionWarning` 置顶。**数据不丢**（`band` 与 `value` 原样透出），但整个打分面板的视觉结论失效。20 个 Web 测试仍然全绿，因为它们**引用的是同一个常量**——常量改错时两边一起错，测试永远发现不了。这正是 §13 F16 第 3 条「自洽 ≠ 干净」的又一次复发：**测试与实现共用同一个错误常量时，测试证明的只是自洽。** 修法：把常量改成 `/5`，并加一条「常量必须等于后端 `scoreVersion`」的跨语言断言（或从 golden 文件读）。**本轮不在范围内，未改代码。** |
+| 14 | **`score.go` / `score_ldplayer_test.go` 注释里的 `82.75` 对不上任何样本** | **注释层**（代码逻辑正确，只有注释数字错） | `score.go` 的 `/5` 版本历史注释与 `score_ldplayer_test.go:134` 都写「三轴可见分 82.75 vs 71」。实测应为 **82.5**（雷电：`(40×100 + 35×50 + 25×100)/100`），而仿真器基准样本是 **87.75 vs 80**。**两条注释都没有任何测试断言**，所以永远不会红。这正是 §13 F16 第 3 条「有数字 ≠ 有口径」的复发：**注释里的数字和文档里的数字一样，没人复算就一定会漂。** 修法：把这两个数字改成「由样本自己算出来」，或直接删掉具体数字只留公式。**本轮只改文档、未改代码。** |
 
 **平台覆盖与改写能力的完整实测台账**（命令 + 原始输出）不在本文，见 [VIRTUALIZATION-MATRIX.md](VIRTUALIZATION-MATRIX.md)：它记录了雷神 LDPlayer 9 的属性改写能力、`/proc/cpuinfo` 不可写证据、平台覆盖现状与复现步骤。本文只引用它的结论，不重复它的数据。
 
@@ -1654,9 +1843,9 @@ F 系列记的是**已经发生并处理过**的缺口。下面是**还没处理
 | 5 | R3/R4 | 7 个 insufficient 的 fixture 得 `?`；`undetermined` 原因可区分。✅ **七个值**：四个字段状态 + `PROFILE_UNSET`（SoC 已登记但缺期望值）+ `UNMAPPED_SDK_LEVEL`（`initialSdk` 读到但不在年份表里）+ `UNPARSEABLE_PARTITION_DATES`（分区日期读到但解析不出年份）。前五个由 `TestScoreProfileUnset*` 五个测试锁住，含「不得遮蔽 foreign-profile」与「不得替代字段状态」两条反向断言；后两个由 `TestScoreUsageU2UnmappedSdkIsNamedNotAssumed` 与 U2 系列测试锁住（§13 F12） |
 | 6 | R5 | 四个 decisive fixture 均 D，`caps` 各一条（Pixel 6 / 仿真器 / identity app-uid / nine-green-one-red） |
 | 7 | R6 | 轴分覆盖 0–100（扣满 = 0）；扣分不按权重换算；整数运算 |
-| 8 | R7/R8 | 低覆盖轴不进平均，**但带扣分的薄轴必须计入**；`value=null` 时前端不显示 0 |
+| 8 | R7/R8 | 低覆盖轴不进平均，**但带扣分的薄轴必须计入**；`value=null` 时前端不显示 0；**被 R7 排除的轴必须出版 `score = null`**，否则文档不可复算。✅ `recomputeValue` 断言「印出来的有分轴加权重算 == `value`」（§5.6、§8.3.1） |
 | 9 | R9 | 87/88 不产生不同颜色；band 文案正确。✅ `TestScoreNearbyValuesShareABand` 钉住相邻分数同 band，并单独断言 50/49 **不得**同 band（C/D 边界在这里） |
-| 10 | R10/R11 | **R10 两层都要验**：声明轴盲 → `?` 不出版数字（严格形态）；behavior/usage 轴盲 → **数字照常出版但 band 不得为 A**（窄形态）。A 档零扣分，有扣分即降 B。✅ `TestRedteamDeletingUsageEvidenceScoresBetterThanKeepingIt`（删证据得 100/B，不再是 100/A）+ 被改写的 `TestScoreRule7ThinAxisDoesNotDilute`、`TestScoreUsageHalfReadDoesNotLiftTheBand`（§4 R10） |
+| 10 | R10/R11 | **R10 两层都要验**：声明轴盲 → `?` 不出版数字（严格形态），**但决定性命中例外、`value` 照常出版**（`/5`）；behavior/usage 轴盲 → **数字照常出版但 band 不得为 A**（窄形态）。A 档零扣分，有扣分即降 B。✅ `TestRedteamDeletingUsageEvidenceScoresBetterThanKeepingIt`（删证据得 100/B，不再是 100/A）+ `TestScoreDecisiveKeepsItsValueWhenTheDeclarationAxisIsBlind`（决定性命中保留 `value`，且可复算）+ `TestScoreDecisiveStillWithholdsTheNumberUnderTheCoverageFloor`（**反向**：R8 仍然无条件吞数字）+ 被改写的 `TestScoreRule7ThinAxisDoesNotDilute`、`TestScoreUsageHalfReadDoesNotLiftTheBand`（§4 R10） |
 | 11 | `basis` | `hit` 列出全部冲突分支；`not_observed` 列出确认分支；判不出时为空 |
 | 12 | 身份分流 | model/device 对 → 25 分 + 决定性；**SKU-only → 15 分、非决定性**；**一侧可读一侧为空 → 同样走这条分支（`hit`），不另设扣分值** |
 | 13 | 轴分母口径 | declaration 3 单元、behavior 6 个计分标签、usage 1 个派生标签。✅ `TestScoreDeclarationAxisHasExactlyThreeUnits`：Pixel 6 全决出 → coverage 恰好 1.0（分母为 4 时最好只有 0.75）；MI 8 → 恰好 0.67，并显式排除 0.5 / 0.75 这两个错误的分子分母组合 |
@@ -1664,9 +1853,9 @@ F 系列记的是**已经发生并处理过**的缺口。下面是**还没处理
 | 15 | 锚点 | Pixel 6 = D/82；MI 8 = A/100；**仿真器 = D/null/0.67/decisive**；五份黄金文件锁住整份文档。`/1` → `/2`、`/2` → `/3`、`/3` → `/4` **三次**升版后，五份黄金文件的 diff **都只有 `version` 一行**，判定逐字未变 |
 | 16 | 版本 | 权重、标称分、分支 label 或输出顺序改动必产生黄金 diff；**改判定或标签状态映射才升 `sigmark-score/N`**，只改输出形状不升版。当前 `/4` ↔ `profile/9`；「零命中也要升版」已有两例（`/1`→`/2` 的 U2、`/2`→`/3` 的一侧身份不对称），**且 `/4` 证明「升哪一层由哪一层变了决定」**——标签层没变，所以只升 `score` 不升 `profile`。三次升版全库都零漂移照升（§8.7） |
 | 17 | 边界 | 文档、UI、导出都写明「不能证明真机」。✅ `score-panel.tsx` 标题下已写明「这套判定只看本次采样看见的痕迹，**不能证明是真机**，也不能证明设备没有被改装」；文档见 §12 |
-| 18 | 隐私 | v1 未新增字段/权限；v26 候选有单独决策清单 |
+| 18 | 隐私 | v1 未新增字段/权限；v27 候选有单独决策清单（字段集 26 的 `system.bootQemu` 是采集面新增，不进打分，见 §10.4） |
 | 19 | 降级 | 三种情况都不伪造分数。✅ **旧后端无 `score` → 已实现且已测**；**计算失败省略 `score` → 已实现，`TestScoreEmptyArchiveIsNotACleanDevice` 锁住「空档案不得渲染成 A」与 wire 上的显式 `null`**；**未知 `version` → 已实现且已测**（不上色、数据原样、`versionWarning` 置顶；缺字段同按未知）。见 §8.4 与 §13 F12 |
-| 20 | 行号引用 | 本文每个 `文件:行号` 引用**两个方向都要对**：① href 能打开**所声称的那个函数或语句**——不是空行、不是无关行、也不是同文件里另一条语句；② **方括号里的可见行号必须等于 href 里的行号**（`[score.go:217](…#L217)` 可以，`[score.go:205](…#L217)` 不行）。只查「非空」或只查「href 可解析」都不算通过（§13 F16 第 5 条）。改代码后必须逐条回扫，并用一条正则校验标签 == href |
+| 20 | 行号引用 | 本文每个 `文件:行号` 引用**两个方向都要对**：① href 能打开**所声称的那个函数或语句**——不是空行、不是无关行、也不是同文件里另一条语句；② **方括号里的可见行号必须等于 href 里的行号**（`[score.go:217]` 配 `#L217` 可以，`[score.go:205]` 配 `#L217` 不行）。只查「非空」或只查「href 可解析」都不算通过（§13 F16 第 5 条）。改代码后必须逐条回扫，并用一条正则校验标签 == href |
 | 21 | 排序确定性 | 同一份证据两次投影必须产出逐字节相同的文档：`deductions` 按 points 降序、`caps` 按 code 升序、`undetermined` 按轴/reason/keys 排序去重。✅ 由黄金文件逐字节比对 + 前端 `the ledger preserves backend order instead of re-sorting` 锁住（§8.3） |
 | 22 | 行为轴阳性样本 | 五个仿真器变体各产生一份真实报告，`multi_open` / `hook_injection` / `selinux_permissive` 三个分支**都有真实阳性**且扣分与 §2.3 一致。✅ `TestScoreEmulatorVariant*` 四个测试 + 两份变体黄金文件；实测记录见 [EMULATOR-LAB.md §7.3](EMULATOR-LAB.md) |
 | 23 | 权重敏感性 | 每个标称分 ±5，band 不得翻转；value 次序按**簇**稳定（重簇永不排在轻簇之后），**不要求簇内全序**——簇内三个数字互相在噪声内，这是实测结论而非缺陷。✅ `TestScoreBehaviorWeightsAreNotBandSensitive` + `TestScoreBehaviorWeightsSeparateIntoTwoClusters`（§9.3.1） |
@@ -1682,16 +1871,21 @@ F 系列记的是**已经发生并处理过**的缺口。下面是**还没处理
 | 33 | 测试数字的口径 | 本文每个测试数字旁边**必须写明口径**（顶层 vs 含子测试），且必须来自可复现命令 `go test -v -count=1 ./cmd/sigmark`：**数 `--- PASS:` / `--- SKIP:` / `--- FAIL:` 行，不数 `=== RUN`**（`=== RUN` 含子测试 `TestXxx/sub`，会多算）。当前口径 143 PASS + 3 SKIP = **146 个顶层测试**，`RUN` 行 216 个（§13 F16） |
 | 34 | 不对称的四个跳过条件 | 逐条验，缺一条就会误伤：① 任一侧 `NOT_ARCHIVED` → 不算（旧字段集整行不存在）；② 任一侧非 `AVAILABLE`（`RESTRICTED`/`ERROR`/`UNAVAILABLE`）→ 不算；③ 两侧都空/都占位符 → 不算；④ 只有「两侧 AVAILABLE + 恰一侧为空」→ `hit`。✅ `device_profile_test.go` 的 `restricted side is not comparable`、`no identity rows`、`placeholder on both sides is still not comparable` 三个反例 + 全库 7 份字段集 16/20 报告零漂移（§4 R4、§13 F15） |
 | 35 | 占位符语义 | **单侧占位符（`unknown`/`null`/`none`/`n/a`/`-`）必须判 `hit`**——只堵空白不堵占位符等于没堵；**两侧都是占位符仍判 `insufficient`**——那是设备真的报不出。✅ `one-sided placeholder is asymmetry evidence` + `placeholder on both sides is still not comparable` |
-| 36 | 不对称的措辞与证据行 | 命中时证据行必须是 `identity_asymmetry`，值形如「N 对身份读数只有一侧可读（共 M 对在档）」；`detail` **不得**出现「被篡改」「伪造」等断言，只能写观察到的形态。✅ `identityAsymmetryDetail`（[score.go:953](../backend/cmd/sigmark/score.go#L953)）+ 决定性 cap 的 reason 复用同一句（§13 F15） |
+| 36 | 不对称的措辞与证据行 | 命中时证据行必须是 `identity_asymmetry`，值形如「N 对身份读数只有一侧可读（共 M 对在档）」；`detail` **不得**出现「被篡改」「伪造」等断言，只能写观察到的形态。✅ `identityAsymmetryDetail`（[score.go:1004](../backend/cmd/sigmark/score.go#L1004)）+ 决定性 cap 的 reason 复用同一句（§13 F15） |
 | 37 | 对照实验的前置断言 | 任何「洗白 / 加固有效」的对照实验，**必须先在测试里断言对照组是干净的**（基线 band=A 且 value=100 且声明轴零扣分），再谈差异；不得靠实验者相信。第二次洗白实验就是因为基线带着 30 分 `ram_dispersion` 而作废（§13 F16 第四次） |
 | 38 | 模拟器改写三键后仍能判 D | 雷神报告 `ce1bdc7f`（`cpu.hardware=qcom` / `system.product=RMX5010` / `system.device=unicorn`）必须 **`band=D` + `decisive=true` + 35 分 `STRUCTURAL_VIRTUAL_EVIDENCE`**；同时 `virtual_build_markers` 保持 `not_observed`（判 D 靠的是新通道，不是把黑名单改聪明）。✅ `TestRedteamEmulatorRewritesEveryVirtualBuildMarker`（先断言前提：三键确实躲过黑名单）+ `TestRedteamStructuralContradictionCatchesWhatTheBlocklistMisses`（§13 F17） |
 | 39 | 结构性证据的两个防误伤 | ① `cpuInfo` 含 `implementer 0x` 必须返回 false（ARM 正品信号，否则所有真机都中）；② 空白或不认识的 `cpuInfo` 必须返回 false（**「我不认识」不是证据**，否则误伤每一颗未来的 ARM 芯片）。✅ `TestRedteamStructuralCheckDoesNotFireOnRealDevices` 的 7 个真机/空白反例 + `TestRedteamOneRewriteIsNotEnough`（§13 F17） |
-| 40 | 结构性证据与黑名单互斥 | `markerHit == true` 时 `structuralVirtualDeduction` 必须返回 false——一因一果（R2），同一次「这是模拟器」不得收两次 35 分，也不得产生两条 `DECISIVE_VIRTUAL_BUILD` cap。✅ `structuralVirtualDeduction` 的首个分支（[score.go:1044](../backend/cmd/sigmark/score.go#L1044)）；扣分码 `STRUCTURAL_VIRTUAL_EVIDENCE` 走同一个 cap（[score.go:1031](../backend/cmd/sigmark/score.go#L1031)） |
+| 40 | 结构性证据与黑名单互斥 | `markerHit == true` 时 `structuralVirtualDeduction` 必须返回 false——一因一果（R2），同一次「这是模拟器」不得收两次 35 分，也不得产生两条 `DECISIVE_VIRTUAL_BUILD` cap。✅ `structuralVirtualDeduction` 的首个分支（[score.go:1133](../backend/cmd/sigmark/score.go#L1133)）；扣分码 `STRUCTURAL_VIRTUAL_EVIDENCE` 走同一个 cap（[score.go:1069](../backend/cmd/sigmark/score.go#L1069)） |
 | 41 | 未登记 SoC 必须点名被跳过的通道 | SoC 有声明但不在注册表时，四个通道（`cpu_core_set` / `gpu_family` / `cpu_capacity` / `cma_total`）必须各留一条 `unregistered_soc:<channel>`；**聚合 state 不得改变**（仍 `not_observed`——点名省略是审计改进，不是新判决）；**已登记 SoC 不得出现任何 `unregistered_soc:`**。✅ `score_redteam_unregistered_test.go` 的 `NamesTheChannelsItSkipped` + `KeepsTheAggregateState` + `RegisteredSocPublishesNoUnregisteredBasis`（§13 F18） |
 | 42 | gap 标记不得进入 30 分计价 | `nonOverlayBasis` 必须排除 `unregistered_soc:` 前缀，**同时真实冲突（如 `ram_dispersion`）必须仍然被计价**——排除过宽会把真的矛盾也一起免掉。两个方向都要验。✅ `TestRedteamUnregisteredSocDoesNotPayTheChannelConflictPrice`（§13 F18） |
 | 43 | 「没声明 SoC」≠「未登记 SoC」 | `known == false` 混了两种情况，只有「**有声明但注册表不认识**」才打 gap 标记；老报告没这个字段时不得打标记，否则把「这份报告没存」误报成「我们试过但失败了」。✅ `socDeclared`（[hardware_facts.go:112](../backend/cmd/sigmark/hardware_facts.go#L112)）与 `!known && socDeclared(read)` 的合取（[hardware_facts.go:190](../backend/cmd/sigmark/hardware_facts.go#L190)） |
 | 44 | 采集字段必须三层同时登记 | 任何要进归档的采集字段，**三层缺一即视为未落地**：① Android 采集侧（`DeviceCollectors.kt` / `SecurityObservations.kt` 有该 key）；② 投影（`LanDetails.kt` 的 `system` 组集合）；③ Go 白名单（`protocol.go` 的 `parameterKeys`）。**「采了但没上传」和「没采」在归档层完全一样**，不逐层验就会把「投影漏配」误判成「规则漏读」。反例：`Build.FINGERPRINT` 有第 ① 层、缺 ②③ 层，195 个归档 key 里 `fingerprint` 零命中（§13.1 第 1b 项） |
 | 45 | 结构性证据的成本标签必须诚实 | 描述两条通道时**不得**把 `generic_board_platform` 写成「构建产物 / 改它要动内核」——它是 `ro.board.platform` 属性（[DeviceCollectors.kt:129](../app/src/main/java/com/sigmark/app/collector/DeviceCollectors.kt#L129)），一条 `setprop` 即可清除。**文档与代码注释里的成本描述必须与「数据从哪来」一致**（属性 / `/proc` / 构建产物），并写明规则真实强度是**一条硬通道 + 一条软通道**。✅ `TestRedteamFakingPlatformAloneIsCheap`（一条改写清掉软通道、两条都改则归零）+ `TestRedteamCpuInfoSurvivesPlatformRewrite`（`boardPlatform` 取 `pineapple`/`gs101`/`sdm845`/`mt6985` 时任取，`cpuInfo` 独立成立）（§13 F17 成本更正、§13.1 第 7 项） |
+| 46 | 决定性命中不得吞掉 `value` | `band` 已被决定性 cap 钉在 D 时，`value` **必须出版**（排序键，§13 F5）。抑制条件是 `declarationBlind && !out.Decisive`，**不是**裸的 `declarationBlind`。✅ `TestScoreDecisiveKeepsItsValueWhenTheDeclarationAxisIsBlind`（§4 R10、§13 F19-a） |
+| 47 | R8 与 `weights == 0` 必须**仍然**吞掉 `value` | 第 46 项不得被读成「决定性命中总给数字」。总体 coverage < 地板时，**即使决定性**也 `value = null`——那里「没有数字」本身就是结论。✅ `TestScoreDecisiveStillWithholdsTheNumberUnderTheCoverageFloor`（反向断言，与第 46 项成对） |
+| 48 | 文档必须可复算 | 把 `axes[]` 里有 `score` 的轴按权重加总、除以这些轴权重之和，**必须等于 `value`**。因此被 R7 排除的轴必须出版 `score = null`；`finalizeScoreAxis` 必须在所有 append 之后调用。✅ `recomputeValue`（[score_test.go:100](../backend/cmd/sigmark/score_test.go#L100)）在雷电与仿真器样本上双向断言（§5.6、§8.3.1、§13 F19-c） |
+| 49 | 虚拟设备不重复计费 | `FRESH_BOOT_ON_AGED_ROM` 在虚拟化被独立通道确认时**不计分**，但 `decided` 仍 1、usage `coverage` 仍 1.00、`undetermined` 不变。**抑制定价，不抑制可判性。** ✅ `TestUsageFreshBootStillFiresOnRealHardware`（**真机必须照扣**，用与雷电完全相同的 usage 读数）+ 雷电样本断言 usage 轴 100（§10.2.1、§13 F19-b） |
+| 50 | 测试样本必须包含攻击样本 | 任何「只在模拟器/异常数据上出现」的缺陷，真机黄金文件**永远抓不到**——它走不到那段代码。回归集必须含至少一份红队实测样本（雷电 / AVD），并且该样本的每个数字都要来自归档而不是构造。反例：`finalizeScoreAxis` 顺序错误在 Pixel 6 与 MI 8 上全绿（§8.3.1、§13 F19-c） |
 
 ---
 
@@ -1708,30 +1902,33 @@ F 系列记的是**已经发生并处理过**的缺口。下面是**还没处理
 | 硬件通道、overlay 通道、三态判定 | [hardware_facts.go:129](../backend/cmd/sigmark/hardware_facts.go#L129)（`hardwareFactsLabel` 函数头）、[:223](../backend/cmd/sigmark/hardware_facts.go#L223)（overlay 通道）、[:293](../backend/cmd/sigmark/hardware_facts.go#L293)（`not_observed`） |
 | 判定分支 `basis` 的公布 | [hardware_facts.go:289](../backend/cmd/sigmark/hardware_facts.go#L289)（冲突）与 [:294](../backend/cmd/sigmark/hardware_facts.go#L294)（确认）；两者都 `append(…, unset...)`，见 §4 R4 的顺序约束 |
 | **未登记 SoC 的四个 gap 标记** | [hardware_facts.go:190](../backend/cmd/sigmark/hardware_facts.go#L190)（`!known && socDeclared(read)` 才打标）、[:192](../backend/cmd/sigmark/hardware_facts.go#L192)（`unregistered_soc:<channel>`）；`socDeclared` 在 [:112](../backend/cmd/sigmark/hardware_facts.go#L112)；见 §13 F18 |
-| **gap 标记的计价排除** | [score.go:698](../backend/cmd/sigmark/score.go#L698)（`nonOverlayBasis`）、[:709](../backend/cmd/sigmark/score.go#L709)（排除 `unregistered_soc:` 前缀）、[:798](../backend/cmd/sigmark/score.go#L798)（`conflictBasis` 消费点） |
+| **gap 标记的计价排除** | [score.go:749](../backend/cmd/sigmark/score.go#L749)（`nonOverlayBasis`）、[:760](../backend/cmd/sigmark/score.go#L760)（排除 `unregistered_soc:` 前缀）、[:836](../backend/cmd/sigmark/score.go#L836)（`conflictBasis` 消费点） |
 | foreignProfile | [hardware_facts.go:322](../backend/cmd/sigmark/hardware_facts.go#L322) |
-| **结构性虚拟证据（`/4` 新增）** | 新文件 `virtual_evidence.go`：`genericBoardPlatforms` [:33](../backend/cmd/sigmark/virtual_evidence.go#L33)、`desktopCpuMarkers` [:48](../backend/cmd/sigmark/virtual_evidence.go#L48)、`boardPlatformIsGeneric` [:56](../backend/cmd/sigmark/virtual_evidence.go#L56)、`cpuInfoContradictsHandset` [:73](../backend/cmd/sigmark/virtual_evidence.go#L73)（`implementer 0x` 早退在 [:79](../backend/cmd/sigmark/virtual_evidence.go#L79)）、`structuralVirtualEvidence` [:93](../backend/cmd/sigmark/virtual_evidence.go#L93) |
-| **结构性证据的计分与互斥** | `structuralVirtualPoints = 35` [score.go:150](../backend/cmd/sigmark/score.go#L150)；`structuralVirtualDeduction` [score.go:1044](../backend/cmd/sigmark/score.go#L1044)（`markerHit` 早退 = 与黑名单互斥）；挂 cap 的调用点 [score.go:1031](../backend/cmd/sigmark/score.go#L1031)；detail 拼装 [:1069](../backend/cmd/sigmark/score.go#L1069)；见 §13 F17 |
+| **结构性虚拟证据（`/4` 新增）** | 新文件 `virtual_evidence.go`（176 行）：`genericBoardPlatforms` [:60](../backend/cmd/sigmark/virtual_evidence.go#L60)、`desktopCpuMarkers` [:99](../backend/cmd/sigmark/virtual_evidence.go#L99)、`boardPlatformIsGeneric` [:109](../backend/cmd/sigmark/virtual_evidence.go#L109)（空串早退在 [:111](../backend/cmd/sigmark/virtual_evidence.go#L111)）、`cpuInfoContradictsHandset` [:126](../backend/cmd/sigmark/virtual_evidence.go#L126)（`implementer 0x` 早退在 [:132](../backend/cmd/sigmark/virtual_evidence.go#L132)）、`structuralVirtualEvidence` [:146](../backend/cmd/sigmark/virtual_evidence.go#L146) |
+| **`/5` 新增：虚拟化是否已被确认** | `virtualEvidenceConfirmed` [score.go:1103](../backend/cmd/sigmark/score.go#L1103)（黑名单标签 **或** 结构通道，任一为真）；它复用 `structuralVirtualRead` [score.go:1113](../backend/cmd/sigmark/score.go#L1113)——与扣分通道**共用同一个读数函数**，不另造第二个定义；消费点 [score.go:1287](../backend/cmd/sigmark/score.go#L1287)（`&& !virtualized`）。见 §10.2.1、§13 F19-b |
+| **`/5` 新增：轴分必须在所有 append 之后定稿** | `finalizeScoreAxis` [score.go:706](../backend/cmd/sigmark/score.go#L706)；调用点 [score.go:958](../backend/cmd/sigmark/score.go#L958)（declaration）、[:1092](../backend/cmd/sigmark/score.go#L1092)（**behavior，已移到结构通道 append 之后**）、[:1315](../backend/cmd/sigmark/score.go#L1315)（usage）。见 §8.3.1、§13 F19-c |
+| **`/5` 新增：雷电实测 fixture 与可复算断言** | `score_ldplayer_test.go`（462 行，全部数字取自归档报告 `6642e350`）：`TestScoreDecisiveKeepsItsValueWhenTheDeclarationAxisIsBlind` [:135](../backend/cmd/sigmark/score_ldplayer_test.go#L135)（`value == 71` 且 `recomputeValue` 一致）、`TestScoreDecisiveStillWithholdsTheNumberUnderTheCoverageFloor` [:173](../backend/cmd/sigmark/score_ldplayer_test.go#L173)（反向：R8 仍吞数字）、`TestUsageFreshBootStillFiresOnRealHardware` [:316](../backend/cmd/sigmark/score_ldplayer_test.go#L316)（真机照扣 12 分） |
+| **结构性证据的计分与互斥** | `structuralVirtualPoints = 35` [score.go:179](../backend/cmd/sigmark/score.go#L179)；`structuralVirtualDeduction` [score.go:1133](../backend/cmd/sigmark/score.go#L1133)（`markerHit` 早退 = 与黑名单互斥）；挂 cap 的调用点 [score.go:1069](../backend/cmd/sigmark/score.go#L1069)；detail 拼装 [:1151](../backend/cmd/sigmark/score.go#L1151)；见 §13 F17 |
 | **结构性证据的成本不对称（两条通道的真实强度）** | [score_redteam_emulator_test.go:159](../backend/cmd/sigmark/score_redteam_emulator_test.go#L159)（`TestRedteamFakingPlatformAloneIsCheap`：一条改写清掉软通道，两条都改则归零）、[:180](../backend/cmd/sigmark/score_redteam_emulator_test.go#L180)（`TestRedteamCpuInfoSurvivesPlatformRewrite`：`boardPlatform` 任取 `pineapple`/`gs101`/`sdm845`/`mt6985`，`cpuInfo` 独立成立）；见 §13 F17「成本更正」、§14 第 45 项 |
 | **虚拟化平台实测台账（外部文档）** | [VIRTUALIZATION-MATRIX.md](VIRTUALIZATION-MATRIX.md)：雷神 LDPlayer 9 的属性改写能力（`ro.*` / `persist.*` / `/data` 能改，`/proc/cpuinfo` 不能）、`/proc` 不可写的原始输出、平台覆盖现状与复现步骤。本文只引用其结论，不重复其数据；见 §13.1 第 7–12 项 |
 | 身份三对读数、适用对、比较 | [identity_consistency.go:7](../backend/cmd/sigmark/identity_consistency.go#L7)（`appIdentityPairs`）、[:37](../backend/cmd/sigmark/identity_consistency.go#L37)（`compareAppIdentity`） |
 | **一侧身份不对称的判定** | [identity_consistency.go:70](../backend/cmd/sigmark/identity_consistency.go#L70)（`oneSidedIdentity`）；跳过条件在 [:75](../backend/cmd/sigmark/identity_consistency.go#L75)（`NOT_ARCHIVED`）与 [:84](../backend/cmd/sigmark/identity_consistency.go#L84)（非 `AVAILABLE`）；两侧都空在 [:89](../backend/cmd/sigmark/identity_consistency.go#L89) |
-| **不对称证据行与文案** | [device_profile.go:259](../backend/cmd/sigmark/device_profile.go#L259)（消费点）、[:266](../backend/cmd/sigmark/device_profile.go#L266)（`identity_asymmetry` 行）；[score.go:953](../backend/cmd/sigmark/score.go#L953)（`identityAsymmetryDetail`）、[:854](../backend/cmd/sigmark/score.go#L854)（决定性命中时替换 `detail`） |
+| **不对称证据行与文案** | [device_profile.go:259](../backend/cmd/sigmark/device_profile.go#L259)（消费点）、[:266](../backend/cmd/sigmark/device_profile.go#L266)（`identity_asymmetry` 行）；[score.go:1004](../backend/cmd/sigmark/score.go#L1004)（`identityAsymmetryDetail`）、[:892](../backend/cmd/sigmark/score.go#L892)（决定性命中时替换 `detail`） |
 | 占位符归一 | [identity_consistency.go:22](../backend/cmd/sigmark/identity_consistency.go#L22)（`usableIdentity`：`unknown`/`null`/`none`/`n/a`/`-` → 空） |
 | Android 端同名行（overlay / hardware / identity） | [DevicePosture.kt:103](../app/src/main/java/com/sigmark/app/security/DevicePosture.kt#L103)、[:123](../app/src/main/java/com/sigmark/app/security/DevicePosture.kt#L123)、[:85](../app/src/main/java/com/sigmark/app/security/DevicePosture.kt#L85) |
 | `bootCount` 语义与重置 | [SecurityObservations.kt:50](../app/src/main/java/com/sigmark/app/collector/SecurityObservations.kt#L50) |
 | `partitionBuildDates` / `initialSdk` | [SecurityObservations.kt:118](../app/src/main/java/com/sigmark/app/collector/SecurityObservations.kt#L118)、[:43](../app/src/main/java/com/sigmark/app/collector/SecurityObservations.kt#L43) |
 | 字段集与值类型 | [protocol.go:87](../backend/cmd/sigmark/protocol.go#L87)、[field_dictionary.go:70](../backend/cmd/sigmark/field_dictionary.go#L70) |
-| **采集字段的三层登记（§14 第 44 项）** | ① Android 采集：[DeviceCollectors.kt:108](../app/src/main/java/com/sigmark/app/collector/DeviceCollectors.kt#L108)（`Build.FINGERPRINT`，**已采**）；② 投影：[LanDetails.kt:14](../app/src/main/java/com/sigmark/app/lan/LanDetails.kt#L14)（`system` 组推送集，**缺 `fingerprint`**）、[:28](../app/src/main/java/com/sigmark/app/lan/LanDetails.kt#L28)（本地集，同样缺）；③ Go 白名单：[protocol.go:35](../backend/cmd/sigmark/protocol.go#L35)（`parameterKeys["system"]`，**缺 `fingerprint`**）。`partitionField` 正则只放行 `partition_*`（[protocol.go:108](../backend/cmd/sigmark/protocol.go#L108)），无旁路。见 §13.1 第 1b 项 |
+| **采集字段的三层登记（§14 第 44 项）** | ① Android 采集：[DeviceCollectors.kt:108](../app/src/main/java/com/sigmark/app/collector/DeviceCollectors.kt#L108)（`Build.FINGERPRINT`，**已采**）；② 投影：[LanDetails.kt:14](../app/src/main/java/com/sigmark/app/lan/LanDetails.kt#L14)（`system` 组推送集，**缺 `fingerprint`**）、[:30](../app/src/main/java/com/sigmark/app/lan/LanDetails.kt#L30)（本地集，同样缺）；③ Go 白名单：[protocol.go:34](../backend/cmd/sigmark/protocol.go#L34)（`parameterKeys["system"]`，**缺 `fingerprint`**）。`partitionField` 正则只放行 `partition_*`（[protocol.go:109](../backend/cmd/sigmark/protocol.go#L109)），无旁路。见 §13.1 第 1b 项 |
 | 报告顶层 `coverage`（字段覆盖） | [protocol.go:501](../backend/cmd/sigmark/protocol.go#L501) |
-| 打分版本常量 `sigmark-score/4` | [score.go:51](../backend/cmd/sigmark/score.go#L51)（含 `/1` → `/2` → `/3` → `/4` 的版本历史注释） |
-| R10 两层形态 | [score.go:411](../backend/cmd/sigmark/score.go#L411)（`axisBlind` 循环）、[:427](../backend/cmd/sigmark/score.go#L427)（`declarationBlind` 循环）、[:433](../backend/cmd/sigmark/score.go#L433)（声明轴盲 → 不出版数字）、[:481](../backend/cmd/sigmark/score.go#L481)（窄形态：`bandA && axisBlind != ""` → B） |
+| 打分版本常量 `sigmark-score/5` | [score.go:67](../backend/cmd/sigmark/score.go#L67)（含 `/1` → `/2` → `/3` → `/4` → `/5` 的版本历史注释，L24–L66） |
+| R10 两层形态 | [score.go:433](../backend/cmd/sigmark/score.go#L433)（`axisBlind` 循环）、[:464](../backend/cmd/sigmark/score.go#L464)（`declarationBlind` 循环）、[:470](../backend/cmd/sigmark/score.go#L470)（声明轴盲 → 不出版数字）、[:532](../backend/cmd/sigmark/score.go#L532)（窄形态：`bandA && axisBlind != ""` → B） |
 | U2 与 R10 的测试 | `score_usage_u2_test.go`（9 个）、`score_emulator_u2_test.go`（2 个，仿真器边界与老镜像新实例） |
 | 红队测试 | `score_redteam_decisive_test.go`（**决定性实验**：干净 100/A 基线，§13 F15 的主证据）、`score_redteam_clean_test.go`（隔离设备，基线带 30 分 `ram_dispersion`，故只到 88/B）、`score_redteam_test.go`（删 usage 证据、删身份一侧）、`score_redteam_overlay_test.go`（**被污染的作废实验，保留作方法论反面教材**） |
-| `initialSdk` 年份表与解析 | [score.go:217](../backend/cmd/sigmark/score.go#L217)（`usageSdkYears`）、[:223](../backend/cmd/sigmark/score.go#L223)（`usageSdkYear`） |
-| usage 轴判定（U1/U2 两条独立检查） | [score.go:1106](../backend/cmd/sigmark/score.go#L1106)（`usageAxis` 函数头）、[:1106](../backend/cmd/sigmark/score.go#L1106)（可判条件）、[:1184](../backend/cmd/sigmark/score.go#L1184)（`agedImage`）、[:1185](../backend/cmd/sigmark/score.go#L1185)（`agedDevice`）、[:1186](../backend/cmd/sigmark/score.go#L1186)（`switch` 一因一果） |
-| 两个新 reason 的产生点 | [score.go:1161](../backend/cmd/sigmark/score.go#L1161)（`UNPARSEABLE_PARTITION_DATES`）、[:1172](../backend/cmd/sigmark/score.go#L1172)（`UNMAPPED_SDK_LEVEL`） |
-| 「3 年」窗口与无采样时间时的回落 | [score.go:1219](../backend/cmd/sigmark/score.go#L1219)（`usageAgedRomCutoff`）、[:190](../backend/cmd/sigmark/score.go#L190)（`usageAgedRomFallbackYear = 2021`） |
+| `initialSdk` 年份表与解析 | [score.go:246](../backend/cmd/sigmark/score.go#L246)（`usageSdkYears`）、[:252](../backend/cmd/sigmark/score.go#L252)（`usageSdkYear`） |
+| usage 轴判定（U1/U2 两条独立检查） | [score.go:1206](../backend/cmd/sigmark/score.go#L1206)（`usageAxis` 函数头）、[:1279](../backend/cmd/sigmark/score.go#L1279)（可判条件）、[:1288](../backend/cmd/sigmark/score.go#L1288)（`agedImage`）、[:1289](../backend/cmd/sigmark/score.go#L1289)（`agedDevice`）、[:1290](../backend/cmd/sigmark/score.go#L1290)（`switch` 一因一果） |
+| 两个新 reason 的产生点 | [score.go:1260](../backend/cmd/sigmark/score.go#L1260)（`UNPARSEABLE_PARTITION_DATES`）、[:1270](../backend/cmd/sigmark/score.go#L1270)（`UNMAPPED_SDK_LEVEL`） |
+| 「3 年」窗口与无采样时间时的回落 | [score.go:1327](../backend/cmd/sigmark/score.go#L1327)（`usageAgedRomCutoff`）、[:219](../backend/cmd/sigmark/score.go#L219)（`usageAgedRomFallbackYear = 2021`） |
 | 画像读取契约 | [LAN-PILOT.md:117](LAN-PILOT.md) |
 | 现有 10 标签的界面文案 | [device-profile.tsx:12](../backend/web/src/device-profile.tsx#L12) |
 | 不保存派生评分的既有约定 | [ARCHITECTURE.md:52](ARCHITECTURE.md) |

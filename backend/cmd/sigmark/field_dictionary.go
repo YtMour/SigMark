@@ -5,8 +5,8 @@ import (
 	"strings"
 )
 
-const latestFieldSet = 25
-const dictionaryVersion = "sigmark-lan-fields/16"
+const latestFieldSet = 26
+const dictionaryVersion = "sigmark-lan-fields/17"
 
 type dictionaryField struct {
 	Key           string   `json:"key"`

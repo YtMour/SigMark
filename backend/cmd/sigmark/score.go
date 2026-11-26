@@ -48,7 +48,23 @@ import (
 //	    Verdict change, not a shape change: the same archived report moves `?` → D.
 //	    profileVersion stays /9 — the label layer did not move, the score layer reads the
 //	    new evidence straight from parameters.
-const scoreVersion = "sigmark-score/4"
+//	/5  two fixes found by replaying the LDPlayer 9 capture that /4 was built for:
+//	    (a) a decisive hit no longer withholds `value`. The declaration-blind withhold (R10)
+//	    fired on that report — declaration coverage 0.33, no deduction — and dropped the
+//	    number even though `band` was already D and overall coverage was 0.73. R10 exists to
+//	    stop an unlooked-at 40%-weight axis from publishing a comfortable A; once a decisive
+//	    cap has fixed the band at D there is no comfort left to protect, and the number is
+//	    the only remaining sort key (§13 F5 says exactly that). So the withhold now applies
+//	    only when nothing else has decided the band.
+//	    (b) FRESH_BOOT_ON_AGED_ROM is no longer charged on a device already identified as
+//	    virtual. LDPlayer reports initialSdk 28 against an android-14 image and bootCount 2,
+//	    so U2 priced it 12 points — but "the image's first_api_level disagrees with the
+//	    system image" is what an emulator *is*, not a disguise. The same fact is already
+//	    charged 35 points decisively on the behaviour axis, and one cause must not be
+//	    charged twice. The suppression is one-way: on real hardware the rule is untouched.
+//	    Both are verdict changes for archived emulator reports (the LDPlayer capture moves
+//	    from `value: null` to 71, and its usage axis from 88 to 100), so the version moves.
+const scoreVersion = "sigmark-score/5"
 
 const (
 	axisDeclaration = "declaration"
@@ -359,7 +375,7 @@ func buildDeviceScore(parameters []Parameter, labels []profileLabel, capturedAt 
 	}
 	declaration, declarationCaps, declarationUndetermined := declarationAxis(labels)
 	behavior, behaviorCaps, behaviorUndetermined := behaviorAxis(labels, parameters)
-	usage, usageUndetermined := usageAxis(parameters, capturedAt)
+	usage, usageUndetermined := usageAxis(parameters, capturedAt, virtualEvidenceConfirmed(labels, parameters))
 	out.Axes = []scoreAxis{declaration, behavior, usage}
 	out.Caps = append(append(out.Caps, declarationCaps...), behaviorCaps...)
 	out.Undetermined = append(append(out.Undetermined, declarationUndetermined...), behaviorUndetermined...)
@@ -401,13 +417,6 @@ func buildDeviceScore(parameters []Parameter, labels []profileLabel, capturedAt 
 	// axes drop their scores too, so no surface can render a number that was never
 	// published; their coverage stays visible, because that is *why* there is no
 	// number.
-	// R10: the declaration axis is the one that answers "does this device tell the
-	// truth about itself". A report that never read a single declaration channel has
-	// not found the device consistent, it has simply not looked. Averaging the other
-	// two clean axes over it would let a 40%-weight blind spot publish an A, so a
-	// blind declaration axis withholds the number the same way low overall coverage
-	// does. "Blind" means read nothing *and found nothing*: an axis that recorded a
-	// deduction is not blind, it is thin, and R7 already keeps its finding in play.
 	// R10: an axis that read nothing *and* found nothing is a blind spot, not a clean one.
 	// Averaging the other axes over it publishes a number that was never actually earned.
 	//
@@ -428,22 +437,37 @@ func buildDeviceScore(parameters []Parameter, labels []profileLabel, capturedAt 
 			break
 		}
 	}
-	// The declaration axis keeps the *strict* form of R10: a report that never read a single
-	// declaration channel has not found the device consistent, it has simply not looked, and
-	// averaging the other two clean axes over a 40%-weight blind spot must not publish an A.
-	// So a blind declaration axis withholds the number entirely.
+	// Two strengths of R10, because the two cases lose different things.
 	//
-	// The other two axes get the *narrow* form below (forbid the top band, keep the number),
+	// A blind *declaration* axis withholds the number. It is the axis that answers "does this
+	// device tell the truth about itself", it carries 40% of the weight, and averaging the
+	// other two clean axes over it is how an unlooked-at picture turns into "100 / A".
+	//
+	// A blind behaviour or usage axis only forbids the top band (below) and keeps the number,
 	// because withholding there would hide a genuine finding: a device with hook injection and
 	// a debugger attached is a D, and turning that into "?" because the usage axis was thin
 	// would lose the one thing the report did see.
+	//
+	// The declaration withhold is itself conditional on nothing else having decided the band,
+	// and that limit is the fix for a real capture rather than a refinement. Its whole
+	// justification is "do not publish a *comfortable* result for a picture nobody looked at";
+	// once a decisive cap has pinned the band at D there is no comfort left to protect.
+	// Measured on LDPlayer 9: the declaration axis read 1 of 3 units and found nothing, overall
+	// coverage was 0.73, a decisive virtual-build cap had already fixed the band at D — and the
+	// document still came out `band=D, value=null`, so the one thing a reviewer asks next ("how
+	// much was actually deducted?") was missing, and two D-grade reports could not be ordered
+	// against each other. §13 F5 rules the other way for exactly this case: a decisive hit
+	// keeps its value as a sort key, because the band already carries the conclusion.
+	//
+	// R8 (coverage below the floor) and the weights==0 guard still withhold unconditionally:
+	// there the absence of a number is the finding, not a formatting choice.
 	declarationBlind := false
 	for _, axis := range out.Axes {
 		if axis.Code == axisDeclaration && axis.Coverage < scoreCoverageFloor && len(axis.Deductions) == 0 {
 			declarationBlind = true
 		}
 	}
-	if out.Coverage < scoreCoverageFloor || weights == 0 || declarationBlind {
+	if out.Coverage < scoreCoverageFloor || weights == 0 || (declarationBlind && !out.Decisive) {
 		out.Band = bandUnknown
 		out.BandLabel = scoreBandLabels[bandUnknown]
 		out.CoverageLabel = scoreCoverageLabel(out.Coverage)
@@ -468,6 +492,20 @@ func buildDeviceScore(parameters []Parameter, labels []profileLabel, capturedAt 
 	out.Band = scoreBandOf(value)
 	out.BandLabel = scoreBandLabels[out.Band]
 	out.CoverageLabel = scoreCoverageLabel(out.Coverage)
+
+	// R7 leaves a thin axis out of the weighted average, so it must leave its *score* out of
+	// the document too. Publishing `declaration: 100, coverage: 0.33` next to a value that
+	// was computed without it makes the document un-recomputable: on the android-34 AVD the
+	// three printed axis scores give (40×100 + 35×65 + 25×100)/100 = 82.75, while the
+	// published value is 80, and a reviewer has no way to tell which number is wrong. Null
+	// here means the same thing it means under R8 — "this number is not part of the value" —
+	// so the rule a reader applies is uniform: sum the axes that have a score, weighted,
+	// divided by their weights.
+	for i := range out.Axes {
+		if out.Axes[i].Coverage < scoreCoverageFloor && len(out.Axes[i].Deductions) == 0 {
+			out.Axes[i].Score = nil
+		}
+	}
 
 	// R11: "一致" is a statement that nothing disagreed. A report that carries any
 	// deduction, however small, has something that disagreed, so it cannot wear that
@@ -1038,14 +1076,52 @@ func behaviorAxis(labels []profileLabel, parameters []Parameter) (scoreAxis, []s
 			undetermined = append(undetermined, scoreUndeterminedFor(axis.Code, label))
 		}
 	}
-	finalizeScoreAxis(&axis, decided, total)
 	// One cause, one deduction: the structural channel only speaks when the blocklist
 	// stayed silent. It adds itself after the table so the deduction order stays stable.
+	//
+	// It must still be *finalized*, which is why the axis is finalized after this point
+	// rather than before it: appending a 35-point deduction to an axis whose score was
+	// already computed printed a document that contradicted itself — deductions summing to
+	// 50 next to an axis score of 85 (= 100 − 15), and a weighted total that could not be
+	// recomputed from either. Measured on LDPlayer 9, where the structural channel is the
+	// one that fires: the axis claimed 85 while its own ledger said 50.
 	if deduction, ok := structuralVirtualDeduction(parameters, markerHit); ok {
 		axis.Deductions = append(axis.Deductions, deduction)
 		caps = append(caps, scoreCap{Code: "DECISIVE_VIRTUAL_BUILD", Band: bandD, Reason: deduction.Detail})
 	}
+	finalizeScoreAxis(&axis, decided, total)
 	return axis, caps, undetermined
+}
+
+// virtualEvidenceConfirmed reports whether this capture has already been identified as a
+// virtual device, by either of the two channels the behaviour axis prices.
+//
+// It exists so the usage axis can ask "is this machine already known to be an emulator?"
+// without re-deriving the verdict: the marker label is read from the labels that were
+// already computed, and the structural channel from the same two parameters the deduction
+// reads. No third opinion is formed here.
+func virtualEvidenceConfirmed(labels []profileLabel, parameters []Parameter) bool {
+	if marker, ok := scoreLabelByCode(labels, "virtual_build_markers"); ok && marker.State == "hit" {
+		return true
+	}
+	return len(structuralVirtualEvidence(structuralVirtualRead(parameters))) > 0
+}
+
+// structuralVirtualRead collects the two structural channel readings from the archive.
+// Shared by the deduction and by the usage-axis suppression so both ask the same question
+// from the same evidence; a second reader would be a second definition.
+func structuralVirtualRead(parameters []Parameter) map[string]string {
+	values := make(map[string]string, 2)
+	for _, key := range []string{"cpu.cpuInfo", "system.boardPlatform"} {
+		for _, p := range parameters {
+			if p.Group+"."+p.Key != key || p.Status != "AVAILABLE" || p.Value == nil {
+				continue
+			}
+			values[key] = *p.Value
+			break
+		}
+	}
+	return values
 }
 
 // structuralVirtualDeduction is the escape hatch for an emulator that defeats the blocklist.
@@ -1058,18 +1134,11 @@ func structuralVirtualDeduction(parameters []Parameter, markerHit bool) (scoreDe
 	if markerHit {
 		return scoreDeduction{}, false
 	}
-	values := make(map[string]string, 2)
+	values := structuralVirtualRead(parameters)
 	keys := make([]string, 0, 2)
 	for _, key := range []string{"cpu.cpuInfo", "system.boardPlatform"} {
-		for _, p := range parameters {
-			if p.Group+"."+p.Key != key || p.Status != "AVAILABLE" || p.Value == nil {
-				continue
-			}
-			values[key] = *p.Value
-			if strings.TrimSpace(*p.Value) != "" {
-				keys = append(keys, key)
-			}
-			break
+		if strings.TrimSpace(values[key]) != "" {
+			keys = append(keys, key)
 		}
 	}
 	basis := structuralVirtualEvidence(values)
@@ -1115,8 +1184,26 @@ func oldestPartitionYear(value string) (int, bool) {
 }
 
 // usageAxis v1 scores only what the current field set already archives: boot count
-// against partition build dates. It deliberately adds no collection.
-func usageAxis(parameters []Parameter, capturedAt int64) (scoreAxis, []scoreUndetermined) {
+// against partition build dates and the shipping SDK level. It deliberately adds no
+// collection.
+//
+// virtualized suppresses FRESH_BOOT_ON_AGED_ROM and nothing else. The rule asks whether a
+// device with almost no cold boots is claiming a generation older than itself, and on an
+// emulator that shape is guaranteed rather than suspicious: an AVD carries
+// ro.product.first_api_level from the system image it was built from, so an android-14
+// image on an "SDK 28" device is the normal, documented layout — and a freshly created
+// instance starts at bootCount 1–2. Measured on LDPlayer 9: initialSdk 28 against an
+// android-14 image, bootCount 2, so U2 charged 12 points for being an emulator.
+//
+// That is the same fact the behaviour axis already charges 35 points for, decisively. One
+// cause, one deduction (R2) is the rule this file applies everywhere else, and an emulator
+// is not made more suspicious by also looking like a fresh install — it *is* one.
+//
+// The suppression is deliberately one-way: it is gated on virtual evidence having been
+// confirmed by an independent channel, so a real 2017 phone reset once still gets its 12
+// points and no attacker can reach the suppression by claiming to be an emulator (claiming
+// it costs 35 decisive points and a D).
+func usageAxis(parameters []Parameter, capturedAt int64, virtualized bool) (scoreAxis, []scoreUndetermined) {
 	axis := newScoreAxis(axisUsage)
 	undetermined := []scoreUndetermined{}
 	rows := map[string]profileEvidence{}
@@ -1193,7 +1280,11 @@ func usageAxis(parameters []Parameter, capturedAt int64) (scoreAxis, []scoreUnde
 		decided = 1
 		bootCount, err := strconv.Atoi(bootRow.Value)
 		cutoff := usageAgedRomCutoff(capturedAt)
-		if err == nil && bootCount <= usageFreshBootCeiling {
+		// A virtualized capture keeps its coverage (the signal was readable and did answer)
+		// but is not priced: see the function comment. `decided` is deliberately left at 1,
+		// because "we could tell" and "we charged for it" are different statements and only
+		// the second one is being suppressed.
+		if err == nil && bootCount <= usageFreshBootCeiling && !virtualized {
 			agedImage := dateYearOK && dateYear <= cutoff
 			agedDevice := sdkYearOK && sdkYear <= cutoff
 			switch {

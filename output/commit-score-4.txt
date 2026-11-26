@@ -374,7 +374,41 @@ Android-x86 / Bliss / Waydroid / redroid（未测）、arm64-v8a 速度（未测
 
 ---
 
-## 十二、改动文件
+## 十二、虚拟化平台覆盖扩展（规则侧）
+
+第三项目标「其它虚拟化平台属性」落地。**注意措辞：这是「规则覆盖」，不是「实测覆盖」。**
+
+`genericBoardPlatforms` 从 **10 条扩到 23 条**，`desktopCpuMarkers` 从 **15 条扩到 25 条**。
+
+新增平台（各平台**公开发布的默认板名**，不是猜）：
+`waydroid` / `lineage_waydroid` / `android_x86` / `androidx86` / `bliss` / `blissos` /
+`genymotion` / `vbox` / `qemu` / `qemu64` / `qemu_arm64` / `cuttlefish` / `cf_x86_64_phone`
+
+新增 CPU 标记：`ampere` / `neoverse` / `graviton`（**ARM 服务器芯片**，不是 x86，
+但同样不是手机 SoC）、`virtual cpu` / `qemu virtual` / `kvm` / `virtualbox` / `vmware`
+
+**关键设计未变**：`implementer 0x` 短路仍然优先。真 ARM 手机 cpuinfo 带
+`implementer 0x41`，规则见到它直接判真机。这是「一个可疑词」与「确定不是手机」的区别，
+只有后者能扣 35 分决定性。
+
+**新增 8 个测试**（`virtual_platforms_test.go`），其中三个是防误伤闸门：
+
+| 测试 | 锁什么 |
+| --- | --- |
+| `TestVirtualPlatformsDoNotFireOnRealHandsetSocs` | **10 个真实 SoC 代号都不命中** |
+| `TestVirtualPlatformsArmImplementerStillWins` | **短路优先于 marker** |
+| `TestVirtualPlatformsUnknownIsNotEvidence` | **不认识 ≠ 是 VM**（`rk3588`/`mt6893`） |
+| `TestVirtualPlatformsMeasuredDevicesStillClean` | **Pixel 6 / MI 8 实测值零命中** |
+
+**全库回算**：25 份分布**零漂移**（A:4 / B:4 / D:10 / ?:7），decisive 仍 10 份。
+扩展覆盖**没有误伤任何一份真实报告**。
+
+**诚实的限制**：这 13 个新平台名**没有一台实测过**。它们来自各平台公开默认值，
+某平台改了默认值测试会红。**这是「规则覆盖」，不是「实测覆盖」。**
+
+---
+
+## 十三、改动文件
 
 新增：
 - `backend/cmd/sigmark/virtual_evidence.go`

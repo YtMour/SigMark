@@ -24,7 +24,7 @@ class LanReportTest {
         assertEquals(setOf("runtime.vulkanVersion","media.cameraCapabilitySummary","sensors.typeWakeupSummary"),
             lanParameters(snapshot).map { it.group+"."+it.key }.toSet())
         val report = lanReport(snapshot,"0.20.0","")
-        assertEquals(25, report.fieldSetVersion)
+        assertEquals(26, report.fieldSetVersion)
         assertEquals(7, report.copy(fieldSetVersion = 7).copy(feedback = "old draft").fieldSetVersion)
     }
 
@@ -65,7 +65,29 @@ class LanReportTest {
             DeviceInfoItem(key,key,value,"public Android API")
         })))
         assertEquals(setOf("keyguardSecure","storageEncryption"),lanParameters(snapshot).map { it.key }.toSet())
-        assertEquals(25,LanFieldSetVersion)
+        assertEquals(26,LanFieldSetVersion)
+    }
+
+    // The QEMU boot flag is an ordinary app-visible property: it is projected with its
+    // source, and an unset property is archived as UNAVAILABLE rather than dropped.
+    @Test fun projectsTheQemuBootFlagWithItsOwnStatus() {
+        val set = lanParameters(DeviceSnapshot(1800000000000, listOf(DeviceSection("system", "系统", listOf(
+            DeviceInfoItem("bootQemu", "QEMU 启动标记", "1", "getprop ro.boot.qemu"),
+        ))))).single()
+        assertEquals("system", set.group)
+        assertEquals("bootQemu", set.key)
+        assertEquals("1", set.value)
+        assertEquals("getprop ro.boot.qemu", set.source)
+        assertEquals("AVAILABLE", set.status)
+        // On a real device the property is simply absent; that must stay visible as
+        // "not reported" instead of being silently omitted.
+        val unset = lanParameters(DeviceSnapshot(0, listOf(DeviceSection("system", "系统", listOf(
+            DeviceInfoItem("bootQemu", "QEMU 启动标记", null, "getprop ro.boot.qemu",
+                ValueStatus.UNAVAILABLE, reason = ReadReason.NOT_REPORTED),
+        ))))).single()
+        assertNull(unset.value)
+        assertEquals("UNAVAILABLE", unset.status)
+        assertEquals("NOT_REPORTED", unset.reason)
     }
 
     // Field set 25 projects the multi-path overlay evidence next to the single codename.

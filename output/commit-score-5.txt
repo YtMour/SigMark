@@ -1,0 +1,191 @@
+feat(score): field set 26 adds ro.boot.qemu, score /5 fixes three defects
+
+一、本提交做了什么
+
+两件事：给采集契约加一个字段（字段集 25 → 26），给评分体系修三个缺陷（sigmark-score/4 → /5）。
+两件事都来自同一台真实设备：雷电 LDPlayer 9 首次用新版 APK 采集后暴露出来的问题。
+
+二、为什么加 system.bootQemu
+
+雷电 LDPlayer 9 的 getprop 实测：
+
+    ro.boot.qemu    = 1        ← 自己承认是 QEMU
+    ro.kernel.qemu  = （空）    ← 被清掉了
+
+它清掉了最经典的那条，却漏了这一条。一条 getprop 就能判定，而我们从没采集它
+（全仓非测试代码零命中）。这不是"判据不够强"，是这条判据从来没进系统。
+
+三、三设备实测对照（App 视角，字段集 26）
+
+    设备              报告 ID     fieldSet  bootQemu      打分
+    雷电 LDPlayer 9   9d5b546e    26        '1' AVAILABLE  D  / 71 / decisive
+    Pixel 6           2b931bd3    26        '' UNAVAILABLE D  / 82 / decisive
+    MI 8              dd334a08    26        '' UNAVAILABLE A  / 100 / 非决定性
+
+模拟器自曝 1，两台真机都是 UNAVAILABLE（不是空串冒充"干净"）。
+MI 8 拿 A/100，说明新字段没有误伤真机。
+
+四、字段集 25 → 26 的五层锁步
+
+加一个字段要同时动五处，缺一层测试就红：
+
+    1. Android 采集      DeviceCollectors.kt:139  declaredProperty("bootQemu", ...)
+    2. Android 投影      LanDetails.kt:14 / :30  两处 system 组各加 bootQemu
+    3. Android 版本      LanReport.kt:19          LanFieldSetVersion 25 → 26
+    4. Go 白名单         protocol.go:96           {"system", "bootQemu", 26}
+    5. Go 上限           protocol.go              新增档位 >= 26 → maxFields 260
+    6. 字段字典          field_dictionary.go      latestFieldSet 26, dictionaryVersion /17
+    7. 契约断言          protocol_test.go         静态键数 235 → 236
+
+maxFields 的公式是 235 + 新增固定键数 + 24，本档写 236 + 24 = 260。
+不写死数字，下次加字段只需新增一档，不动 259/260 这两行。
+
+新增 fixture app/src/test/resources/lan-projection-v26.txt（236 行，UTF-8 无 BOM，
+CRLF，Ordinal 排序，system.bootQemu 落在 bootHardware 与 bootloader 之间）。
+projectionMatchesSharedLanRegistry 比对投影键集与这份 fixture，是第五道闸门。
+
+五、评分体系的三个缺陷
+
+缺陷 1：决定性命中吞掉了 value
+
+雷电报告修复前 value 是空的，三个轴分也全是空的。coverage 0.73 高于地板 0.5，
+按 R8 该出数字。
+
+判定：bug。R10"声明轴盲 → 不出版数字"没有区分"盲且无人兜底"和"盲但已被决定性
+cap 定了档"。后者的全部依据——"别为一个没人看过的画面出版一个舒服的结果"——在
+band 已经被钉在 D 之后不再成立；而 F5 本来就要求决定性命中保留 value 当排序键。
+
+修复：抑制条件改为 declarationBlind && !Decisive。
+R8（coverage 低于地板）和 weights == 0 仍然无条件吞数字，那里"没有数字"本身就是结论。
+
+缺陷 2：behavior 轴分与它自己的账本不符（三个里最严重）
+
+存档报告 behavior 轴印 85（= 100 − 15），但它自己的 deductions 是 35 + 15 = 50。
+
+根因：STRUCTURAL_VIRTUAL_EVIDENCE 这条扣分是在 finalizeScoreAxis 之后才 append 的，
+那 35 分从来没进过轴分。它只贡献了 cap，没贡献扣分。
+
+这个 bug 在真机上永远暴露不了——真机不命中结构通道。只有模拟器数据能照出来。
+这是"测试样本必须包含攻击样本"的活例证。
+
+修复：finalizeScoreAxis 移到结构通道 append 之后。顺带修掉"三轴可见分数加权 ≠
+出版 value"的不可复算问题。
+
+效果：behavior 85 → 50，总分 91 → 71。
+    (85×35 + 100×25) / 60 = 91.25
+    (50×35 + 100×25) / 60 = 70.83 → 71
+
+缺陷 3：FRESH_BOOT_ON_AGED_ROM 在模拟器上误报 −12
+
+雷电 initialSdk = 28（Android 9 代），镜像是 Android 14。规则判定"新启动跑在老代
+设备上"可疑，扣 12 分。但模拟器镜像的 first_api_level 与镜像 API 不一致是固有特征，
+不是攻击行为。
+
+修复：虚拟化已被独立通道确认时不再计分。新增 virtualEvidenceConfirmed()：
+virtual_build_markers 标签 hit 或结构通道命中，任一即真。扣分与抑制读同一份证据。
+
+两条关键约束：
+  - 单向。只看"虚拟化是否已被独立通道确认"。声称自己是模拟器要付 35 分 + D 档，
+    没有攻击者能靠这个逃掉。
+  - 抑制的是定价，不是可判性。decided 仍为 1、coverage 仍 1.00。否则模拟器的
+    coverage 会被悄悄拉低，可能掉到地板以下——那就变成借修复之名改形状了。
+
+这是"一因一果"原则的延伸：同一个"这是模拟器"的事实不该被计两次。
+
+六、为什么升到 sigmark-score/5
+
+两个缺陷都改变计分行为，不只是缺陷 3：
+  - 缺陷 3 直接改计分：usage 轴 88 → 100。
+  - 缺陷 2 改计分：behavior 85 → 50，总分 91 → 71。影响比缺陷 3 大得多。
+  - 缺陷 1 严格说是形状变更（null → 数字），但它把"两个 D 能不能排序"从不能变成能。
+    前端如果按 value === null 分支渲染会走错路，所以一起升。
+
+profileVersion 不动（标签层没变）。
+
+七、虚拟化平台覆盖扩展（规则侧）
+
+genericBoardPlatforms 10 → 23 条，desktopCpuMarkers 15 → 25 条。
+新增 waydroid / lineage_waydroid / android_x86 / androidx86 / bliss / blissos /
+genymotion / vbox / qemu / qemu64 / qemu_arm64 / cuttlefish / cf_x86_64_phone，
+以及 ampere / neoverse / graviton / virtual cpu / qemu virtual / kvm / virtualbox / vmware。
+
+新增 backend/cmd/sigmark/virtual_platforms_test.go，8 个 Test 全 PASS。其中 3 个是
+防误伤闸门：10 个真实 SoC 不命中、implementer 0x 短路优先、不认识的平台不算证据。
+
+全库回算零漂移——平台扩展没有误伤任何真实报告。
+
+八、arm64 结论修正：从"未测"改成"硬性不支持"
+
+上一版台账写"未测（工作量问题）"。这轮真下载了 3GB arm64 镜像并启动，结论不同：
+
+    FATAL | Avd's CPU Architecture 'arm64' is not supported by the QEMU2 emulator
+            on x86_64 host. System image must match the host architecture.
+
+5 秒内 FATAL 退出。Windows x86_64 上的 emulator 只提供 QEMU2 x86_64 版本，没有
+ARM 转译层（Apple Silicon 才有，那边宿主本身就是 arm64）。不是配置问题、不是缺参数。
+
+一个容易混的点：两台真机都是 arm64，SigMark 在 arm64 上跑得通（已验证）。没验证的
+只是"arm64 模拟器启动多慢"，而这个数字在 x86 宿主上不存在。
+
+环境已清理：AVD 删除，3GB 镜像 uninstall。
+
+九、一处自我纠正：adb 读数不等于产品能力
+
+本轮一度把 Pixel 6 的 boardPlatform 记成 gs101。实际报告里是 mt6985，三份一致。
+
+    adb shell getprop ro.board.platform  →  gs101
+    App 采集到 system.boardPlatform     →  mt6985
+
+SigMark 是 App，产品形态是普通应用在普通用户手机上采集。adb / shell 读数只是开发期
+的辅助观察，不是产品能力。任何判据、样例、结论都必须以 App 视角的采集结果为准。
+
+这条已写进 docs/VIRTUALIZATION-MATRIX.md §〇 作为铁律。
+
+十、新增文档
+
+docs/DEVICE-FINGERPRINT-MATRIX.md（542 行）：三设备跨设备指纹对照矩阵。
+§2 列 67 个字段（7 组），§3 撞车 59 个，§4 高区分度 34 个。
+§6 建议纳入 9 个字段、剔除 8 类。其中 cpu.hardware / system.bootHardware /
+runtime.glesVendor 三个全撞 MI 8——用它们判"真机"会放过 LD。
+
+十一、测试
+
+    Go       167 顶层 / 164 PASS / 3 SKIP / 0 FAIL
+    Android  140 / 140
+    Web      103 / 103
+    go vet   干净
+    gofmt -l 无输出
+
+新增测试文件：
+    backend/cmd/sigmark/score_ldplayer_test.go（462 行，7 个 Test）
+    backend/cmd/sigmark/virtual_platforms_test.go（8 个 Test）
+
+score_ldplayer_test.go 的 fixture 从存档报告 6642e350 逐字段抄录（含所有 UNAVAILABLE
+行），采样时间用真实的 1795678180782，所以三年窗口是算出来的不是写死的。
+复现出的 coverage 是 0.73，与线上一致。
+
+缺陷 3 的测试是双向的：TestUsageFreshBootStillFiresOnRealHardware 用 gs101/oriole
+真机 + 完全相同的 usage 读数，照常扣 12 分。
+
+黄金文件全部重新生成：pixel6 / mi8 只变 version 一行；emulator 系列从 "/4 null"
+变成 "/5 80"（user10 是 75）。
+
+十二、部署后全库回算
+
+    29 份，全部 sigmark-score/5
+    A:5 / B:4 / D:13 / ?:7
+    decisive 13 份
+    零误伤真机
+
+十三、剩余限制（如实记录）
+
+1. bootQemu 目前没有任何规则读它。采到了、归档了、判据还没接。
+   全库非测试代码只有 protocol.go 白名单一处。这条不说清容易被读成"模拟器问题解决了"。
+2. 真机样本量只有 2 台（Pixel 6 / MI 8），误报率无统计意义，需要 ≥30 台不同 SoC。
+3. SoC 注册表只有 6 条（gs101 / mt6985 / sm8550 / sm8450 / sm8250 / sdm845）。
+4. 单观察者通道未测：overlay / SELinux / virtual_build 三对能否"删一侧"擦除。
+5. 权重标定：六分支各 1 份阳性，15/12/8 需各 ≥30 独立样本。
+6. 桌面 CPU 族名是人工枚举，不是完备集。
+7. arm64 模拟器速度在本机无数字（x86 宿主硬性不支持）。
+
+Co-Authored-By: YtMour <ytmourxiao1@gmail.com>

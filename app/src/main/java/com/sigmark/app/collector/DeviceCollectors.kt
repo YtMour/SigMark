@@ -132,6 +132,12 @@ private object SystemCollector : DeviceCollector {
             "只读启动硬件声明，与 Build.HARDWARE 的含义不同，保留原值。")
         declaredProperty("hardwareSku", "ro.boot.hardware.sku", "启动硬件 SKU", Regex("[A-Za-z0-9._-]{1,32}"), false,
             "与 Build.SKU（API 31+）核对同一声明，可能共享底层数据。")
+        // A bootloader-supplied flag, read with the app's own identity. Emulators often
+        // leave it set while clearing the more famous ro.kernel.qemu, so it is worth
+        // reading even though it is a single property an adversary can also delete:
+        // "1" is direct evidence, an empty value is only "not reported", never "clean".
+        declaredProperty("bootQemu", "ro.boot.qemu", "QEMU 启动标记", Regex("[01]"), false,
+            "模拟器常自曝此属性；真机为空。单个属性可被 resetprop 删除，读到空值只表示未报告，不表示不是模拟器。")
         if (Build.VERSION.SDK_INT >= 31) value("sku", "硬件 SKU", "Build.SKU") { Build.SKU }
         observation("baseOs", "基础系统版本", SafeReader.firstAvailable(
             { SafeReader.read("Build.VERSION.BASE_OS", "OEM 可选字段。") { normalizeValue(Build.VERSION.BASE_OS) } },

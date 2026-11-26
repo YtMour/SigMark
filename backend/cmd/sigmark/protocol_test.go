@@ -414,9 +414,9 @@ func TestFieldSet17To18DictionaryMetadata(t *testing.T) {
 	for _, entry := range dictionary() {
 		meta[entry.Key] = entry
 	}
-	// maxFields for field set 25 is 259: these 235 static keys plus 24 partition rows.
-	if len(meta) != 235 {
-		t.Fatalf("static registry = %d keys, want 235", len(meta))
+	// maxFields for field set 26 is 260: these 236 static keys plus 24 partition rows.
+	if len(meta) != 236 {
+		t.Fatalf("static registry = %d keys, want 236", len(meta))
 	}
 	if got := meta["system.initialSdk"]; got.SinceFieldSet != 18 || got.ValueKind != "integer_text" ||
 		got.Unit != "api_level" || got.MinSchema != 4 || got.Scope != "lan_projection" {
@@ -750,7 +750,9 @@ func TestFieldSet25OverlayEvidence(t *testing.T) {
 		got.Observer != "APP_PROC_MAPS+APP_DIR_LIST" {
 		t.Errorf("overlayEvidence metadata = %+v", got)
 	}
-	if latestFieldSet != 25 || dictionaryVersion != "sigmark-lan-fields/16" {
+	// The header moves with every field set that adds a key. overlayEvidence still
+	// arrives at field set 25; bootQemu arrives at 26, so the current header is 26.
+	if latestFieldSet != 26 || dictionaryVersion != "sigmark-lan-fields/17" {
 		t.Errorf("dictionary header = %d %q", latestFieldSet, dictionaryVersion)
 	}
 

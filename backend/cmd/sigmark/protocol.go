@@ -93,6 +93,7 @@ var versionedParameters = []versionedParameter{
 	{"environment", "overlayDeviceCodename", 23},
 	{"cpu", "cpuCapacity", 24}, {"memory", "cmaTotal", 24},
 	{"environment", "overlayEvidence", 25},
+	{"system", "bootQemu", 26},
 	{"environment", "hookSignals", 17}, {"environment", "tracerPid", 17}, {"environment", "rootMountHints", 17},
 	{"environment", "rootManagerVisible", 17}, {"environment", "userProfile", 17}, {"environment", "drmSecurityLevel", 17},
 	{"environment", "verityMode", 17}, {"environment", "buildDebuggable", 17},
@@ -573,6 +574,9 @@ func (p Report) valid() bool {
 	}
 	if p.FieldSetVersion >= 25 {
 		maxFields = 259 // 235 fixed keys and up to 24 dynamic partition rows.
+	}
+	if p.FieldSetVersion >= 26 {
+		maxFields = 260 // 236 fixed keys and up to 24 dynamic partition rows.
 	}
 	if (p.SchemaVersion < 1 || p.SchemaVersion > 4) || !requestPattern.MatchString(p.RequestID) || p.AndroidAPI < 0 || p.AndroidAPI > 999 ||
 		!modelPattern.MatchString(p.Model) || !versionPattern.MatchString(p.AppVersion) ||

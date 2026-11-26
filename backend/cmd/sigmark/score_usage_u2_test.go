@@ -206,10 +206,18 @@ func TestScoreUsageU2UnmappedSdkIsNamedNotAssumed(t *testing.T) {
 
 // The version bump is itself a contract: a stale frontend must be able to tell that the
 // thresholds it knows do not apply. This asserts the bump happened, so nobody can land a
-// verdict change while leaving the version at /1.
-func TestScoreVersionIsTwoAfterU2(t *testing.T) {
-	if scoreVersion != "sigmark-score/4" {
-		t.Fatalf("scoreVersion = %q, want sigmark-score/4: structural virtual evidence changes verdicts", scoreVersion)
+// verdict change while leaving the version behind.
+//
+// It has been named after each bump so far (/2 U2, /3 one-sided identity, /4 structural
+// virtual evidence, /5 the LDPlayer replay fixes) and it now carries the whole chain: the
+// literal below is the *current* version, not the one the name remembers. Renaming it again
+// on every bump would be noise; what matters is that changing the literal is a deliberate
+// act that shows up in review next to the rule change that forced it.
+func TestScoreVersionTracksVerdictChanges(t *testing.T) {
+	if scoreVersion != "sigmark-score/5" {
+		t.Fatalf("scoreVersion = %q, want sigmark-score/5: a decisive hit now publishes its "+
+			"value, and FRESH_BOOT_ON_AGED_ROM is suppressed on a confirmed virtual device. "+
+			"Both move archived reports", scoreVersion)
 	}
 	values, statuses := pixel6Evidence()
 	score := scoreDevice(values, statuses)

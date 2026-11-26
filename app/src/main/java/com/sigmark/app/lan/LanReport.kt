@@ -16,7 +16,7 @@ internal val reportFields = linkedMapOf(
 )
 
 internal data class LanMetric(val key: String, val status: String, val reason: String?)
-internal const val LanFieldSetVersion = 25
+internal const val LanFieldSetVersion = 26
 
 internal data class LanReport(
     val model: String, val androidApi: Int, val network: String, val wifiBand: String, val radio: String,

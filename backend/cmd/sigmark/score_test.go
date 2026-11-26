@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -89,6 +90,27 @@ func axisScoreOf(t *testing.T, axis scoreAxis) int {
 		return *axis.Score
 	}
 	return axis.computed
+}
+
+// recomputeValue applies the published formula to the axes that printed a score: the
+// weighted mean over exactly those axes. It is the check a reviewer performs by hand from
+// the JSON (§8.1), encoded once so that a document which cannot be recomputed fails a test
+// rather than a human. An axis that is excluded from the average and still prints a score
+// is the failure mode this catches.
+func recomputeValue(t *testing.T, score deviceScore) int {
+	t.Helper()
+	weighted, weights := 0.0, 0.0
+	for _, axis := range score.Axes {
+		if axis.Score == nil {
+			continue
+		}
+		weighted += float64(axis.Weight) * float64(*axis.Score)
+		weights += float64(axis.Weight)
+	}
+	if weights == 0 {
+		t.Fatal("no axis published a score, so there is nothing to recompute")
+	}
+	return int(math.Round(divide(weighted, weights)))
 }
 
 // pixel6Evidence is the archived evidence of report
@@ -409,8 +431,18 @@ func TestScoreDeductionTableMatchesTheDocumentedContract(t *testing.T) {
 	}
 }
 
-// The emulator anchor: a decisive hit on a report that is also too thin to publish a
-// number. Both facts must survive — the band is a conclusion, the number is not.
+// The emulator anchor: a decisive hit on a report whose declaration axis is blind. Both
+// facts must survive — the band is the conclusion, and the number is a sort key that no
+// longer disappears just because the conclusion is already settled.
+//
+// This test used to assert `value == nil` here, on the reading that "coverage withholds the
+// number". That was the *declaration* form of R10, and it was doing the withholding — not
+// overall coverage, which is 0.67 on this capture. Replaying a real LDPlayer 9 report showed
+// what that costs: `band=D, value=null` tells a reviewer nothing about how much was actually
+// deducted, and two D-grade devices cannot be ordered against each other. R10 exists to stop
+// a blind 40%-weight axis from publishing a comfortable A, and once a decisive cap has fixed
+// the band at D there is no comfort left to protect (§13 F5). So the withhold now applies
+// only when nothing else has decided the band.
 func TestScoreEmulatorAnchorIsDecisiveUnderLowCoverage(t *testing.T) {
 	values, statuses := emulatorEvidence()
 	score := scoreDevice(values, statuses)
@@ -423,15 +455,27 @@ func TestScoreEmulatorAnchorIsDecisiveUnderLowCoverage(t *testing.T) {
 	if score.Band != bandD {
 		t.Fatalf("band = %q, want D", score.Band)
 	}
-	if score.Value != nil {
-		t.Fatalf("value = %d, want null: coverage is what withholds the number", *score.Value)
+	if score.Value == nil {
+		t.Fatal("value = null: a decisive hit keeps its number as a sort key, the band is " +
+			"already the conclusion")
+	}
+	// The number must be recomputable from the axes that printed one. The declaration axis
+	// is blind here (coverage 0.33, nothing found), so R7 keeps it out of the average and it
+	// must therefore print no score — otherwise the three visible scores give 82.75 against
+	// a published 80.
+	declaration := scoreAxisByCode(t, score, axisDeclaration)
+	if declaration.Score != nil {
+		t.Fatalf("declaration score = %d at coverage %v: an axis R7 excluded from the "+
+			"average must not publish a score", *declaration.Score, declaration.Coverage)
+	}
+	if got := recomputeValue(t, score); got != *score.Value {
+		t.Fatalf("published value = %d, recomputed from the printed axes = %d", *score.Value, got)
 	}
 	// The marker is priced once, on behavior, and the declaration axis stays clean.
 	behavior := scoreAxisByCode(t, score, axisBehavior)
 	if got := scoreDeductionsFor(behavior, "virtual_build_markers"); len(got) != 1 {
 		t.Fatalf("behavior virtual_build_markers = %+v", got)
 	}
-	declaration := scoreAxisByCode(t, score, axisDeclaration)
 	if len(declaration.Deductions) != 0 {
 		t.Fatalf("declaration must stay clean on a pure build-marker hit: %+v",
 			declaration.Deductions)

@@ -11,7 +11,7 @@ internal data class LanParameter(
 
 // Only the named fields are serialized, never raw DeviceSnapshot JSON.
 private val legacyFields = mapOf(
-    "system" to setOf("release","api","patch","type","manufacturer","brand","model","buildId","romHint","uptime","selinux","selinuxPolicy","selinuxBootHint","selinuxBuildHint","socModel","socManufacturer","declaredCapabilities"),
+    "system" to setOf("release","api","patch","type","manufacturer","brand","model","buildId","romHint","uptime","selinux","selinuxPolicy","selinuxBootHint","selinuxBuildHint","socModel","socManufacturer","declaredCapabilities","bootQemu"),
     "cpu" to setOf("kernel","kernelFull","abis","hardware","cores","pageSize","cpuInfo","features","cpu0MaxFrequency"),
     "memory" to setOf("totalRam","availableRam","lowMemory","lowMemoryThreshold","swap","internalTotal","internalAvailable","sharedState"),
     "display" to setOf("resolution","densityDpi","density","fontScale","refresh","modes","hdr","sizeEstimate"),
@@ -27,7 +27,7 @@ private val diagnosticFields = mapOf(
     "network" to setOf("visibleTransports", "wifiRouteRole"),
     "system" to setOf("display", "incremental", "buildTime", "board", "sku", "baseOs", "tags", "device", "product", "bootloader",
         "partitionCount","webViewProvider","webViewVersion","webViewCode","systemSpl","vendorSpl","initialSdk",
-        "boardPlatform","bootHardware","hardwareSku","bootCount","mediaPerformanceClass","propertyModel","propertyDevice"),
+        "boardPlatform","bootHardware","hardwareSku","bootCount","mediaPerformanceClass","propertyModel","propertyDevice","bootQemu"),
     "cpu" to setOf("arch", "abi32", "abi64", "cpuParts", "cpuCapacity"),
     "memory" to setOf("ramUseEstimate", "volumeSummary", "systemSpace", "appCacheSpace", "physicalRam", "kernelMemTotal",
         "cmaTotal"),

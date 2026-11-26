@@ -496,7 +496,7 @@ func buildDeviceScore(parameters []Parameter, labels []profileLabel, capturedAt 
 	// R7 leaves a thin axis out of the weighted average, so it must leave its *score* out of
 	// the document too. Publishing `declaration: 100, coverage: 0.33` next to a value that
 	// was computed without it makes the document un-recomputable: on the android-34 AVD the
-	// three printed axis scores give (40×100 + 35×65 + 25×100)/100 = 82.75, while the
+	// three printed axis scores give (40×100 + 35×65 + 25×100)/100 = 87.75, while the
 	// published value is 80, and a reviewer has no way to tell which number is wrong. Null
 	// here means the same thing it means under R8 — "this number is not part of the value" —
 	// so the rule a reader applies is uniform: sum the axes that have a score, weighted,

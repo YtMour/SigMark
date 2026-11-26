@@ -6,9 +6,9 @@ import {
   undeterminedLead,unscoredHeadline,
 } from '../src/score-view.ts';
 
-// 契约样本：GET /api/admin/reports/{id}/device-profile 顶层 score（version=sigmark-score/4）。
+// 契约样本：GET /api/admin/reports/{id}/device-profile 顶层 score（version=sigmark-score/5）。
 const payload=()=>({
-  version:'sigmark-score/4',
+  version:'sigmark-score/5',
   value:62,band:'C',bandLabel:'可疑',coverage:0.73,coverageLabel:'部分可判',decisive:false,
   axes:[
     {code:'declaration',label:'声明一致性',weight:40,score:45,coverage:0.9,deductions:[
@@ -277,22 +277,22 @@ test('all five band labels map, and each band headlines its own label',()=>{
   assert.equal(undeterminedLead,'这些通道没读到，所以本次判断不覆盖它们。');
 });
 
-// 版本协商（§8.4）。升到 sigmark-score/4 之后阈值可能变，一个还停在 /1 的前端
-// 如果照旧按 A≥85 染色，会把 /4 判成 C 的设备染成 B——颜色是给人看的结论，染错比不染更糟。
+// 版本协商（§8.4）。升到 sigmark-score/5 之后阈值可能变，一个还停在 /4 的前端
+// 如果照旧按 A≥85 染色，会把 /5 判成 C 的设备染成 B——颜色是给人看的结论，染错比不染更糟。
 test('an unknown score version stops colouring instead of guessing',()=>{
-  const raw={...payload(),version:'sigmark-score/5'};
+  const raw={...payload(),version:'sigmark-score/6'};
   const view=scoreView(raw);
   // 数字和 band 是后端算的，前端不许改写。
   assert.equal(view.band,'C');
   assert.equal(view.score,62);
   assert.equal(view.scored,true);
-  // 但颜色必须停用：我们不知道 /5 的阈值是不是还是 A≥85。
+  // 但颜色必须停用：我们不知道 /6 的阈值是不是还是 A≥85。
   assert.equal(view.tone,bandTones['?'],'未知版本不得沿用本版颜色');
   assert.notEqual(view.tone,bandTones.C);
   // 必须明说，不能静默降级。
   assert.equal(view.versionSupported,false);
-  assert.equal(view.version,'sigmark-score/5');
-  assert.ok(view.versionWarning.includes('sigmark-score/5'));
+  assert.equal(view.version,'sigmark-score/6');
+  assert.ok(view.versionWarning.includes('sigmark-score/6'));
   assert.ok(view.versionWarning.includes('颜色已停用'));
 });
 
@@ -311,14 +311,14 @@ test('the current version keeps its colour and carries no warning',()=>{
   assert.equal(view.versionSupported,true);
   assert.equal(view.versionWarning,null);
   assert.equal(view.tone,bandTones.C);
-  assert.equal(view.version,'sigmark-score/4');
+  assert.equal(view.version,'sigmark-score/5');
 });
 
 // 真实仿真器样本本身就是 /1，必须走正常路径——用真机数据兜住这次改动。
 test('the real emulator capture is still a supported version',()=>{
   const raw=emulator();
   const view=scoreView(raw);
-  assert.equal(raw.version,'sigmark-score/4');
+  assert.equal(raw.version,'sigmark-score/5');
   assert.equal(view.versionSupported,true);
   assert.equal(view.versionWarning,null);
   assert.equal(view.tone,bandTones.D);

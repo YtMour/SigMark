@@ -75,7 +75,13 @@ export const undeterminedLead = '这些通道没读到，所以本次判断不�
 // /2：U2 落地后 initialSdk 参与 FRESH_BOOT_ON_AGED_ROM 判定，usage 轴能在「镜像新、世代老」
 // 的设备上给出真实扣分。这是判定变化，不是形状变化 —— 旧前端若继续用 /1 阈值染色会把这种
 // 设备显示成一致。
-export const scoreVersion = 'sigmark-score/4';
+// /5：两处判定变化，都改变数字本身，不是形状变化。
+//   ① 决定性命中不再吞掉 value（声明轴盲时也出版数字，因为 band 已被 cap 钉死，没有
+//      「舒服的结论」可保护）。旧前端把 null 当「无结论」，现在有数字了。
+//   ② 结构通道的 35 分过去在 finalizeScoreAxis 之后才 append，从未进过轴分——behavior
+//      轴印 85 而它自己的账本扣了 50。修好后轴分和账本一致，总分随之下降。
+//   两条都改变 band 的边界判定，所以必须升版本，不能只当前端常量不动。
+export const scoreVersion = 'sigmark-score/5';
 export const versionMismatchNote = (version: string) =>
   '这份打分来自 ' + version + '，当前界面只认得 ' + scoreVersion +
   '。等级和数字仍按后端原样显示，但颜色已停用——判定规则可能变了，不该用旧阈值给它上色。';

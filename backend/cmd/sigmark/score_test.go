@@ -461,7 +461,7 @@ func TestScoreEmulatorAnchorIsDecisiveUnderLowCoverage(t *testing.T) {
 	}
 	// The number must be recomputable from the axes that printed one. The declaration axis
 	// is blind here (coverage 0.33, nothing found), so R7 keeps it out of the average and it
-	// must therefore print no score — otherwise the three visible scores give 82.75 against
+	// must therefore print no score — otherwise the three visible scores give 87.75 against
 	// a published 80.
 	declaration := scoreAxisByCode(t, score, axisDeclaration)
 	if declaration.Score != nil {

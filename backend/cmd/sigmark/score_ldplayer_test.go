@@ -131,7 +131,7 @@ func scoreLdPlayer() deviceScore {
 //
 // The number must also be recomputable from what is printed, which is why the blind axis
 // publishes no score: R7 kept it out of the average, so leaving a 100 on it would make the
-// three visible axis scores disagree with the published value (82.75 vs 71 here).
+// three visible axis scores disagree with the published value (82.5 vs 71 here).
 func TestScoreDecisiveKeepsItsValueWhenTheDeclarationAxisIsBlind(t *testing.T) {
 	score := scoreLdPlayer()
 	if !score.Decisive {

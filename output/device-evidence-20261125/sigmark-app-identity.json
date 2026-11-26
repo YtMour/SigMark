@@ -1,0 +1,38 @@
+{
+  "schema": "sigmark-app-identity\/1",
+  "observer": "APP",
+  "capturedAtEpochMs": 1795601480520,
+  "collectorVersion": "1.17.0",
+  "readings": {
+    "system.model": {
+      "status": "AVAILABLE",
+      "value": "23078PND5G",
+      "source": "Build.MODEL"
+    },
+    "system.device": {
+      "status": "AVAILABLE",
+      "value": "corot",
+      "source": "Build.DEVICE"
+    },
+    "system.initialSdk": {
+      "status": "AVAILABLE",
+      "value": "33",
+      "source": "getprop ro.product.first_api_level"
+    },
+    "system.boardPlatform": {
+      "status": "AVAILABLE",
+      "value": "mt6985",
+      "source": "getprop ro.board.platform"
+    },
+    "system.bootHardware": {
+      "status": "AVAILABLE",
+      "value": "mtk",
+      "source": "getprop ro.boot.hardware"
+    },
+    "system.hardwareSku": {
+      "status": "AVAILABLE",
+      "value": "23078PND5G",
+      "source": "getprop ro.boot.hardware.sku"
+    }
+  }
+}

@@ -26,6 +26,8 @@ FIELDS = {
     "system.boardPlatform": ("ro.board.platform", r"[a-z0-9_.-]{1,32}"),
     "system.bootHardware": ("ro.boot.hardware", r"[a-z0-9_.-]{1,32}"),
     "system.hardwareSku": ("ro.boot.hardware.sku", r"[A-Za-z0-9._-]{1,32}"),
+    "system.device": ("ro.product.device", r"[A-Za-z0-9._-]{1,80}"),
+    "system.initialSdk": ("ro.product.first_api_level", r"[1-9][0-9]?"),
 }
 
 SYSFS_BATTERY_TEMP = ("/sys/class/power_supply/battery/temp", "/sys/class/power_supply/bms/temp")
@@ -50,7 +52,7 @@ def battery_values(raw):
     return values
 
 
-def collect(adb):
+def collect(adb, selinux_only=False):
     def capture(*args):
         try:
             result = subprocess.run([*adb, *args], capture_output=True, text=True, encoding="utf8",
@@ -61,18 +63,33 @@ def collect(adb):
 
     if capture("get-state") != "device":
         raise ValueError("Select a connected ADB test device.")
-    model = capture("shell", "getprop", "ro.product.model")
-    if not model or len(model) > 100 or not model.isprintable():
-        raise ValueError("No valid model was returned by the device.")
     start = datetime.now(timezone.utc)
-    readings = {}
+    model = capture("shell", "getprop", "ro.product.model")
+    if (not model or not model.isprintable() or len(model.encode("utf-16-le")) > 200
+            or model.lower() in {"unknown", "null"}):
+        if selinux_only:
+            raise ValueError("No valid model was returned by the device.")
+        model = None
+    mode = capture("shell", "getenforce")
+    readings = {"system.selinux": mode if mode in {"Enforcing", "Permissive", "Disabled"} else None}
+    observation = {
+        "schema": "sigmark-adb-evidence/6",
+        "observer": "ADB_SHELL",
+        "model": model,
+        "observedAtEpochMs": int(start.timestamp() * 1000),
+        "readings": readings,
+    }
+    if selinux_only:
+        # Keep the existing import schema. Null means these fields were not read.
+        observation["schema"] = "sigmark-adb-evidence/1"
+        for key in ("system.patch", "system.vendorSpl", "environment.verifiedBoot", "environment.flashLock"):
+            readings[key] = None
+        return observation
     for key, (prop, pattern) in FIELDS.items():
         value = capture("shell", "getprop", prop)
         valid = re.fullmatch(pattern, value, re.ASCII) is not None
         # "unknown"/"null" are placeholders, not readings (the App normalizes them away).
         readings[key] = value if valid and value.lower() not in {"unknown", "null"} else None
-    mode = capture("shell", "getenforce")
-    readings["system.selinux"] = mode if mode in {"Enforcing", "Permissive", "Disabled"} else None
     # 'dumpsys battery' without arguments is a read-only service query.
     battery = capture("shell", "dumpsys", "battery")
     # When Android reports that BatteryService updates are stopped, these
@@ -86,17 +103,17 @@ def collect(adb):
         if node is not None:
             break
     readings["battery.sysBatteryTemp"] = node
-    return {"schema": "sigmark-adb-evidence/4", "observer": "ADB_SHELL", "model": model,
-            "observedAtEpochMs": int(start.timestamp() * 1000), "readings": readings}
+    return observation
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--serial", required=True, help="Connected test device selected in adb devices.")
     parser.add_argument("--output", required=True, type=Path, help="New local JSON filename.")
+    parser.add_argument("--selinux-only", action="store_true", help="Read only the device model and SELinux mode.")
     args = parser.parse_args()
     try:
-        value = collect(["adb", "-s", args.serial])
+        value = collect(["adb", "-s", args.serial], selinux_only=args.selinux_only)
         with args.output.open("x", encoding="utf8") as stream:
             json.dump(value, stream, ensure_ascii=False, indent=2)
             stream.write("\n")

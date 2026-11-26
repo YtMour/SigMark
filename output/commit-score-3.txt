@@ -1,0 +1,253 @@
+# 提交摘要：U2 落地 + 红队对抗 + 身份洗白修复（sigmark-score/3）
+
+## 一、这一轮做了什么
+
+四件事，按影响排序：
+
+1. **U2 落地**：`system.initialSdk` 从「只拼进 keys 的装饰」变成真正的世代信号，参与
+   `FRESH_BOOT_ON_AGED_ROM` 判定。
+2. **红队对抗验证**：把「攻击这套打分」当成一等任务做了一轮，产出
+   `docs/SCORE-REDTEAM.md`（905+ 行威胁模型），并把最严重的发现写成**可执行的 Go 测试**，
+   用真实设备证据做单变量对照。
+3. **修掉两个真洞**：
+   - 删 usage 证据能升档（97/B → 100/A）；
+   - 删一侧身份读数能把确认过的伪装洗成 100/A。
+4. **版本双升**：`profileVersion /8 → /9`、`scoreVersion /2 → /3`。
+   全库 23 份**零漂移**，但契约变了就升版——这是「零命中也要升版」的第二例。
+
+---
+
+## 二、U2：为什么值得做，以及它没那么神
+
+### 它解决什么
+
+U1 看 `partitionBuildDates`——描述的是**镜像**。攻击者刷一个新 ROM，镜像就变新了，
+U1 立刻失明。
+
+U2 看 `initialSdk`——描述的是**设备世代**。一台 2017 年的手机刷了 2024 的镜像，
+仍然报 `sdk 27`。所以 U2 覆盖的正是 U1 结构上看不见的那一类伪装：
+**设备老、镜像新、开机次数极少**。
+
+### 它没那么神（红队指出，我验证后撤回原说法）
+
+我第一版在代码注释里写「`initialSdk` 是不可伪造的，而声明轴已经为它定价」。
+**两处都错**：`initialSdk` 取自 `ro.product.first_api_level`，`resetprop` 一行就能改；
+`hardwareKeys` 也不含它，声明轴根本不交叉校验。U2 的真实定位是
+「**把伪装成本抬高一步**」，不是「不可伪造」。注释已按此改写。
+
+### 实现上的一个坑
+
+第一版用 `else if` 把 U1/U2 串成互斥分支，让 U2 在它唯一该工作的场景
+（分区日期可读且很新）**永不触发**。旧测试全绿，是新写的
+`TestScoreUsageU2CatchesOldDeviceOnFreshImage` 把它揪出来的。
+改为两条独立检查，同时命中只扣一次 12 分（R2 一因一果）。
+
+### 仿真器实测出的误报面
+
+`emulator-5554` 实测：`first_api_level=34`(2023)、`boot_count=2`、`build.date=2024-07-11`。
+采集年 2026 → cutoff 2023 → **恰好压边界命中**，usage 轴 100 → 88。
+
+这不是判定错误（它精确描述了规则要抓的矛盾），但**解释变了**：仿真器上是「镜像老」，
+不是「有人在隐藏使用痕迹」。而一台 2017 年的真机被重置一次，会拿到同样的 12 分，
+**且没有决定性 cap 兜底**。缓解方向是加 `uptime < 3 天` 限定，本轮未做。
+
+因此「U2 无阳性样本」要修正为：**生产库 23 份 0 命中，仿真器上 1 份实测阳性；
+缺的是真机阳性样本。**
+
+---
+
+## 三、红队四条发现，三种结局
+
+全部当成**待验证的假设**，写成可执行测试，单变量对照。
+
+### 发现 3：删 usage 证据能升档 —— **一字不差，已修**
+
+| 场景 | usage 轴 | 总分 | band |
+| --- | --- | --- | --- |
+| 诚实：老镜像 + 1 次开机 | cov=1, 1 条扣分 | **97** | **B** |
+| 删掉 `partitionBuildDates` + `initialSdk` | cov=0, 0 条扣分 | **100** | **A** |
+
+修复：R10 分两层。declaration 轴盲 → 照旧**不出版数字**（原严格形态保留）；
+behavior / usage 轴盲 → **数字照常出版，但禁止评为 A**。
+
+为什么不统一成「都不出版」：我先试了，一个 hook 注入 + debugger 都在的真机样本
+从 **D 变成 `?`**，把唯一看见了的东西弄丢了。窄形态才对——**band 才是攻击者想动的
+东西，就锁死 band**，数字留作排序键。
+
+### 发现 2：删一侧身份读数 —— **严重性最高，已修**
+
+这条我做了**三次实验**才看清，前两次都是被污染的：
+
+| # | 样本 | 结果 | 为什么作废 |
+| --- | --- | --- | --- |
+| 一 | Pixel 6 真实证据 | 82/D | 自带 `FOREIGN_PROFILE`(30) + overlay 不一致(15)，与洗白无关 |
+| 二 | 隔离「干净」设备 | 88/B → 78/D → 88/B | `kernelMemTotal` 7.44 vs 12.00 GiB 差 38% → `ram_dispersion` 冲突 → 30 分扣分，基线**注定到不了 A** |
+| 三 | 真正干净的基线 | **100/A → 90/D → 100/A** | 决定性 |
+
+**实验三证实：一台确认过的伪装机，删掉一个属性就变回 100/A，报告与真干净设备逐字节
+不可区分。** 实验二之所以看起来「只到 B」，是因为那 30 分硬件扣分挡着——不是 R10 挡住了洗白。
+
+> 这是这一轮最重要的教训：**结果自洽不等于测量干净。**
+> 88/78/88 三个数互相一致、能自圆其说，但基线本身是脏的。
+> 是红队从最终 value 反推轴权重、发现基线注定到不了 A，才拆穿的。
+
+**修复**：`oneSidedIdentity`——同一对身份读数，**两侧 Status 都是 `AVAILABLE`**
+但只有一侧产出可用值，这本身就是证据（两侧来自同一次采集、同一进程、同一对源，
+一边有值一边没值不是「读不到」）。
+
+四个显式跳过条件，每条都是防误伤：
+1. `NOT_ARCHIVED` —— 字段集根本没这个字段。**关键**：全库 7 份「不对称」的全是
+   fs=16/20，那三个字段整行不存在，所以不误伤。
+2. `RESTRICTED` / `ERROR` / `UNAVAILABLE` —— 采集受限或读取失败，不是证据。
+3. 两侧都不可用 —— 真的读不到，不是篡改。
+4. 以上全满足才判 hit。
+
+命中时附证据行 `identity_asymmetry`，值为「N 对身份读数只有一侧可读（共 M 对在档）」，
+cap 理由也用这句——**不写「被篡改」，只写观察到了什么**。
+
+**修复后**：决定性实验 90/D → 洗白 **90/D**（等于冲突，不再回到 A）；
+隔离设备 78/D → 洗白 **78/D**。洗白不再有任何收益。
+
+**连带语义变更**：单侧**占位符**现在也算不对称。原来 `device="UnKnOwN"` vs
+`propertyDevice="corot"` 判 `insufficient`，现在判 `hit`。理由：占位符和空白一样便宜，
+只堵空白不堵 `unknown` 等于没堵。两侧都是占位符 → 仍 `insufficient`（设备真的报不出）。
+
+这是**用 R4 的边界换来的**：R4 说「无证据不定罪」，但「一侧有值一侧无值」不是无证据，
+是**证据不对称**。
+
+### 发现 1（未登记 SoC 算「没问题」）—— 未验证，仍是最高优先级待办
+
+`declaredSoc` 只认 `socProfiles` 5 颗，表外 SoC 让四条硬件通道因 `known &&` 前置静默
+跳过，标签报 `not_observed`。红队指出「老实声明得 D、改声明成表外 SoC 得 A」。
+**本轮未验证也未修**，现在升为第一优先级。
+
+---
+
+## 四、版本双升与零漂移
+
+| 项 | 旧 | 新 | 理由 |
+| --- | --- | --- | --- |
+| `profileVersion` | `/8` | **`/9`** | `identity_conflict` 的状态映射变了 |
+| `scoreVersion` | `/2` | **`/3`** | 它移动 band |
+
+**全库 23 份逐份比对 band/value，三次零漂移**（修 R10 后、修洗白后、升版后各一次）。
+分布稳定：A:4 / D:8 / B:4 / ?:7。全部 `version=sigmark-score/3`。
+
+黄金文件 5 份重生成，**数值全部不变**（Pixel6 82/D、MI8 100/A、三份仿真器 D），
+只有 `version` 一行变。
+
+---
+
+## 五、验证
+
+| 项 | 结果 |
+| --- | --- |
+| Go `go test -count=1 ./...` | **136 顶层：133 PASS / 3 SKIP / 0 FAIL**（含子测试 199 个 RUN 行） |
+| `gofmt -l` / `go vet` | 干净 / exit 0 |
+| Web `npm test` | **103 / 103 / 0** |
+| 全库回算 | **0 / 23 变化** |
+| 部署 | 镜像重建、容器重启、`/readyz` = `{"status":"ready"}` |
+
+> 数字口径：数 `--- PASS/SKIP/FAIL` 行，**不数 `=== RUN`**（`TestXxx/sub` 会多算）。
+> 这个口径必须写在数字旁边——我这一轮就因为没写清，先报了 197 顶层（实为 RUN 行数），
+> 又手算出 201。
+
+新增测试文件：
+- `score_usage_u2_test.go`（9 Test）：U2 年份表、核心命中、U1 不回归、不重复计价、
+  高开机次数不误报、窗口相对性、表外 SDK 命名、版本断言。
+- `score_emulator_u2_test.go`（2 Test）：仿真器 U2 边界三档 + 老镜像新实例误报。
+- `score_redteam_test.go`（2 Test）：删 usage 证据升档、删一侧身份洗白。
+- `score_redteam_overlay_test.go`（1 Test）：**污染实验，保留作反例**（`caps=2` 是污染指纹）。
+- `score_redteam_clean_test.go`（1 Test）：**污染实验，保留作反例**（基线藏 30 分）。
+- `score_redteam_decisive_test.go`（1 Test）：决定性的干净基线洗白实验。
+
+---
+
+## 六、这一轮的教训（四条，全是同一类错）
+
+我这一轮犯了四次同类错误：**用一个不足以支撑结论的判据，然后把它当成验证。**
+
+| # | 判据不够 | 错在哪 | 该用什么判据 |
+| --- | --- | --- | --- |
+| 1 | 行号只查非空 | 6 处指向同文件另一条语句 | 「该行是不是那个东西」 |
+| 2 | 实验基线自带噪声（Pixel 6） | 「82/D 洗白无效」作废 | 「基线是否真的干净」 |
+| 3 | 测试计数没写清口径 | 197 当顶层、又手算 201 | 数 `--- PASS/SKIP/FAIL` |
+| 4 | 实验二结果自洽 | 88/78/88 互相一致，但基线脏 | 基线必须先**独立**验证干净 |
+| 5 | 批量替换不区分语义 | 前端正常路径也被改成「未知版本」，103 → 86 | 替换要按用途分支 |
+
+四次里有三次是**别人**发现的（红队两次、docs 一次）。这说明：自检只能发现自检能发现的
+问题。对抗性审查不是可选项。
+
+---
+
+## 七、剩余限制（如实）
+
+### 未修 / 未验证
+- **发现 1：未登记 SoC**。`known &&` 前置让表外 SoC 的硬件通道静默跳过，未验证。
+  现在是**最高优先级**——它是目前唯一「低成本且能到 A」的路径。
+- **洗白修复只覆盖 identity 这一对**。这是修完之后最重要的新问题，而且它不是一个
+  「修法不够狠」的问题，是**信息结构问题**：
+
+  | 通道 | 观察者数量 | 能否被「删一侧」擦除 |
+  | --- | --- | --- |
+  | `identity_conflict` | **2**（App 侧 + 同名只读属性） | 不能（本轮已修） |
+  | `overlay_codename` | **1** | 未测，预期能 |
+  | `selinux_permissive` | **1** | 未测，预期能 |
+  | `virtual_build_markers` | 3 键但同源 | 未测 |
+
+  **identity 之所以能修，是因为它本来就有一个对照物**（同一份声明的两次读数）。
+  另外三条只有一个观察者——没有对照物，就没有「不对称」可言，判据再狠也没用。
+  所以下一轮的真正入口不是「再加一条规则」，而是**给每个单观察者通道找第二来源**：
+  overlay 用分区构建时间对照、SELinux 用 `getenforce` 双读、virtual_build 三个键
+  互为对照（只需改 `insufficient` 的语义）。
+- **U2 无真机阳性样本**（生产库 0、仿真器 1、真机 0）。
+
+### 已实测但受限
+- **权重标定缺口**：behavior 六分支各仅 1 份阳性样本，`15/12/8` 在 ±5 噪声内无法区分。
+  要各 ≥30 份**独立**样本（同一台 AVD 重复采集不算）。
+  `debugger_attached`(20) 与 `root_manager_visible`(12) 连真机样本都没有。
+- **仿真器**：只有 `android-34 google_apis x86_64` 一个镜像。`-writable-system` 持久化语义、
+  老 API 镜像、`arm64-v8a` 在 x86 宿主速度、Android-x86/Bliss/Waydroid/redroid 的属性值，
+  全部未实测。
+
+### 未做采集
+- usage 轴字段集 26（`system.firstBootTime` / `battery.chargeFull`+`chargeFullDesign` /
+  `system.launcherAppCount` / `PATCH_AFTER_BUILD`）。
+- `FRESH_BOOT_ON_AGED_ROM` 加 `uptime < 3 天` 限定并降 REVIEW。
+
+---
+
+## 八、改动清单
+
+**代码**
+- `backend/cmd/sigmark/score.go`：`/3` + 版本历史；`usageSdkYears` + `usageSdkYear()`；
+  `usageAxis` 的 U1/U2 独立检查；R10 两层（`axisBlind` + `declarationBlind`）；
+  `identityAsymmetryDetail()`；U2 注释按实测修正。
+- `backend/cmd/sigmark/identity_consistency.go`：**新增 `oneSidedIdentity()`**（洗白修复核心）。
+- `backend/cmd/sigmark/device_profile.go`：`profileVersion /9` + 版本历史；
+  `identity_conflict` 消费 `oneSidedIdentity`；`identity_asymmetry` 证据行。
+- `backend/cmd/sigmark/{score_usage_u2,score_emulator_u2,score_redteam,score_redteam_overlay,score_redteam_clean,score_redteam_decisive}_test.go`。
+- `backend/cmd/sigmark/{score,score_golden,score_variants,device_profile}_test.go`：断言随契约更新。
+- `backend/cmd/sigmark/testdata/*.golden.json`（5 份，仅 version 变）。
+
+**前端**
+- `backend/web/src/score-view.ts`：`scoreVersion` → `/3`。
+- `backend/web/test/score-view.test.mjs` + `fixtures-emulator-score.json`：同步 `/3`，
+  未知版本用例用 `/4`。
+
+**文档**
+- `docs/SCORE-REDTEAM.md`（新）：对抗性威胁模型 + 三轮实测记录。
+- `docs/SECURITY-SCORE.md`：契约同步到 `/3` / `profile9`，F15 改为已修，F16 方法论三次。
+- `output/commit-score-3.txt`（本文件）。
+
+---
+
+## 九、怎么提交（手动）
+
+```bash
+cd D:\SigMark
+git add -A
+git commit -F output/commit-score-3.txt
+```
+
+不 push、不 clean，按约定留给手动执行。

@@ -230,6 +230,9 @@ class MainActivity : ComponentActivity() {
                 }, onExport = { snapshot ->
                     pendingExport = snapshot.toJson()
                     createDocument.launch("SigMark-${SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date(snapshot.collectedAt))}.json")
+                }, onIdentityExport = { snapshot ->
+                    pendingExport = com.sigmark.app.security.appIdentityJson(snapshot)
+                    createDocument.launch("SigMark-identity-${snapshot.collectedAt}.json")
                 })
             }
         }
@@ -254,6 +257,7 @@ private fun SigMarkScreen(
     onPhonePermission: () -> Unit,
     onTimelineExport: (String) -> Unit,
     onExport: (DeviceSnapshot) -> Unit,
+    onIdentityExport: (DeviceSnapshot) -> Unit,
 ) {
     var query by rememberSaveable { mutableStateOf("") }
     var selected by rememberSaveable { mutableStateOf("all") }
@@ -334,40 +338,28 @@ private fun SigMarkScreen(
                                 Text("上传报告")
                             }
                         }
-                        if (state.fullStage == 0) {
-                            Text("整体获取包含密钥保护、AVC 首帧和 GLES 离屏回读自测。",
-                                color = Muted, fontSize = 12.sp)
-                        }
-                        Text(when (state.fullStage) {
-                            1 -> "正在采集设备参数"
-                            2 -> "正在进行密钥保护自测"
-                            3 -> "正在验证固定样片首帧"
-                            4 -> "正在进行图形离屏回读实测"
-                            5 -> "正在保存本次报告"
-                            else -> if (!lanEnabled) "采集设备与安全信息，结果只在本机查看。"
-                                else saved.firstOrNull()?.let { "最近保存：" + networkLabel(it.network) + " · " +
-                                    java.text.DateFormat.getTimeInstance().format(Date(it.time)) + "　待上传 " + saved.count { row -> !row.sent } + " 份" }
-                                    ?: "先采集，再上传。换回 Wi-Fi 后也能上传之前的报告。"
+                        if (state.fullStage > 0) Text(when (state.fullStage) {
+                            1 -> "正在采集"
+                            5 -> "正在保存报告"
+                            else -> "正在检查"
                         }, color = Muted, fontSize = 12.sp)
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            OutlinedButton(enabled = !busy, onClick = { onCollectAll(CapturePlan.ROM) }, modifier = Modifier.weight(1f)) { Text("ROM 验收") }
-                            OutlinedButton(enabled = !busy, onClick = { showRouteExperiment = true }, modifier = Modifier.weight(1f)) { Text("网络切换实验") }
+                        if (state.captureSecurityReady && !busy) {
+                            CaptureSecuritySummary(snapshot, onDetails = { showSecurity = true })
                         }
-                        if (hardware.isNotEmpty()) {
-                            OutlinedButton(onClick = { hardwareOnly = !hardwareOnly; query = ""; issuesOnly = false; selected = "all" },
-                                modifier = Modifier.fillMaxWidth()) {
-                                Text(if (hardwareOnly) "返回全部采集项" else "查看扩展采集 · ${hardware.size} 项")
-                            }
-                            Text("扩展采集：${hardware.count { it.status == ValueStatus.AVAILABLE }} 项有值 / ${hardware.size} 项已记录。",
-                                color = Muted, fontSize = 12.sp)
-                        }
-                        TextButton(enabled = !busy, onClick = { showPlans = true }) { Text("选择验收方案") }
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                            TextButton(enabled = !busy, onClick = { showRecheck = true }, modifier = Modifier.weight(1f)) { Text("权限与复测") }
-                            TextButton(onClick = { showSecurity = true }, modifier = Modifier.weight(1f)) { Text("指纹安全") }
+                            if (!state.captureSecurityReady) TextButton(onClick = { showSecurity = true }) { Text("指纹安全") }
                             Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
                                 TextButton(onClick = { showTools = true }) { Text("更多工具") }
                                 DropdownMenu(expanded = showTools, onDismissRequest = { showTools = false }) {
+                                    DropdownMenuItem(text = { Text("权限与复测") }, enabled = !busy,
+                                        onClick = { showTools = false; showRecheck = true })
+                                    DropdownMenuItem(text = { Text("选择验收方案") }, enabled = !busy,
+                                        onClick = { showTools = false; showPlans = true })
+                                    DropdownMenuItem(text = { Text("网络切换实验") }, enabled = !busy,
+                                        onClick = { showTools = false; showRouteExperiment = true })
+                                    if (hardware.isNotEmpty()) DropdownMenuItem(
+                                        text = { Text(if (hardwareOnly) "返回全部采集项" else "查看扩展采集") },
+                                        onClick = { showTools = false; hardwareOnly = !hardwareOnly; query = ""; issuesOnly = false; selected = "all" })
                                     DropdownMenuItem(text = { Text("链路记录") }, onClick = { showTools = false; showTimeline = true })
                                     if (lanEnabled) DropdownMenuItem(text = { Text("检查更新") }, onClick = { showTools = false; showUpdate = true })
                                     DropdownMenuItem(text = { Text("实时传感器") }, onClick = { showTools = false; showSensors = true })
@@ -491,7 +483,7 @@ private fun SigMarkScreen(
         close = { showRecheck = false },
         requestCell = { showCellExplanation = true }, requestPhone = { showPhoneExplanation = true },
         appSettings = onAppSettings, locationSettings = onLocationSettings)
-    if (showSecurity && snapshot != null) SecurityPanel(snapshot, state.testingKey, state.refreshing, onTestKey) { showSecurity = false }
+    if (showSecurity && snapshot != null) SecurityPanel(snapshot, state.testingKey, state.refreshing, onTestKey, onIdentityExport) { showSecurity = false }
     if (showPhoneExplanation) AlertDialog(
         onDismissRequest = { showPhoneExplanation = false },
         title = { Text("授权电话状态") },

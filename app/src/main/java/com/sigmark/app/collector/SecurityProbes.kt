@@ -5,6 +5,8 @@ import android.content.Intent
 import android.media.MediaDrm
 import android.os.UserManager
 import android.provider.Settings
+import com.sigmark.app.model.ReadReason
+import com.sigmark.app.model.ValueStatus
 import java.util.Locale
 import java.util.UUID
 
@@ -122,13 +124,232 @@ internal fun partitionDatesText(dates: Map<String, String>): String? =
     partitionBuildDateOrder.mapNotNull { part -> dates[part]?.let { "$part $it" } }
         .joinToString(" · ").ifEmpty { null }
 
+// AOSP names the framework runtime-resource-overlay after the product the image was
+// built for: framework-res__<product>_user__auto_generated_rro_<partition>.apk. Its
+// idmap stays mapped in every process that loads resources, so the product name of
+// the installed image is visible in /proc/self/maps even when the property layer
+// reports a different codename.
+//
+// Field set 25. One baked file name is a single build artifact; the same image also
+// carries the per-target RROs it was built with, both as idmaps in `maps` and as
+// files under the partition overlay directories. Reading several of them makes the
+// channel survive a module that replaces only the framework overlay, and keeps the
+// disagreement visible instead of silently picking one. None of these paths can name
+// the SoC or the SKU: those only ever appear as side evidence.
+private val frameworkRro = Regex(
+    """framework-res__([A-Za-z0-9_]{2,32})_user__auto_generated_rro(?:_[a-z0-9]{1,16})?\.apk"""
+)
+private val idmapPath = Regex("""/data/resource-cache/([^/\s]+)@idmap""")
+// Group 1 is the target package, kept only for context; group 2 is the candidate.
+private val perTargetRro = Regex(
+    """^(?!framework-res__)([A-Za-z0-9_.]{1,64})__([A-Za-z0-9_]{2,32})_user__auto_generated_rro(?:_[a-z0-9]{1,16})?\.apk$"""
+)
+private val dirRro = Regex(
+    """^[A-Za-z0-9_.\-]{1,64}__([A-Za-z0-9_]{2,32})_user__auto_generated_(?:rro|characteristics_rro)(?:_[a-z0-9]{1,16})?\.apk$"""
+)
+// YmRecentsGs101Overlay -> Gs101. The platform name, never a device codename.
+private val socOverlay = Regex("""Ym[A-Za-z]{2,24}?([A-Z][a-z]?\d{3})Overlay""")
+// SettingsOverlayGR1YH.apk -> GR1YH. A SKU, never a device codename.
+private val skuOverlay = Regex("""^[A-Za-z]{3,24}Overlay([A-Z0-9]{4,10})\.apk$""")
+
+// Structural words, placeholders, platform names and SKU-shaped words that a capture
+// group could otherwise turn into a codename. `corot` and `oriole` are real codenames
+// and must never be listed here.
+private val overlayCodenameBlocklist = setOf(
+    "framework", "common", "system", "product", "vendor", "odm", "system_ext", "main", "default", "base",
+    "nosdcard", "generic", "unknown", "google", "android", "aosp", "user", "eng", "test", "debug",
+    "overlay", "rro", "apk", "idmap", "resources", "device", "phone", "build",
+    "mtk", "qcom", "gs101", "gs201", "exynos", "tensor", "kirin", "sm8450", "mt6985",
+)
+
+internal enum class OverlayDir(val path: String, val channel: String) {
+    VENDOR("/vendor/overlay", "vendor_dir"),
+    PRODUCT("/product/overlay", "product_dir"),
+    SYSTEM_EXT("/system_ext/overlay", "system_ext_dir"),
+    ODM("/odm/overlay", "odm_dir"),
+}
+
+// Three states, not two: "the directory is not on this image" and "the app may not
+// list it" mean different things to the report and must not collapse into "no match".
+internal sealed interface DirScan {
+    data class Names(val names: List<String>) : DirScan
+    data object Absent : DirScan
+    data object Denied : DirScan
+}
+
+internal data class OverlayReading(
+    val codename: String?,
+    val evidence: String?,
+    val conflicts: List<String>,
+    val denied: List<String>,
+    val available: Boolean,
+)
+
+private const val overlayEvidenceMaxChars = 200
+private const val overlayDirMaxEntries = 64
+
+// The capture groups are deliberately loose so one pattern covers every AOSP name
+// shape, which lets a one-character product name absorb the separator and capture
+// `a_` from `framework-res__a__user__...`. The length and character rules from the
+// spec are therefore enforced here, once, rather than repeated in five patterns:
+// 2-32 characters, alphanumeric at both ends.
+private val overlayCodenameShape = Regex("^[a-z0-9][a-z0-9_]{0,30}[a-z0-9]$")
+
+// Case-insensitive with `-` folded to `_` for the blocklist comparison only.
+private fun overlayCodenameCandidate(raw: String?): String? {
+    val value = raw?.trim()?.lowercase(Locale.ROOT) ?: return null
+    if (!overlayCodenameShape.matches(value)) return null
+    return value.takeIf { it.replace('-', '_') !in overlayCodenameBlocklist }
+}
+
+private fun firstOverlayCodename(candidates: Iterable<String?>): String? =
+    candidates.mapNotNull(::overlayCodenameCandidate).firstOrNull()
+
+internal fun overlayReading(
+    maps: String?,
+    directories: Map<OverlayDir, DirScan> = emptyMap(),
+    declaredSku: String? = null,
+): OverlayReading {
+    val denied = mutableListOf<String>()
+    val text = maps.orEmpty()
+    // A null reading means the node could not be read at all, which is evidence of a
+    // gap rather than evidence of absence.
+    if (maps == null) denied += "maps"
+
+    // A: the framework RRO, in both its direct and its @idmap escaped form.
+    val rro = firstOverlayCodename(frameworkRro.findAll(text).map { it.groupValues[1] }.toList())
+    // B: any other per-target RRO idmap that happens to be loaded in this process.
+    val idmap = firstOverlayCodename(
+        idmapPath.findAll(text).map { it.groupValues[1].substringAfterLast('@') }
+            .mapNotNull { perTargetRro.find(it)?.groupValues?.get(2) }.toList(),
+    )
+
+    val dirValues = mutableMapOf<OverlayDir, String?>()
+    for (dir in OverlayDir.entries) {
+        when (val scan = directories[dir] ?: DirScan.Absent) {
+            is DirScan.Names -> dirValues[dir] = firstOverlayCodename(
+                scan.names.sorted().map { dirRro.find(it)?.groupValues?.get(1) },
+            )
+            DirScan.Denied -> denied += dir.channel
+            DirScan.Absent -> Unit
+        }
+    }
+
+    // Fixed channel order; the first hit is the verdict, a later disagreement is only
+    // recorded. maps wins because it shows what this process actually loaded, while a
+    // directory entry can be swapped on its own.
+    val channels = listOf("rro" to rro, "idmap" to idmap) +
+        OverlayDir.entries.map { it.channel to dirValues[it] }
+    val codename = channels.firstOrNull { it.second != null }?.let { (channel, value) -> channel to value!! }
+
+    val conflicts = if (codename == null) emptyList() else channels
+        .filter { (channel, value) -> value != null && channel != codename.first && value != codename.second }
+        .map { (channel, value) -> "conflict:${codename.first}:${codename.second}!=${channel}:$value" }
+
+    // SoC and SKU names are read from every visible name, but only as side evidence.
+    val names = (listOf(text) + dirValues.keys.mapNotNull { dir ->
+        (directories[dir] as? DirScan.Names)?.names?.joinToString(" ")
+    }).joinToString(" ").split(Regex("[\\s/]+")).filter { it.isNotEmpty() }
+    val skuCandidates = names.mapNotNull { skuOverlay.find(it)?.groupValues?.get(1)?.lowercase(Locale.ROOT) }.distinct()
+    val socCandidates = names.mapNotNull { socOverlay.find(it)?.groupValues?.get(1)?.lowercase(Locale.ROOT) }.distinct()
+    val declared = declaredSku?.trim()?.lowercase(Locale.ROOT)?.takeIf { it.isNotEmpty() }
+    // A device carries one SKU overlay per hardware variant it was built for, so a
+    // single value needs a tie-break: the declared SKU when it is one of the measured
+    // candidates, otherwise every candidate stays listed rather than one being picked.
+    val sku = when {
+        skuCandidates.isEmpty() -> null
+        declared != null && declared in skuCandidates -> declared
+        skuCandidates.size == 1 -> skuCandidates.single()
+        else -> skuCandidates.sorted().joinToString(",")
+    }
+    val soc = socCandidates.sorted().joinToString(",").ifEmpty { null }
+
+    val parts = mutableListOf<String>()
+    if (rro != null) parts += "rro:$rro"
+    if (idmap != null) parts += "idmap:$idmap"
+    for (dir in OverlayDir.entries) {
+        when {
+            dirValues.containsKey(dir) -> parts += "${dir.channel}:${dirValues[dir] ?: "unknown"}"
+            dir.channel in denied -> parts += "${dir.channel}:denied"
+        }
+    }
+    if (sku != null) parts += "sku:$sku"
+    if (soc != null) parts += "soc:$soc"
+    parts += conflicts
+
+    return OverlayReading(
+        codename = codename?.second,
+        evidence = parts.joinToString(" / ").take(overlayEvidenceMaxChars).ifEmpty { null },
+        conflicts = conflicts,
+        denied = denied,
+        available = codename != null,
+    )
+}
+
+// Kept for the callers that only have `maps`. It runs levels A and B, which is exactly
+// the old single-pattern behaviour plus the blocklist; the capture path uses the full
+// five-level reading below.
+internal fun overlayDeviceCodename(maps: String?): String? =
+    if (maps == null) null else overlayReading(maps).codename
+
+// SafeReader.listNames stats the path first, so a denied directory comes back RESTRICTED
+// while a missing one comes back UNAVAILABLE. Keeping the two apart matters: "cannot
+// read" must not be reported as "nothing there".
+private fun scanOverlayDir(dir: OverlayDir): DirScan {
+    val listing = SafeReader.listNames(dir.path, overlayDirMaxEntries)
+    if (listing.value != null) return DirScan.Names(listing.value)
+    return if (listing.status == ValueStatus.RESTRICTED) DirScan.Denied else DirScan.Absent
+}
+
+private fun overlayDirScans(): Map<OverlayDir, DirScan> =
+    OverlayDir.entries.associateWith(::scanOverlayDir)
+
+private const val overlayEvidenceSource = "/proc/self/maps + /vendor|product|system_ext|odm/overlay"
+
+private fun overlayCodenameReading(maps: ReadResult<String>, overlay: OverlayReading): ReadResult<String> = when {
+    overlay.codename == null -> if (maps.value == null) maps else ReadResult(null, ValueStatus.UNAVAILABLE,
+        maps.source, "maps 与四个 overlay 目录里都没有 AOSP 命名的 RRO 产品名。", ReadReason.NOT_REPORTED)
+    maps.value == null -> ReadResult(overlay.codename, ValueStatus.AVAILABLE, overlayEvidenceSource)
+    else -> maps.copy(value = overlay.codename)
+}
+
+private fun overlayEvidenceReading(overlay: OverlayReading): ReadResult<String> = when {
+    overlay.available -> ReadResult(overlay.evidence, ValueStatus.AVAILABLE, overlayEvidenceSource)
+    // "Could not read" is not "not there": an incomplete evidence trail must not be
+    // reported as a clean image.
+    overlay.denied.isNotEmpty() -> ReadResult(null, ValueStatus.RESTRICTED, overlayEvidenceSource,
+        "部分通道被拒绝读取（${overlay.denied.joinToString("、")}），证据不完整，不能据此断言没有 overlay 记录。",
+        ReadReason.ACCESS_DENIED)
+    else -> ReadResult(null, ValueStatus.UNAVAILABLE, overlayEvidenceSource,
+        "maps 与四个 overlay 目录都没有 AOSP 命名的 RRO 记录。", ReadReason.NOT_REPORTED)
+}
+
 // Field set 17 additions. Every item is an observation of this app process and
 // carries its own status; one failed read never removes the others.
 internal fun SectionBuilder.securityEnvironment(context: Context) {
+    // One read of this process's maps serves both the injection scan and the overlay
+    // product name; the node is large and must not be read twice per capture.
+    val maps = SafeReader.node(SafeReader.Node.PROCESS_MAPS)
     observation("hookSignals", "Hook / 注入映射线索",
-        SafeReader.node(SafeReader.Node.PROCESS_MAPS).map(::hookSignals)
+        maps.map(::hookSignals)
             .withNote("只扫描本应用进程 /proc/self/maps 的路径段，并排除 ART/JIT、图形栈等运行时创建的 memfd；" +
                 "只代表本进程映射，不等于设备被注入。"))
+    // Field set 23: the image's own build artifact, independent of every property.
+    // Field set 25: the same reading also reports which of several redundant paths
+    // answered. Both observations reuse this one maps read and this one directory
+    // scan; the node is large and must never be read twice per capture.
+    val overlay = overlayReading(maps.value, overlayDirScans(),
+        SafeReader.property("ro.boot.hardware.sku").value)
+    observation("overlayDeviceCodename", "系统 overlay 记录的产品代号",
+        overlayCodenameReading(maps, overlay)
+            .withNote("取自已映射的 framework RRO overlay 文件名（AOSP 按镜像构建的产品名生成），是构建产物而不是属性声明。" +
+                "与 system.device 不一致时先核对改机工具、移植 ROM 或虚拟化环境；它同样不能单独证明硬件。"))
+    // The directory scan is redundancy for the case where a module renames the
+    // framework overlay only; it is not a new identity verdict.
+    observation("overlayEvidence", "系统 overlay 多路径证据",
+        overlayEvidenceReading(overlay)
+            .withNote("依次尝试 maps 中的 framework RRO、其它 RRO idmap、vendor/product/system_ext/odm overlay 目录；" +
+                "任一路径命中即给出代号，冲突时以 maps 为准。sku/soc 只作旁证，不参与代号。"))
     observation("tracerPid", "内核跟踪进程 PID",
         SafeReader.node(SafeReader.Node.PROCESS_STATUS).map(::tracerPid)
             .withNote("0 表示无跟踪方；非零表示内核记录了跟踪进程（调试器、Profiler 或注入框架都可能）。这是内核记录，不是攻击结论。"))

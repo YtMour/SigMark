@@ -1,7 +1,7 @@
 import {useId,type ReactNode} from 'react';
 import {caption,date,groups,saveDownload} from './reports';
 import {experimentLabels,probeComparisonLabels,type buildVerification} from './verification-package';
-import {RiskRuleList,riskLevelText} from './risk-panel';
+import {identityVerificationLabel,RiskRuleList,riskLevelText} from './risk-panel';
 
 type Packet=ReturnType<typeof buildVerification>;
 const context:Record<string,string>={full:'整体获取',standard:'标准采集',rom:'ROM 验收',network:'网络复测',usb:'USB 插拔实验',gnss:'GNSS 读数核对',granted:'已授权',not_granted:'未授权',
@@ -24,6 +24,7 @@ export function VerificationPanel({packet,pending,conditions}:{packet:Packet;pen
         {completed>0&&<p>{passed} 项通过{completed>passed?` · ${completed-passed} 项未通过`:''}</p>}
       </div>
       <div><strong>风险评估</strong><p className="risk-level" data-level={packet.risk.level}>{riskLevelText[packet.risk.level][0]}</p>
+        <p>{identityVerificationLabel}</p>
         {packet.strength.totalChecks>packet.strength.knownChecks&&
           <p>{packet.strength.totalChecks-packet.strength.knownChecks} 项关键检查待确认</p>}</div>
       <div className="verification-comparison"><strong>对照结论</strong><p>{comparison?selected?'登记基线：'+selected.name:'同资产历史对照':'仅核对当前样本'}</p>

@@ -123,6 +123,196 @@ class SecurityProbesTest {
         val valid = SafeReader.read<String>("getprop fixture") { "1" }.decodeProperty({ flagLabel(it) }, "invalid")
         assertEquals("开启", valid.value)
     }
+
+    @Test fun overlayCodenameComesFromTheBakedRroFileName() {
+        // Shape of a real Pixel 6 process map: the image's own product name survives
+        // in the framework overlay even when the property layer reports another one.
+        val maps = listOf(
+            "7f0000000000-7f0000100000 r--p 00000000 fd:00 1234 /data/resource-cache/product@overlay@YmRecentsGs101Overlay@YmRecentsGs101Overlay.apk@idmap",
+            "7f1000000000-7f1000100000 r--p 00000000 fd:00 1235 /data/resource-cache/product@overlay@framework-res__oriole_user__auto_generated_rro_product.apk@idmap",
+            "7f2000000000-7f2000100000 r--p 00000000 fd:00 1236 /data/resource-cache/vendor@overlay@framework-res__oriole_user__auto_generated_rro_vendor.apk@idmap",
+        ).joinToString("\n")
+        assertEquals("oriole", overlayDeviceCodename(maps))
+        assertNull(overlayDeviceCodename(null))
+        // A renamed overlay that does not follow the AOSP pattern is not a reading.
+        assertNull(overlayDeviceCodename("7f0-7f1 r--p 0 fd:00 1 /data/resource-cache/custom-rro.apk@idmap"))
+    }
+
+    // Field set 25: the same image usually carries the per-target RROs it was built
+    // with, both as idmaps and as files under the partition overlay directories. These
+    // cases are the fallbacks for a module that renames only the framework overlay.
+
+    private fun mapsOf(vararg paths: String) = paths.mapIndexed { index, path ->
+        "7f%02d00000000-7f%02d00100000 r--p 00000000 fd:00 %d %s".format(index, index, 1234 + index, path)
+    }.joinToString("\n")
+
+    @Test fun overlayReadingFallsBackToTheVendorOverlayDirectory() {
+        val reading = overlayReading("", mapOf(OverlayDir.VENDOR to
+            DirScan.Names(listOf("Settings__corot_user__auto_generated_rro_vendor.apk"))))
+        assertEquals("corot", reading.codename)
+        assertTrue(reading.evidence!!.contains("vendor_dir:corot"))
+        // No framework RRO was mapped, so that channel has nothing to say.
+        assertFalse(reading.evidence!!.contains("rro:"))
+        assertTrue(reading.available)
+    }
+
+    @Test fun overlayReadingFallsBackToAnotherPerTargetIdmap() {
+        val maps = mapsOf("/data/resource-cache/product@overlay@Settings__corot_user__auto_generated_rro_product.apk@idmap")
+        val reading = overlayReading(maps)
+        assertEquals("corot", reading.codename)
+        assertTrue(reading.evidence!!.contains("idmap:corot"))
+    }
+
+    @Test fun overlayReadingKeepsMapsAsTheVerdictAndRecordsTheDisagreement() {
+        val maps = mapsOf("/data/resource-cache/product@overlay@framework-res__oriole_user__auto_generated_rro_product.apk@idmap")
+        val reading = overlayReading(maps, mapOf(OverlayDir.VENDOR to
+            DirScan.Names(listOf("Settings__corot_user__auto_generated_rro_vendor.apk"))))
+        // maps reflects what this process actually loaded, so it wins the verdict.
+        assertEquals("oriole", reading.codename)
+        assertTrue(reading.evidence!!.contains("conflict:rro:oriole!=vendor_dir:corot"))
+        assertEquals(listOf("conflict:rro:oriole!=vendor_dir:corot"), reading.conflicts)
+    }
+
+    @Test fun overlayReadingAgreesAcrossEveryCodenamePath() {
+        val maps = mapsOf(
+            "/data/resource-cache/product@overlay@framework-res__oriole_user__auto_generated_rro_product.apk@idmap",
+            "/data/resource-cache/vendor@overlay@framework-res__oriole_user__auto_generated_rro_vendor.apk@idmap",
+        )
+        val reading = overlayReading(maps, mapOf(
+            OverlayDir.VENDOR to DirScan.Names(listOf(
+                "BatteryStatsViewer__oriole_user__auto_generated_rro_vendor.apk",
+                "framework-res__oriole_user__auto_generated_rro_vendor.apk",
+                "Settings__oriole_user__auto_generated_rro_vendor.apk")),
+            OverlayDir.PRODUCT to DirScan.Names(listOf(
+                "framework-res__oriole_user__auto_generated_rro_product.apk")),
+        ))
+        assertEquals("oriole", reading.codename)
+        assertEquals("rro:oriole / vendor_dir:oriole / product_dir:oriole", reading.evidence)
+        assertTrue(reading.conflicts.isEmpty())
+    }
+
+    @Test fun overlayReadingRejectsPlaceholderAndStructuralWords() {
+        // `nosdcard` is the placeholder product name AOSP ships on some images (real
+        // device output has both the `_user__` and the `_characteristics_rro` shape);
+        // `framework` and `common` are structural words a capture group could pick up.
+        val maps = mapsOf("/data/resource-cache/product@overlay@framework-res__nosdcard__auto_generated_characteristics_rro.apk@idmap")
+        val reading = overlayReading(maps, mapOf(
+            OverlayDir.VENDOR to DirScan.Names(listOf(
+                "Settings__nosdcard_user__auto_generated_rro_vendor.apk",
+                "framework__framework_user__auto_generated_rro_vendor.apk",
+                "Settings__common_user__auto_generated_rro_vendor.apk")),
+            OverlayDir.PRODUCT to DirScan.Names(listOf(
+                "framework-res__nosdcard__auto_generated_characteristics_rro.apk",
+                "SettingsOverlayGR1YH.apk",
+                "DeviceAsWebcamOriole.apk")),
+        ))
+        assertNull(reading.codename)
+        assertFalse(reading.available)
+        assertTrue(reading.evidence!!.contains("vendor_dir:unknown"))
+        assertTrue(reading.evidence!!.contains("product_dir:unknown"))
+        assertTrue(reading.evidence!!.contains("sku:gr1yh"))
+        // The CamelCase overlay names are deliberately not mined for a codename.
+        assertFalse(reading.evidence!!.contains("oriole"))
+    }
+
+    @Test fun overlayReadingIsEmptyWhenNothingIsReachable() {
+        val reading = overlayReading(null)
+        assertNull(reading.codename)
+        assertNull(reading.evidence)
+        assertFalse(reading.available)
+        assertEquals(listOf("maps"), reading.denied)
+        assertEquals(overlayReading(""), overlayReading(""))
+    }
+
+    @Test fun overlayReadingKeepsADeniedDirectoryVisible() {
+        val reading = overlayReading("", mapOf(OverlayDir.VENDOR to DirScan.Denied))
+        assertNull(reading.codename)
+        assertTrue(reading.evidence!!.contains("vendor_dir:denied"))
+        assertEquals(listOf("vendor_dir"), reading.denied)
+        // A denied channel must not be reported as a clean "no overlay here".
+        assertFalse(reading.available)
+    }
+
+    @Test fun overlayReadingRecordsSocAndSkuOnlyAsSideEvidence() {
+        val soc = overlayReading(mapsOf("/product/overlay/YmRecentsGs101Overlay/YmRecentsGs101Overlay.apk"))
+        assertNull(soc.codename)
+        assertTrue(soc.evidence!!.contains("soc:gs101"))
+        assertFalse(soc.evidence!!.contains("rro:"))
+
+        val sku = overlayReading("", mapOf(OverlayDir.PRODUCT to
+            DirScan.Names(listOf("SettingsOverlayGB7N6.apk"))))
+        assertNull(sku.codename)
+        assertTrue(sku.evidence!!.contains("sku:gb7n6"))
+    }
+
+    @Test fun overlayReadingNormalizesCaseAndDedupesRepeatedMappings() {
+        val upper = overlayReading("", mapOf(OverlayDir.VENDOR to
+            DirScan.Names(listOf("Settings__ORIOLE_user__auto_generated_rro_vendor.apk"))))
+        assertEquals("oriole", upper.codename)
+
+        val line = "/data/resource-cache/product@overlay@Settings__corot_user__auto_generated_rro_product.apk@idmap"
+        val repeated = overlayReading(listOf(line, line, line).joinToString("\n"))
+        assertEquals("corot", repeated.codename)
+        assertEquals(1, Regex("idmap:").findAll(repeated.evidence!!).count())
+    }
+
+    @Test fun overlayReadingIgnoresNamesOutsideTheCodenameLengthRange() {
+        assertNull(overlayReading("", mapOf(OverlayDir.PRODUCT to DirScan.Names(listOf(
+            "framework-res__a__user__auto_generated_rro_product.apk")))).codename)
+        assertNull(overlayReading("", mapOf(OverlayDir.PRODUCT to DirScan.Names(listOf(
+            "framework-res__${"b".repeat(33)}_user__auto_generated_rro_product.apk")))).codename)
+    }
+
+    @Test fun overlayReadingDoesNotMineDynamicColourFrroNames() {
+        // The three systemui *.frro idmaps are dynamic colour resources, not product
+        // overlays; they must not be read as a codename.
+        val reading = overlayReading(mapsOf(
+            "/data/resource-cache/data@resource-cache@com.android.systemui-accent-MYFK.frro@idmap",
+            "/data/resource-cache/data@resource-cache@com.android.systemui-neutral-90PO.frro@idmap",
+        ))
+        assertNull(reading.codename)
+        assertNull(reading.evidence)
+    }
+
+    @Test fun overlayReadingReproducesThePixel6EvidenceString() {
+        // Verbatim contents of a real Pixel 6 capture (§1.2 of docs/OVERLAY-ROBUSTNESS.md).
+        val maps = mapsOf(
+            "/data/resource-cache/data@resource-cache@com.android.systemui-accent-MYFK.frro@idmap",
+            "/data/resource-cache/data@resource-cache@com.android.systemui-dynamic-mb14.frro@idmap",
+            "/data/resource-cache/data@resource-cache@com.android.systemui-neutral-90PO.frro@idmap",
+            "/data/resource-cache/product@overlay@YmRecentsGs101Overlay@YmRecentsGs101Overlay.apk@idmap",
+            "/data/resource-cache/product@overlay@framework-res__oriole_user__auto_generated_rro_product.apk@idmap",
+            "/data/resource-cache/vendor@overlay@framework-res__oriole_user__auto_generated_rro_vendor.apk@idmap",
+            "/product/overlay/YmRecentsGs101Overlay/YmRecentsGs101Overlay.apk",
+            "/product/overlay/framework-res__oriole_user__auto_generated_rro_product.apk",
+            "/vendor/overlay/framework-res__oriole_user__auto_generated_rro_vendor.apk",
+        )
+        val vendor = listOf("BatteryStatsViewer", "DeviceDiagnostics", "EmergencyInfo", "NfcNci", "ONS",
+            "Settings", "StorageManager", "SystemUI", "TeleService", "Traceur", "framework-res")
+            .map { "${it}__oriole_user__auto_generated_rro_vendor.apk" }
+        val product = listOf(
+            "CompanionDeviceManager__nosdcard__auto_generated_characteristics_rro.apk",
+            "ConnectivityOverlay.apk", "DeviceAsWebcamOriole.apk",
+            "DisplayCutoutAvoidAppsInCutout", "DisplayCutoutEmulationCorner", "DisplayCutoutEmulationDouble",
+            "DisplayCutoutEmulationHole", "DisplayCutoutEmulationTall", "DisplayCutoutEmulationWaterfall",
+            "DisplayCutoutNoCutout", "FontNotoSerifSource", "NavigationBarMode3Button", "NavigationBarModeGestural",
+            "NavigationBarModeGesturalExtraWideBack", "NavigationBarModeGesturalNarrowBack",
+            "NavigationBarModeGesturalWideBack", "NfcOverlayOriole.apk", "NotesRoleEnabled",
+            "SettingsOverlayG9S9B.apk", "SettingsOverlayGB7N6.apk", "SettingsOverlayGR1YH.apk",
+            "TeleService__nosdcard__auto_generated_characteristics_rro.apk",
+            "TelephonyProvider__nosdcard__auto_generated_characteristics_rro.apk",
+            "TransparentNavigationBar", "WifiOverlay", "YmRecentsGs101Overlay", "YmSetupWizardGs101Overlay",
+            "framework-res__nosdcard__auto_generated_characteristics_rro.apk",
+            "framework-res__oriole_user__auto_generated_rro_product.apk",
+        )
+        val reading = overlayReading(maps, mapOf(
+            OverlayDir.VENDOR to DirScan.Names(vendor),
+            OverlayDir.PRODUCT to DirScan.Names(product),
+        ), declaredSku = "GR1YH")
+        assertEquals("oriole", reading.codename)
+        assertEquals("rro:oriole / vendor_dir:oriole / product_dir:oriole / sku:gr1yh / soc:gs101",
+            reading.evidence)
+    }
 }
 
 class PropertyPartitionTest {

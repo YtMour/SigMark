@@ -6,6 +6,7 @@ import {caption,date,groups,saveDownload} from './reports';
 import {emptyReportFilters,reportWorkspaceLink} from './workspace-route';
 import type {Parameter} from './compare';
 import {ConfigurationEvidence,type ConfigurationCode} from './configuration-evidence';
+import {overlayNoteFor} from './overlay-evidence';
 import './device-dossier.css';
 
 type Kind='configuration'|'snapshot';
@@ -47,10 +48,13 @@ function gapMessage(g:Gap){
 
 function FieldEvidence({field}:{field:Field}){
   const {group,key,label,value,unit,source,status,reason,errno,note}=field;
+  const overlay=overlayNoteFor(field);
   return <li className="dossier-evidence">
     <div><strong>{label}</strong><code>{group}.{key}</code></div>
     <div><span className="dossier-state" data-state={status}>{statuses[status]??status}</span>
       {value!==null&&<p><b>{value}</b>{unit&&<small> 单位／格式：{unit}</small>}</p>}
+      {overlay&&<p className="muted">{overlay.text}</p>}
+      {overlay?.conflict&&<p className="overlay-conflict" role="note">{overlay.conflict}</p>}
       {(reason||errno!=null||status!=='AVAILABLE')&&<p>{reason?caption(reason):'报告未记录具体原因'}
         {errno!=null&&<> · errno={errno}</>}</p>}
       {note&&<p>{note}</p>}

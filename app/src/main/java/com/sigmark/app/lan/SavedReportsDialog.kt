@@ -28,10 +28,9 @@ internal fun SavedReportsDialog(rows: List<SavedSample>, canUseCurrent: Boolean,
     }
     AlertDialog(onDismissRequest = close, title = { Text("上传报告") }, text = {
         LazyColumn(Modifier.heightIn(max = 470.dp),verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            item { Text("选择要发送的报告。这里显示采集当时的网络，切换 Wi-Fi 不会改变报告。") }
             error?.let { item { Text(it, color=MaterialTheme.colorScheme.error) } }
-            item { Text("待上传（" + pending.size + "）",style=MaterialTheme.typography.titleMedium) }
-            if (pending.isEmpty()) item { Text(if (sent.isEmpty()) "还没有保存的报告。可使用首页已显示的结果，或返回点「整体获取」。" else "没有待上传的报告。要记录新的测试，请返回点「整体获取」。") }
+            if (pending.isNotEmpty()) item { Text("待上传（" + pending.size + "）",style=MaterialTheme.typography.titleMedium) }
+            if (pending.isEmpty() && !canUseCurrent) item { Text("没有待上传的报告") }
             items(pending,key={it.id}) { row ->
                 SavedRow(title(row), false, busy, { select(row.id) }, { removing = row })
             }

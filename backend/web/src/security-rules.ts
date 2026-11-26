@@ -10,7 +10,7 @@ const patchDate=(value:string|undefined)=>{
   return Number.isFinite(time)&&new Date(time).toISOString().slice(0,10)===value?time:NaN;
 };
 
-export const ruleVersion='rom-evidence/4';
+export const ruleVersion='rom-evidence/6';
 export const bootKeys=['environment.verifiedBoot','environment.vbmetaState','environment.flashLock'];
 export function bootEvidence(color?:string|null,vbmeta?:string|null,flash?:string|null){
   const [boot,v,f]=[color,vbmeta,flash].map(x=>x?.trim().toLowerCase());
@@ -39,7 +39,7 @@ export function releaseQuery(appVersion:string,fields:Evidence[]){
   return new URLSearchParams({version:appVersion,code:match[2],package:pkg,channel}).toString();
 }
 
-// SELinux 实时模式按前缀归一：直接读数与推断读数属于同一模式，只有策略拒绝时才是未知。
+// Normalize historical strings separately from deciding whether they are direct.
 export type SelinuxMode='enforcing'|'permissive'|'disabled'|'unknown';
 export function selinuxMode(value?:string|null):SelinuxMode{
   const text=(value??'').trim();
@@ -54,21 +54,32 @@ export function selinuxInferred(value?:string|null,evidence?:string|null){
   if(basis==='inferred_mac'||basis==='inferred_disabled')return true;
   return (value??'').includes('推断');
 }
-// Field-set-19 identity pairs. Both sides must be AVAILABLE; a missing or
-// restricted side is never a disagreement. Comparison ignores case.
-export const identityFieldPairs:[string,string,string][]=[['system.board','system.boardPlatform','主板'],
-  ['cpu.hardware','system.bootHardware','硬件'],['system.sku','system.hardwareSku','SKU']];
+// Only like-for-like declarations within the App view, never hardware proof.
+const identityFieldPairs=[['system.model','system.propertyModel','型号'],
+  ['system.device','system.propertyDevice','设备代号'],['system.sku','system.hardwareSku','硬件 SKU']] as const;
+const asciiFold=(value:string)=>value.replace(/[A-Z]/g,ch=>ch.toLowerCase());
+const usableIdentity=(raw?:string|null)=>{
+  const value=raw?.trim()??'';
+  return ['', 'unknown','null','none','n/a','-'].includes(asciiFold(value))?undefined:value;
+};
 export type IdentityConflict={title:string;leftKey:string;rightKey:string;left:string;right:string};
-export function identityConflictsOf(fields:Evidence[]):IdentityConflict[]{
-  const archive=new Map(fields.map(row=>[row.group+'.'+row.key,row]));
-  const read=(key:string)=>{const row=archive.get(key);return row?.status==='AVAILABLE'&&row.value?.trim()?row.value.trim():undefined;};
-  const out:IdentityConflict[]=[];
-  for(const [leftKey,rightKey,title] of identityFieldPairs){
+function appIdentityOf(archive:Map<string,Evidence>){
+  const read=(key:string)=>{const row=archive.get(key);return row?.status==='AVAILABLE'?usableIdentity(row.value):undefined;};
+  const api=read('system.api')??'';
+  const pairs=/^[1-9][0-9]?$/.test(api)&&Number(api)<31&&!read('system.sku')?
+    identityFieldPairs.slice(0,-1):identityFieldPairs;
+  const conflicts:IdentityConflict[]=[];
+  let compared=0;
+  for(const [leftKey,rightKey,title] of pairs){
     const left=read(leftKey),right=read(rightKey);
     if(!left||!right)continue;
-    if(left.toLowerCase()!==right.toLowerCase())out.push({title,leftKey,rightKey,left,right});
+    compared++;
+    if(asciiFold(left)!==asciiFold(right))conflicts.push({title,leftKey,rightKey,left,right});
   }
-  return out;
+  return {conflicts,compared,total:pairs.length,fields:pairs.flatMap(([left,right])=>[left,right])};
+}
+export function identityConflictsOf(fields:Evidence[]){
+  return appIdentityOf(new Map(fields.map(row=>[row.group+'.'+row.key,row]))).conflicts;
 }
 export function evaluateSecurity(input:{parameters?:Evidence[];androidApi:number;model:string;capturedAtEpochMs?:number;fieldSetVersion?:number|null},reference?:ReleaseReference):Check[] {
   const values = new Map((input.parameters??[]).map(p=>[p.group+'.'+p.key,p]));
@@ -78,14 +89,10 @@ export function evaluateSecurity(input:{parameters?:Evidence[];androidApi:number
   const selinux=read('system.selinux'),selinuxEvidence=read('system.selinuxEvidence');
   const mode=selinuxMode(selinux),inferred=selinuxInferred(selinux,selinuxEvidence);
   checks.push({id:'selinux',title:'SELinux 实时模式',fields:['system.selinux','system.selinuxEvidence','environment.selinuxDomain'],
-    state:mode==='enforcing'?'observed':mode==='permissive'?'review':mode==='disabled'?'context':'unknown',
-    finding:mode==='enforcing'?(inferred?
-        '报告只能推断为强制模式：节点被策略拒绝读取，DAC 允许读取，permissive 下本应可读；这是推断，不是直接读数。':
-        '报告读取到强制模式。'):
-      mode==='permissive'?(inferred?'报告推断为宽容模式：读取依据来自推断，不是直接读数；请对照独立观察。':
-        '报告读取到宽容模式；并非 SELinux 已关闭。'):
-      mode==='disabled'?'报告推断 SELinux 未启用：/sys/fs/selinux 不存在（ENOENT），不是直接读数。':
-      '实时模式未确认。受限节点或应用进程域不能代替实时模式。'});
+    state:inferred?'unknown':mode==='enforcing'?'observed':mode==='permissive'?'review':'unknown',
+    finding:inferred?'实时模式未确认。报告中的读取依据仅支持进一步核查。':
+      mode==='enforcing'?'报告读取到强制模式。':mode==='permissive'?'报告读取到宽容模式。':
+      '实时模式未确认。系统拒读或未返回有效值，不代表保护已关闭。'});
   const patch=read('system.patch');
   const parsed=patchDate(patch);
   const age=Math.floor(((input.capturedAtEpochMs??NaN)-parsed)/86400000);
@@ -111,19 +118,13 @@ export function evaluateSecurity(input:{parameters?:Evidence[];androidApi:number
     state:conflict?'review':comparable?'context':'unknown',
     finding:conflict?'报告头与归档字段的型号或 API 不一致。先核对报告投影或 ROM 声明。':
       comparable?'报告头和字段来自同一 App 视角；未见可比项冲突也不是独立身份证据。':'型号或 API 的归档明细不足。'});
-  // 字段集 19：同一观察者内部，Build 声明与只读属性声明是两条独立来源；只比对，不判定真伪。
-  const identityRows=identityFieldPairs.map(([buildKey,propertyKey,title])=>({title,build:read(buildKey),property:read(propertyKey)}));
-  const identityComparable=identityRows.filter(row=>!!row.build&&!!row.property);
-  const identityConflicts=identityConflictsOf(input.parameters??[]);
-  const identityPairText=(row:{title:string;build?:string;property?:string})=>row.title+' Build='+row.build+' / 属性='+row.property;
-  checks.push({id:'identity_fields',title:'身份字段一致性',
-    fields:['system.board','system.boardPlatform','cpu.hardware','system.bootHardware','system.sku','system.hardwareSku'],
-    state:identityConflicts.length?'review':identityComparable.length?'observed':'unknown',
-    finding:identityConflicts.length?'同一观察者内部两组声明不一致，先核对 ROM 属性改写：'+
-        identityConflicts.map(identityPairText).join('；')+'。':
-      identityComparable.length?'可比对的 '+identityComparable.length+' 对一致（'+
-        identityComparable.map(identityPairText).join('；')+'）；两组声明来自同一观察者，不是独立验证。':
-      'Build 声明与只读属性没有一对两侧同时可用，无法比较；缺一侧不等于不一致。'});
+  const {conflicts,compared,total,fields}=appIdentityOf(values);
+  checks.push({id:'identity_fields',title:'App 身份声明核对',
+    fields,
+    state:conflicts.length?'review':compared===total?'observed':'unknown',
+    finding:conflicts.length?conflicts.map(pair=>pair.title).join('、')+'读数不一致。':
+      compared===total?`已比较的 ${compared} 对读数一致；设备身份仍未验证。`:
+      `可比较 ${compared} / ${total} 对；未取得完整读数。`});
   const hookKeys=['environment.hookSignals','environment.rootMountHints','environment.rootManagerVisible'];
   const hookLabels:Record<string,string>={'environment.hookSignals':'映射线索','environment.rootMountHints':'挂载线索',
     'environment.rootManagerVisible':'可见管理应用'};
@@ -221,6 +222,7 @@ const addedFields:FieldSpec[]=[
   ['cpu.coresConfigured','内核配置的逻辑 CPU 数','runtime'],
   ['system.boardPlatform','平台代号声明','identity'],['system.bootHardware','启动硬件声明','identity'],
   ['system.hardwareSku','启动硬件 SKU','identity'],
+  ['system.propertyModel','型号属性','identity'],['system.propertyDevice','设备代号属性','identity'],
 ];
 const extraFields:FieldSpec[]=[
   ['system.webViewProvider','WebView 提供程序','rom'],['system.webViewVersion','WebView 版本','rom'],['system.webViewCode','WebView 内部版本号','rom'],
@@ -251,6 +253,11 @@ export function compareSecurity(before:Evidence[],after:Evidence[],expectUnlock=
     else if(baseline.status==='RESTRICTED'||current.status==='RESTRICTED'){verdict='restricted';note='一侧被系统拒绝读取，不判定变化。';}
     else if(!a||!b||(dated&&(!Number.isFinite(patchDate(a))||!Number.isFinite(patchDate(b))))){
       verdict='insufficient';note='至少一侧无有效读数，不判定安全变化。';
+    }else if(key==='system.selinux'&&(
+      selinuxInferred(a,value(left.get('system.selinuxEvidence')))||selinuxInferred(b,value(right.get('system.selinuxEvidence')))||
+      [selinuxMode(a),selinuxMode(b)].some(mode=>mode==='unknown'||mode==='disabled')
+    )){
+      verdict='insufficient';note='至少一侧缺少直接读数，实时模式变化待确认。';
     }else if(a!==b){
       verdict='changed';note='读数变化，请结合设备、ROM 和测试条件。';
       const unlocked=(signal==='verifiedBoot'&&b==='orange')||(signal==='vbmetaState'&&b==='unlocked')||(signal==='flashLock'&&b==='0');
@@ -260,17 +267,13 @@ export function compareSecurity(before:Evidence[],after:Evidence[],expectUnlock=
       if(key==='app.debuggerConnected'&&a==='否'&&b==='是'){verdict='review';note='采样时从未连接变为连接调试器。';}
       if(key==='system.selinux'){
         const beforeMode=selinuxMode(a),afterMode=selinuxMode(b);
-        const beforeInferred=selinuxInferred(a,value(left.get('system.selinuxEvidence')));
-        const afterInferred=selinuxInferred(b,value(right.get('system.selinuxEvidence')));
-        if(beforeMode===afterMode&&beforeMode!=='unknown'){
+        if(beforeMode===afterMode){
           verdict='context';
-          note=beforeInferred&&afterInferred?'模式一致，两侧都是推断读数，不判定实时模式变化。':
-            !beforeInferred&&!afterInferred?'模式一致，只是值串写法不同，不判定实时模式变化。':
-            afterInferred?'模式一致，读取依据由直接读取变为推断。':'模式一致，读取依据由推断变为直接读取。';
+          note='两侧直接读数的模式一致。';
         }else if(beforeMode==='enforcing'&&afterMode==='permissive'){verdict='review';note='报告显示 SELinux 从强制模式变为宽容模式。';}
       }
       if(key==='system.selinuxEvidence'){
-        verdict='context';note='SELinux 读取依据由 '+a+' 变为 '+b+'；只说明取值方式不同，不判定实时模式变化。';
+        verdict='context';note='两次采样的读取依据不同。';
       }
       if(hookSignalKeys.includes(key)&&!noneText(b)&&noneText(a)){
         verdict='review';note='本次出现上一份未记录的公开线索；只代表当前进程与包可见性范围，需核对测试条件，不等于设备已注入或已 Root。';

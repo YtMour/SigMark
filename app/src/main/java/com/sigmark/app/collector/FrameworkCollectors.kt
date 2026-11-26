@@ -75,6 +75,16 @@ internal object RuntimeCollector : DeviceCollector {
         observation("vulkanVersion", "声明的 Vulkan 版本", features.map { list ->
             list.firstOrNull { it.name == PM.FEATURE_VULKAN_HARDWARE_VERSION }?.let { vulkanVersion(it.version) }
         }.let { it.copy(detail = it.detail ?: "系统公开的规范版本，未运行图形驱动探针。") })
+        // The GPU driver string is the only hardware fact here that does not come from
+        // the framework's cached device description, so it is read through its own EGL
+        // context and kept beside the declared Build values.
+        val driver = probeGraphics()
+        observation("glesRenderer", "实测 GL 渲染器",
+            SafeReader.read("EGL14 / GLES20.glGetString(GL_RENDERER)",
+                "离屏测试上下文报告的 GPU 字符串；只初始化 1×1 表面，不创建界面。") { driver.renderer })
+        observation("glesVendor", "实测 GL 厂商",
+            SafeReader.read("EGL14 / GLES20.glGetString(GL_VENDOR)",
+                "离屏测试上下文报告的驱动厂商字符串。") { driver.vendor })
         value("sharedLibraries", "系统共享库", "PackageManager.systemSharedLibraryNames",
             "系统向应用公开的共享库名称。") {
             pm.systemSharedLibraryNames?.distinct()?.sorted()?.joinToString("\n")?.ifEmpty { "无公开共享库" }

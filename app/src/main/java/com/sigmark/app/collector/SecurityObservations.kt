@@ -14,8 +14,11 @@ import com.sigmark.app.model.ReadReason
 import java.security.KeyStore
 import java.time.Instant
 import java.util.UUID
+import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKeyFactory
+import javax.crypto.SecretKey
+import javax.crypto.spec.GCMParameterSpec
 
 private const val partitionsApi = "Build.getFingerprintedPartitions"
 internal fun partitionField(key: String) = Regex("partition_[a-z0-9_]{1,32}").matches(key)
@@ -129,18 +132,28 @@ internal object SecurityObservations {
         val reading = SafeReader.read(source) {
             val alias = "sigmark-probe-" + UUID.randomUUID()
             val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
-            fun generate(strong: Boolean): KeyInfo {
+            fun generate(strong: Boolean): SecretKey {
                 val spec = KeyGenParameterSpec.Builder(alias, KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
                     .setBlockModes(KeyProperties.BLOCK_MODE_GCM).setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE).setKeySize(128)
                 if (Build.VERSION.SDK_INT >= 28 && strong) spec.setIsStrongBoxBacked(true)
                 val gen = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore")
                 gen.init(spec.build())
-                return SecretKeyFactory.getInstance("AES", "AndroidKeyStore").getKeySpec(gen.generateKey(), KeyInfo::class.java) as KeyInfo
+                return gen.generateKey()
             }
             try {
-                val info = if (Build.VERSION.SDK_INT >= 28 && context.packageManager.hasSystemFeature(PackageManager.FEATURE_STRONGBOX_KEYSTORE))
+                val key = if (Build.VERSION.SDK_INT >= 28 && context.packageManager.hasSystemFeature(PackageManager.FEATURE_STRONGBOX_KEYSTORE))
                     try { generate(true) } catch (_: StrongBoxUnavailableException) { fallback = true; generate(false) }
                     else generate(false)
+                // Exercise the key against a fixed public sample. The provider generates the IV.
+                val sample = "sigmark key probe".toByteArray(Charsets.UTF_8)
+                val encrypt = Cipher.getInstance("AES/GCM/NoPadding").apply { init(Cipher.ENCRYPT_MODE, key) }
+                val ciphertext = encrypt.doFinal(sample)
+                val decrypt = Cipher.getInstance("AES/GCM/NoPadding").apply {
+                    init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(128, encrypt.iv))
+                }
+                check(decrypt.doFinal(ciphertext).contentEquals(sample)) { "Key round trip mismatch" }
+                val info = SecretKeyFactory.getInstance("AES", "AndroidKeyStore")
+                    .getKeySpec(key, KeyInfo::class.java) as KeyInfo
                 if (Build.VERSION.SDK_INT >= 31) when (info.securityLevel) {
                     KeyProperties.SECURITY_LEVEL_SOFTWARE -> "Software"
                     KeyProperties.SECURITY_LEVEL_TRUSTED_ENVIRONMENT -> "TEE"
@@ -150,7 +163,10 @@ internal object SecurityObservations {
                 } else if (info.isInsideSecureHardware) "硬件保护（类型未细分）" else "Software"
             } finally { store.deleteEntry(alias) }
         }
-        return reading.copy(detail = listOfNotNull(reading.detail, if (fallback) "StrongBox 暂不可用，已测试默认提供程序。" else null,
-            "手动测试于 " + Instant.now() + "；仅针对临时密钥，不是远程硬件证明。").joinToString(" ")).item("keyProtection","临时密钥保护级别")
+        return reading.copy(detail = listOfNotNull(
+            if (reading.value != null) "临时密钥加解密通过。" else null,
+            reading.detail, if (fallback) "StrongBox 暂不可用，已测试默认提供程序。" else null,
+            "采样时间 " + Instant.now() + "。本地临时密钥自测。"
+        ).joinToString(" ")).item("keyProtection","临时密钥保护级别")
     }
 }

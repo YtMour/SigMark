@@ -27,12 +27,13 @@ private val diagnosticFields = mapOf(
     "network" to setOf("visibleTransports", "wifiRouteRole"),
     "system" to setOf("display", "incremental", "buildTime", "board", "sku", "baseOs", "tags", "device", "product", "bootloader",
         "partitionCount","webViewProvider","webViewVersion","webViewCode","systemSpl","vendorSpl","initialSdk",
-        "boardPlatform","bootHardware","hardwareSku","bootCount","mediaPerformanceClass"),
-    "cpu" to setOf("arch", "abi32", "abi64"),
-    "memory" to setOf("ramUseEstimate", "volumeSummary", "systemSpace", "appCacheSpace"),
+        "boardPlatform","bootHardware","hardwareSku","bootCount","mediaPerformanceClass","propertyModel","propertyDevice"),
+    "cpu" to setOf("arch", "abi32", "abi64", "cpuParts", "cpuCapacity"),
+    "memory" to setOf("ramUseEstimate", "volumeSummary", "systemSpace", "appCacheSpace", "physicalRam", "kernelMemTotal",
+        "cmaTotal"),
     "display" to setOf("wideGamut", "visibleDisplays", "windowSize", "systemBarInsets", "cutoutInsets"),
     "battery" to setOf("capacityPercent", "chargeCounter", "energyCounter", "currentAverage"),
-    "runtime" to setOf("featureCount", "openGlEs", "virtualMachine", "heapMax", "heapAllocated", "heapFree", "standbyBucket", "backgroundRestricted"),
+    "runtime" to setOf("featureCount", "openGlEs", "virtualMachine", "heapMax", "heapAllocated", "heapFree", "standbyBucket", "backgroundRestricted", "glesRenderer", "glesVendor"),
     "media" to setOf("cameraCount", "bluetoothCapabilities", "audioCapabilities", "audioSampleRate", "audioBuffer", "codecs"),
     "environment" to setOf("selinuxDomain", "buildSignals", "systemDebuggable", "verifiedBoot", "vbmetaState", "flashLock",
         "keyguardSecure", "storageEncryption", "keyProtection"),
@@ -68,9 +69,11 @@ private val timedExperimentFields = mapOf(
     "runtime" to setOf("glesStartAt","glesEndAt","usbStartAt","usbEndAt","usbStartCount","usbEndCount","usbOutcome","usbElapsed"),
 )
 // Field set 17: this process's own hook, trace, root, profile, DRM and ROM evidence.
+// Field set 25 adds the multi-path overlay evidence behind overlayDeviceCodename.
 // environment.androidIdSha256 stays local and is never projected.
 private val processEvidenceFields = mapOf(
     "environment" to setOf("hookSignals","tracerPid","rootMountHints","rootManagerVisible","userProfile",
+        "overlayDeviceCodename","overlayEvidence",
         "drmSecurityLevel","verityMode","buildDebuggable"),
     "system" to setOf("partitionBuildDates","selinuxEvidence"),
     "cpu" to setOf("coresConfigured"),

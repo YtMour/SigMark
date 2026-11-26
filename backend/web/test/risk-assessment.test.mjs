@@ -19,6 +19,18 @@ test('blue requires all core protections and never claims independent trust',()=
   assert.deepEqual(d.triggered,[]);
   assert.equal(assessRisk(row([e('environment.flashLock','1')])).level,'gray');
 });
+test('keystore errors recommend retry while a missing or restricted probe does not raise the risk level',()=>{
+  const id='environment.keyProtection';
+  const failed=assessRisk(row([...core,e(id,null,'ERROR','READ_FAILED')]));
+  assert.equal(failed.level,'yellow');
+  assert.deepEqual(failed.triggered,['KEYSTORE_TEST']);
+  assert.equal(failed.attestation,'not_verified');
+  for(const [value,status] of [['Software','AVAILABLE'],[null,'RESTRICTED'],[null,'UNAVAILABLE']]){
+    const assessed=assessRisk(row([...core,e(id,value,status)]));
+    assert.equal(assessed.level,'blue');
+    assert(!assessed.rules.some(rule=>rule.code==='KEYSTORE_TEST'));
+  }
+});
 test('policy denial and unarchived evidence differ and neither is a failure',()=>{
   const selinux={...e('system.selinux',null,'RESTRICTED','ACCESS_DENIED'),errno:13};
   const d=assessRisk(row([...core.filter(f=>f.key!=='selinux'),selinux]));
@@ -28,6 +40,21 @@ test('policy denial and unarchived evidence differ and neither is a failure',()=
     {key:'system.selinux',value:null,status:'RESTRICTED',source:'fixture',reason:'ACCESS_DENIED',errno:13});
   const old=assessRisk(row([]));
   assert.equal(old.rules.find(r=>r.code==='SELINUX_MODE').evidence[0].status,'NOT_ARCHIVED');
+});
+test('same-declaration App mismatches trigger review without external evidence or identity proof',()=>{
+  const source=[...core,e('system.model','QA'),e('system.board','board'),e('system.boardPlatform','platform')];
+  const old={...row(source),identityReview:{different:6}};
+  const read=d=>d.rules.find(r=>r.code==='APP_IDENTITY_CONSISTENCY');
+  assert.equal(assessRisk(old).level,'blue');
+  assert.equal(read(assessRisk(old)).state,'unknown');
+  const report=assessRisk(row([...source,e('system.propertyModel','Different')]));
+  assert.equal(report.level,'yellow');
+  assert.deepEqual(report.triggered,['APP_IDENTITY_CONSISTENCY']);
+  assert.equal(report.attestation,'not_verified');
+  assert.equal(read(report).evidence.find(r=>r.key==='system.propertyModel').value,'Different');
+  const blocked=assessRisk(row([...source,e('system.propertyModel',null,'RESTRICTED','ACCESS_DENIED')]));
+  assert.equal(blocked.level,'blue');
+  assert.equal(read(blocked).state,'unknown');
 });
 test('direct red outranks missing/weak signals; conflict or weak protection is yellow',()=>{
   const d=assessRisk(row([e('environment.verifiedBoot','red'),e('environment.keyguardSecure','否')]));
@@ -75,12 +102,18 @@ test('architecture conflicts request review but compatible and missing evidence 
   assert.equal(report.rules.find(r=>r.code==='RUNTIME_ARCHITECTURE').evidence[2].value,'i686');
 });
 
-test('an inferred SELinux mode is observed evidence, not an insufficient reading',()=>{
+test('legacy SELinux inference and current node denial remain unconfirmed',()=>{
   const d=assessRisk(row(replace('system.selinux','Enforcing（强制模式，推断）')));
   const rule=d.rules.find(r=>r.code==='SELINUX_MODE');
-  assert.equal(rule.state,'observed');
-  assert.match(rule.finding,/报告只能推断为强制模式/);
-  assert.deepEqual(d.triggered,[]);
-  assert.equal(d.level,'blue');
+  assert.equal(rule.state,'unknown');
+  assert.match(rule.finding,/实时模式未确认/);
+  assert.deepEqual(d.triggered,['SELINUX_MODE']);
+  assert.equal(d.level,'gray');
+  const blocked=assessRisk(row([...core.filter(p=>p.key!=='selinux'),
+    e('system.selinux',null,'RESTRICTED','ACCESS_DENIED'),e('system.selinuxEvidence','inferred_mac')]));
+  assert.equal(blocked.level,'gray');
+  const evidence=blocked.rules.find(r=>r.code==='SELINUX_MODE').evidence;
+  assert.equal(evidence.find(f=>f.key==='system.selinux').status,'RESTRICTED');
+  assert.equal(evidence.find(f=>f.key==='system.selinuxEvidence').value,'inferred_mac');
   assert.equal(assessRisk(row(replace('system.selinux','Permissive（宽容模式）'))).level,'yellow');
 });

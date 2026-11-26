@@ -3,6 +3,7 @@ package com.sigmark.app.collector
 import android.opengl.EGL14
 import android.opengl.EGLConfig
 import android.opengl.GLES20
+import android.os.SystemClock
 import com.sigmark.app.model.DeviceInfoItem
 import com.sigmark.app.model.DeviceSnapshot
 import com.sigmark.app.model.ReadReason
@@ -14,21 +15,37 @@ import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
 
-internal data class GraphicsProbe(val outcome: String, val stage: String, val version: String? = null)
+internal data class GraphicsProbe(
+    val outcome: String, val stage: String, val version: String? = null,
+    val renderer: String? = null, val vendor: String? = null,
+)
 
 // Keep a blocked vendor driver off the UI thread, and don't accumulate jobs.
 private val probeWorker = ThreadPoolExecutor(1, 1, 15, TimeUnit.SECONDS, SynchronousQueue()) {
     Thread(it, "sigmark-egl-probe").apply { isDaemon = true }
 }.apply { allowCoreThreadTimeOut(true) }
 
+// The regular collection and the ROM experiment both need a GL reading. A very short
+// cache keeps one capture from initialising EGL twice, and never reuses an old sample.
+private const val probeCacheMs = 4_000L
+private var cachedProbe: Pair<Long, GraphicsProbe>? = null
+
 internal fun probeGraphics(): GraphicsProbe {
+    val now = SystemClock.elapsedRealtime()
+    cachedProbe?.let { (at, probe) -> if (now - at in 0..probeCacheMs) return probe }
     val task = try { probeWorker.submit<GraphicsProbe> { readback() } }
     catch (_: RejectedExecutionException) { return GraphicsProbe("not_completed", "busy") }
-    return try { task.get(1_800, TimeUnit.MILLISECONDS) }
+    val probe = try { task.get(1_800, TimeUnit.MILLISECONDS) }
     catch (_: TimeoutException) { task.cancel(true); GraphicsProbe("not_completed", "timeout") }
     catch (_: InterruptedException) { task.cancel(true); Thread.currentThread().interrupt(); GraphicsProbe("not_completed", "interrupted") }
     catch (_: Exception) { GraphicsProbe("not_completed", "driver_error") }
+    if (probe.renderer != null || probe.version != null) cachedProbe = SystemClock.elapsedRealtime() to probe
+    return probe
 }
+
+// A driver string is vendor text, not a device identifier. Keep it short and printable.
+internal fun graphicsDriverString(raw: String?): String? = raw?.trim()
+    ?.takeIf { it.isNotEmpty() && it.length <= 96 && it.none(Character::isISOControl) }
 
 internal fun parseGlesVersion(value: String?): String? =
     value?.let { Regex("^OpenGL ES ([1-9]\\.[0-9])(?:\\s|$)").find(it)?.groupValues?.get(1) }
@@ -53,13 +70,16 @@ private fun readback(): GraphicsProbe {
             intArrayOf(EGL14.EGL_CONTEXT_CLIENT_VERSION, 2, EGL14.EGL_NONE), 0)
         if (context == EGL14.EGL_NO_CONTEXT || !EGL14.eglMakeCurrent(egl, surface, surface, context)) return GraphicsProbe("fail", "context")
         val version = parseGlesVersion(GLES20.glGetString(GLES20.GL_VERSION))
+        val renderer = graphicsDriverString(GLES20.glGetString(GLES20.GL_RENDERER))
+        val vendor = graphicsDriverString(GLES20.glGetString(GLES20.GL_VENDOR))
         GLES20.glClearColor(0f, 1f, 0f, 1f)
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
         val pixel = ByteBuffer.allocateDirect(4)
         GLES20.glReadPixels(0, 0, 1, 1, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, pixel)
         val correct = GLES20.glGetError() == GLES20.GL_NO_ERROR &&
             pixel.get(0).toInt() == 0 && (pixel.get(1).toInt() and 0xff) == 255 && pixel.get(2).toInt() == 0
-        return if (correct) GraphicsProbe("pass", "done", version) else GraphicsProbe("fail", "readback", version)
+        return if (correct) GraphicsProbe("pass", "done", version, renderer, vendor)
+        else GraphicsProbe("fail", "readback", version, renderer, vendor)
     } finally {
         EGL14.eglMakeCurrent(egl, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_CONTEXT)
         if (context != EGL14.EGL_NO_CONTEXT) EGL14.eglDestroyContext(egl, context)

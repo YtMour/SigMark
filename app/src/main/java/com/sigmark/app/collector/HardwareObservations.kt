@@ -81,7 +81,14 @@ internal val coreHardwareKeys = setOf(
     "sensors.reportingModes", "sensors.fifoCount", "sensors.directChannelTypes", "media.cameraModes",
 )
 internal val graphicsHardwareKeys = setOf("runtime.glesProbeResult", "runtime.glesProbeVersion", "runtime.glesProbeStage")
-internal val expandedHardwareKeys = coreHardwareKeys + graphicsHardwareKeys +
+// Field set 22: the readings that do not come from the device's own declarations.
+// Field set 24 adds the kernel's capacity profile and reserved contiguous pool.
+internal val measuredHardwareKeys = setOf(
+    "cpu.cpuParts", "memory.physicalRam", "memory.kernelMemTotal",
+    "runtime.glesRenderer", "runtime.glesVendor",
+    "cpu.cpuCapacity", "memory.cmaTotal",
+)
+internal val expandedHardwareKeys = coreHardwareKeys + graphicsHardwareKeys + measuredHardwareKeys +
     setOf("cpu.processBitness", "cpu.kernelMachine", "system.interfaceCapabilities", "runtime.externalInputTypes",
         "system.gnssProvider", "system.gnssHardwareModel", "system.gnssModelReported", "system.gnssAntennaSupport") +
     gnssCheckKeys.map { "system.$it" }

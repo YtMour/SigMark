@@ -26,6 +26,7 @@
 .dossier-state { display: inline-block; border: 1px solid var(--border); padding: .05rem .35rem; border-radius: .35rem; font-size: .8rem; }
 .dossier-state[data-state="MISSING"] { color: var(--muted); }
 .dossier-state[data-state="AVAILABLE"] { color: var(--mint); }
+.overlay-conflict { color: var(--amber); border-inline-start: 2px solid var(--amber); padding-inline-start: .5rem; }
 @media (max-width: 600px) {
   .dossier-summary { display: flex; margin: .3rem 0 0; }
   .dossier-evidence { grid-template-columns: minmax(0,1fr); }

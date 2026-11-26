@@ -1,5 +1,7 @@
 # SigMark · 内网报告工作区
 
+**当前试装（2026-11-25）**：后台接收字段集 21；1.17.0 试装包从管理端「构建中心」下载，公开「下载 APK」及 App 默认更新仍为 1.16.0。核对方式、包散列与真机验收见 [当前版本交接](HANDOFF.md)。安装试装包不切换默认发布版本。
+
 ## 连接方式
 
 1. 在 `backend/` 将 `.env.example` 复制为 `.env`，填写独立随机的 URL 安全 `DB_PASSWORD`、仅用于管理端的 `ADMIN_TOKEN`、测试电脑的私有 IPv4 `LAN_BIND`。可选 `LAN_PORT` 默认 48272、`LAN_BATCH` 默认 `lan-direct`。真实配置不进 Git，不构建到 APK。
@@ -18,6 +20,7 @@
 - 0.10 使用 `schemaVersion: 3`。归档白名单增加电池能量与电荷、窗口边距、运行时、媒体能力、环境和应用调试字段。归档行保留 `null` 状态值、来源、原因和适用的 errno。新增 `coverage` 数组记录手机各分类的可用、受限、暂无数据和异常计数。网页据此显示手机快照及其中仅本机项的范围。配置摘要、构建指纹、安装来源及权限、地区与时区、运营商、精确小区信道和频点继续留在手机。安装应用清单和传感器实时值各自在面板内查看。详见 [采集字段说明](FRAMEWORK-DIAGNOSTICS.md)。
 - v1/v2 按历史提交的粒度呈现。新版上线后，用同一手机重新采集并上传以取得扩展明细。
 - 0.11 使用 `schemaVersion: 4`、`collectorVersion` 和 `fieldSetVersion: 2`。v1–v3 仍保留原值。字段键缺失表示归档未记录；字段键存在且值为 `null` 时，用 `status` 和 `reason` 说明原因。
+- 1.17.0 保持 `schemaVersion: 4`，使用 `fieldSetVersion: 21`。新增的 `system.propertyModel`、`system.propertyDevice` 从普通 App 读取，按字段集门控；旧协议继续接收此前的字段。用户可在「查看上传参数」看到它们。详细语义见 [App 身份核对](SECURITY-EVIDENCE.md#app-身份声明核对)。
 - 用 `docker compose ps` 查看状态，`docker compose stop` 停机并保留报告。升级保留现有 PostgreSQL 卷及原 DB 密码，避免 `docker compose down -v`。使用 `go test ./...`、`go vet ./...`（`backend/`）及 `npm ci`、`npm test`、`npm run build`（`backend/web/`）复测。
 - 仓库统计的数据库集成测试：为测试 PostgreSQL 17 实例设置 `SIGMARK_TEST_DATABASE_URL`，在 `backend/` 执行 `go test -run '^TestRepositoryStatsPostgres$' -count=1 ./cmd/sigmark`。测试只使用该连接的临时表；未配置时跳过。优先使用独立测试实例。
 
@@ -46,7 +49,7 @@
 
 历史版本 0.18.1 首推「整体获取」。也可点「上传当前采样」提交已有结果；成功后该入口变为「查看回执」。不同时间的新采样是不同报告，已勾选关联的同一安装只计一部设备。仅关闭预览不发送；重试同一草稿不重采。
 
-0.18.0 的手动安全采样流程：在 App 首页点击「指纹安全」→ 可选「测试密钥保护」→ 关闭后「上传报告」核对预览。应在同一快照上传，点首页刷新会清掉上次自测。后台在「指纹安全」选择该报告查看发布签名、分区、组件和密钥信息；旧样本不回填。分区构建指纹和当前 APK 证书摘要从字段集 7 开始纳入此预览，整机配置摘要仍仅本机。见[字段与局限](SECURITY-EVIDENCE.md)。
+当前手动流程：App 首页点「整体获取」保存采样并显示安全结论。点「上传报告」选择已保存的快照、核对预览并确认发送。后台打开该报告的「指纹安全」即可分析，无需桌面采集或另外导入。分区构建指纹和当前 APK 证书摘要从字段集 7 开始允许归档，整机配置摘要仍仅本机；旧样本不回填。见[字段与局限](SECURITY-EVIDENCE.md)。
 
 启动 Compose 后，在仓库根目录操作构建工作进程。Windows 已验证，Linux 脚本分支待复测。构建主机需要 Python 3.12+、Git、JDK 17+、Android SDK Platform 36 和 Build Tools 36.0.0，设置 `JAVA_HOME` 和 `ANDROID_HOME`。
 

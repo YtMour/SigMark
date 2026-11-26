@@ -87,6 +87,12 @@ var versionedParameters = []versionedParameter{
 	{"battery", "present", 16}, {"battery", "cycleCount", 16}, {"cellular", "dataSubscriptionService", 16},
 	{"system", "initialSdk", 18}, {"system", "bootCount", 20}, {"system", "mediaPerformanceClass", 20},
 	{"system", "boardPlatform", 19}, {"system", "bootHardware", 19}, {"system", "hardwareSku", 19},
+	{"system", "propertyModel", 21}, {"system", "propertyDevice", 21},
+	{"cpu", "cpuParts", 22}, {"memory", "physicalRam", 22}, {"memory", "kernelMemTotal", 22},
+	{"runtime", "glesRenderer", 22}, {"runtime", "glesVendor", 22},
+	{"environment", "overlayDeviceCodename", 23},
+	{"cpu", "cpuCapacity", 24}, {"memory", "cmaTotal", 24},
+	{"environment", "overlayEvidence", 25},
 	{"environment", "hookSignals", 17}, {"environment", "tracerPid", 17}, {"environment", "rootMountHints", 17},
 	{"environment", "rootManagerVisible", 17}, {"environment", "userProfile", 17}, {"environment", "drmSecurityLevel", 17},
 	{"environment", "verityMode", 17}, {"environment", "buildDebuggable", 17},
@@ -133,7 +139,17 @@ func (p Parameter) valid(schema, fieldSet int) bool {
 	if sysField && !sys.allows(p.Source) {
 		return false
 	}
-	if p.Errno != nil && (!(sysField || (p.Group == "system" && oneOf(p.Key, "selinux", "selinuxPolicy")) ||
+	appProperty := p.Group == "system" && oneOf(p.Key, "propertyModel", "propertyDevice")
+	if appProperty {
+		expected := "getprop ro.product.model"
+		if p.Key == "propertyDevice" {
+			expected = "getprop ro.product.device"
+		}
+		if p.Source != expected {
+			return false
+		}
+	}
+	if p.Errno != nil && (!(sysField || appProperty || (p.Group == "system" && oneOf(p.Key, "selinux", "selinuxPolicy")) ||
 		(p.Group == "cpu" && oneOf(p.Key, "cpuInfo", "features", "cpu0MaxFrequency", "kernelFull", "kernelMachine", "pageSize")) ||
 		(p.Group == "memory" && p.Key == "swap") || (schema >= 3 && p.Group == "environment" && p.Key == "selinuxDomain")) ||
 		p.Status == "AVAILABLE" || *p.Errno < 1 || *p.Errno > 4095) {
@@ -231,6 +247,47 @@ func partitionDatesText(value string) bool {
 	return true
 }
 
+// Field set 25: `channel:value` segments in a fixed order, conflict rows last.
+var overlayEvidencePayload = regexp.MustCompile(`^[a-z0-9_,]+$`)
+
+var overlayEvidenceConflict = regexp.MustCompile(
+	`^conflict:(rro|idmap|vendor_dir|product_dir|system_ext_dir|odm_dir|sku|soc):[a-z0-9_,]+!=(rro|idmap|vendor_dir|product_dir|system_ext_dir|odm_dir|sku|soc):[a-z0-9_,]+$`)
+
+// Channel order is fixed by the collector, so a reordered string is a contract break.
+var overlayEvidenceChannels = []string{"rro", "idmap", "vendor_dir", "product_dir", "system_ext_dir", "odm_dir", "sku", "soc"}
+
+func overlayEvidenceText(value string) bool {
+	if utf8.RuneCountInString(value) > 200 {
+		return false
+	}
+	seen, conflict := -1, false
+	for _, row := range strings.Split(value, " / ") {
+		if overlayEvidenceConflict.MatchString(row) {
+			conflict = true
+			continue
+		}
+		if conflict {
+			return false
+		}
+		channel, payload, ok := strings.Cut(row, ":")
+		if !ok || !overlayEvidencePayload.MatchString(payload) {
+			return false
+		}
+		index := -1
+		for i, name := range overlayEvidenceChannels {
+			if name == channel {
+				index = i
+				break
+			}
+		}
+		if index <= seen {
+			return false
+		}
+		seen = index
+	}
+	return seen >= 0 || conflict
+}
+
 func validAcceptanceValue(group, key, value string) bool {
 	switch group + "." + key {
 	case "battery.present":
@@ -261,6 +318,8 @@ func validAcceptanceValue(group, key, value string) bool {
 		return verityMode.MatchString(value)
 	case "environment.buildDebuggable":
 		return oneOf(value, "开启", "关闭")
+	case "environment.overlayEvidence":
+		return overlayEvidenceText(value)
 	case "system.initialSdk":
 		return compactIntRange(value, 1, 99)
 	case "system.bootCount":
@@ -365,6 +424,10 @@ func validAcceptanceValue(group, key, value string) bool {
 		return platformCode.MatchString(value)
 	case "system.hardwareSku":
 		return skuCode.MatchString(value)
+	case "system.propertyModel":
+		return productModelCode.MatchString(value) && usableIdentity(value) != ""
+	case "system.propertyDevice":
+		return productDeviceCode.MatchString(value) && usableIdentity(value) != ""
 	}
 	return true
 }
@@ -439,12 +502,14 @@ type Report struct {
 }
 
 var (
-	batchPattern   = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,31}$`)
-	requestPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
-	modelPattern   = regexp.MustCompile(`^[\p{L}\p{N} ._+()-]{1,40}$`)
-	versionPattern = regexp.MustCompile(`^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$`)
-	platformCode   = regexp.MustCompile(`^[a-z0-9_.-]{1,32}$`)
-	skuCode        = regexp.MustCompile(`^[A-Za-z0-9._-]{1,32}$`)
+	batchPattern      = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,31}$`)
+	requestPattern    = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
+	modelPattern      = regexp.MustCompile(`^[\p{L}\p{N} ._+()-]{1,40}$`)
+	versionPattern    = regexp.MustCompile(`^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$`)
+	platformCode      = regexp.MustCompile(`^[a-z0-9_.-]{1,32}$`)
+	skuCode           = regexp.MustCompile(`^[A-Za-z0-9._-]{1,32}$`)
+	productModelCode  = regexp.MustCompile(`^[\p{L}\p{N} ._+()-]{1,91}$`)
+	productDeviceCode = regexp.MustCompile(`^[A-Za-z0-9._-]{1,64}$`)
 )
 
 func oneOf(s string, options ...string) bool {
@@ -493,6 +558,21 @@ func (p Report) valid() bool {
 	}
 	if p.FieldSetVersion >= 20 {
 		maxFields = 248 // 224 fixed keys and up to 24 dynamic partition rows.
+	}
+	if p.FieldSetVersion >= 21 {
+		maxFields = 250 // 226 fixed keys and up to 24 dynamic partition rows.
+	}
+	if p.FieldSetVersion >= 22 {
+		maxFields = 255 // 231 fixed keys and up to 24 dynamic partition rows.
+	}
+	if p.FieldSetVersion >= 23 {
+		maxFields = 256 // 232 fixed keys and up to 24 dynamic partition rows.
+	}
+	if p.FieldSetVersion >= 24 {
+		maxFields = 258 // 234 fixed keys and up to 24 dynamic partition rows.
+	}
+	if p.FieldSetVersion >= 25 {
+		maxFields = 259 // 235 fixed keys and up to 24 dynamic partition rows.
 	}
 	if (p.SchemaVersion < 1 || p.SchemaVersion > 4) || !requestPattern.MatchString(p.RequestID) || p.AndroidAPI < 0 || p.AndroidAPI > 999 ||
 		!modelPattern.MatchString(p.Model) || !versionPattern.MatchString(p.AppVersion) ||

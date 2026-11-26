@@ -27,6 +27,7 @@ func identityRowOf(id, asset string, at int64, model, device, board, platform, h
 	put("system.boardPlatform", platform)
 	put("system.bootHardware", hardware)
 	put("system.hardwareSku", sku)
+	put("system.sku", "23078PND5G")
 	row := identityRow{ReportID: id, CapturedAt: at, Values: identityValuesFrom(values), Pairs: identityConflicts(values)}
 	if asset != "" {
 		row.AssetID = identityPtr(asset)
@@ -52,12 +53,12 @@ func TestIdentitySummaryAggregatesDriftSharedAndConflicts(t *testing.T) {
 		t.Fatalf("conflicts: %d %+v", got.ConflictReports, got.ConflictSamples)
 	}
 	sample := got.ConflictSamples[0]
-	// system.sku is not archived in this fixture, so only the board pair is comparable.
+	// Board/platform can differ without conflict; only the SKU differs here.
 	if sample.ReportID != "r2" || sample.AssetID != "A" || len(sample.Pairs) != 1 {
 		t.Fatalf("conflict sample: %+v", sample)
 	}
-	if sample.Pairs[0].Left != "mt6985" || sample.Pairs[0].Right != "gs101" ||
-		sample.Pairs[0].LeftKey != "system.board" || sample.Pairs[0].RightKey != "system.boardPlatform" {
+	if sample.Pairs[0].Left != "23078PND5G" || sample.Pairs[0].Right != "GR1YH" ||
+		sample.Pairs[0].LeftKey != "system.sku" || sample.Pairs[0].RightKey != "system.hardwareSku" {
 		t.Fatalf("pair order or keys changed: %+v", sample.Pairs)
 	}
 	if len(got.MultiIdentityAssets) != 1 {
@@ -113,7 +114,7 @@ func TestIdentitySummaryCapsLists(t *testing.T) {
 	for i := 0; i < identitySummaryLimit+3; i++ {
 		asset := "asset-" + string(rune('a'+i))
 		rows = append(rows,
-			identityRowOf("x"+asset, asset, int64(i+1), "model", "device", "board-"+asset, "board-"+asset, "hw", "sku"),
+			identityRowOf("x"+asset, asset, int64(i+1), "model", "device", "board-"+asset, "board-"+asset, "hw", "23078PND5G"),
 			identityRowOf("y"+asset, asset, int64(i+1), "model", "device", "board-"+asset, "other-"+asset, "hw", "sku"))
 	}
 	got := buildIdentitySummary(rows, 1)
@@ -171,6 +172,7 @@ func TestIdentitySummaryPostgres(t *testing.T) {
 	           jsonb_build_object('group','system','key','board','status','AVAILABLE','value','mt6985'),
 	           jsonb_build_object('group','system','key','boardPlatform','status','AVAILABLE','value',platform),
 	           jsonb_build_object('group','system','key','bootHardware','status','AVAILABLE','value','mtk'),
+	           jsonb_build_object('group','system','key','sku','status','AVAILABLE','value','23078PND5G'),
 	           jsonb_build_object('group','system','key','hardwareSku','status','AVAILABLE','value',sku),
 	           jsonb_build_object('group','system','key','vendorSpl','status','RESTRICTED','value',NULL)
 	         )),trash,asset

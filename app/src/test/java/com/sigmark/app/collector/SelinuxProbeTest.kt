@@ -32,15 +32,16 @@ class SelinuxProbeTest {
         assertNull(SafeReader.read("test") { "unknown" }.value)
     }
 
-    @Test fun infersModeOnlyWhenDacWouldAllowTheRead() {
+    @Test fun dacClueDoesNotReplaceRejectedMode() {
         fun denied() = SafeReader.errnoResult<String>("/sys/fs/selinux/enforce", 13, 13, 1, 2, 19)
         val directoryAllowsOther = 0x1ED // 0755
         val fileAllowsOtherRead = 0x1A4 // 0644
 
         val inferred = selinuxVerdict(denied(), directoryAllowsOther, fileAllowsOtherRead)
-        assertEquals("Enforcing（强制模式，推断）", inferred.mode.value)
-        assertEquals(ValueStatus.AVAILABLE, inferred.mode.status)
-        assertTrue(inferred.mode.detail!!.contains("只可能被 SELinux 策略拒绝"))
+        assertNull(inferred.mode.value)
+        assertEquals(ValueStatus.RESTRICTED, inferred.mode.status)
+        assertEquals(ReadReason.ACCESS_DENIED, inferred.mode.reason)
+        assertEquals(13, inferred.mode.errno)
         assertEquals("inferred_mac", inferred.evidence.value)
         assertEquals("/sys/fs/selinux/enforce", inferred.evidence.source)
 
@@ -57,10 +58,13 @@ class SelinuxProbeTest {
         }
         assertTrue(dacAllowsOtherRead(directoryAllowsOther, fileAllowsOtherRead))
 
-        val disabled = selinuxVerdict(
+        val missing = selinuxVerdict(
             SafeReader.errnoResult("/sys/fs/selinux/enforce", 2, 13, 1, 2, 19), null, null)
-        assertEquals("未启用（推断）", disabled.mode.value)
-        assertEquals("inferred_disabled", disabled.evidence.value)
+        assertNull(missing.mode.value)
+        assertEquals(ValueStatus.UNAVAILABLE, missing.mode.status)
+        assertEquals(ReadReason.NODE_MISSING, missing.mode.reason)
+        assertEquals(2, missing.mode.errno)
+        assertNull(missing.evidence.value)
 
         val enforcing = selinuxVerdict(SafeReader.read("fixture") { "1" }, null, null)
         assertEquals("Enforcing（强制模式）", enforcing.mode.value)

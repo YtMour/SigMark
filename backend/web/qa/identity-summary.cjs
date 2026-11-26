@@ -10,14 +10,14 @@ const when='2026-11-24T07:00:00Z';
 const at=Date.parse(when);
 const identity={model:'23078PND5G',device:'corot',board:'mt6985',boardPlatform:'mt6985',bootHardware:'mtk',hardwareSku:'23078PND5G'};
 const drifted={...identity,boardPlatform:'gs101',hardwareSku:'GR1YH'};
-const summary={schemaVersion:1,ruleVersion:'sigmark-identity/1',generatedAtEpochMs:at,reports:3,assets:2,
+const summary={schemaVersion:1,ruleVersion:'sigmark-identity/2',generatedAtEpochMs:at,reports:3,assets:2,
   multiIdentityAssets:[{assetId:id(900),identities:[
     {...identity,reports:1,lastCapturedAtEpochMs:at,lastReportId:id(1)},
     {...drifted,reports:1,lastCapturedAtEpochMs:at-1000,lastReportId:id(2)}],reports:2,lastCapturedAtEpochMs:at}],
   sharedIdentities:[{...identity,assetCount:2,reports:2,lastCapturedAtEpochMs:at,lastReportId:id(3)}],
   conflictReports:1,
   conflictSamples:[{reportId:id(2),assetId:id(900),capturedAtEpochMs:at-1000,pairs:[
-    {leftKey:'system.board',rightKey:'system.boardPlatform',left:'mt6985',right:'gs101'}]}],
+    {leftKey:'system.model',rightKey:'system.propertyModel',left:'23078PND5G',right:'Model B'}]}],
   truncated:false};
 const conflicting=Array.from({length:20},(_,i)=>({group:['system','cpu'][i%2],key:'field'+i,label:'字段 '+i,
   source:'QA',status:'AVAILABLE',value:String(i)}));
@@ -25,10 +25,12 @@ Object.assign(conflicting[0],{group:'system',key:'board',label:'主板代号',va
 Object.assign(conflicting[1],{group:'system',key:'boardPlatform',label:'平台代号声明',value:'gs101'});
 Object.assign(conflicting[2],{group:'system',key:'bootHardware',label:'启动硬件声明',value:'mtk'});
 Object.assign(conflicting[3],{group:'cpu',key:'hardware',label:'硬件代号',value:'mtk'});
-const consistent=conflicting.map(row=>row.key==='boardPlatform'?{...row,value:'mt6985'}:row);
+Object.assign(conflicting[4],{group:'system',key:'model',label:'型号',value:'23078PND5G'});
+Object.assign(conflicting[5],{group:'system',key:'propertyModel',label:'型号属性',value:'Model B'});
+const consistent=conflicting.map(row=>row.key==='propertyModel'?{...row,value:'23078PND5G'}:row);
 const reportRow=(n,parameters)=>({id:id(n),batch:'qa-identity',receivedAt:when,assetId:id(900),report:{
-  model:'23078PND5G',schemaVersion:4,androidApi:34,appVersion:'1.10.0',network:'wifi',fieldSetVersion:19,
-  collectorVersion:'1.10.0',capturedAtEpochMs:at,assetId:id(900),parameters,coverage:[],metrics:[]}});
+  model:'23078PND5G',schemaVersion:4,androidApi:34,appVersion:'1.17.0',network:'wifi',fieldSetVersion:21,
+  collectorVersion:'1.17.0',capturedAtEpochMs:at,assetId:id(900),parameters,coverage:[],metrics:[]}});
 const rows={[id(1)]:reportRow(1,consistent),[id(2)]:reportRow(2,conflicting)};
 
 async function run(){
@@ -69,7 +71,7 @@ async function run(){
     await page.getByText(/gs101/).first().waitFor();
     await page.getByRole('heading',{name:'跨资产同身份'}).waitFor();
     await page.getByRole('heading',{name:'内部冲突报告'}).waitFor();
-    await page.getByText('system.board').first().waitFor();
+    await page.getByText('system.propertyModel',{exact:true}).first().waitFor();
     await page.setViewportSize({width:390,height:1003});
     assert(await screenOK());
     await snap('identity-390');
@@ -82,17 +84,18 @@ async function run(){
     await page.getByRole('button',{name:'导出身份分布 JSON'}).click();
     const file=await pending;
     const exported=JSON.parse(await fs.readFile(await file.path(),'utf8'));
-    assert.equal(exported.ruleVersion,'sigmark-identity/1');
+    assert.equal(exported.ruleVersion,'sigmark-identity/2');
     assert.equal(exported.multiIdentityAssets[0].identities.length,2);
-    assert.equal(exported.conflictSamples[0].pairs[0].right,'gs101');
+    assert.equal(exported.conflictSamples[0].pairs[0].right,'Model B');
     await page.getByRole('link',{name:'打开报告',exact:true}).click();
     await page.getByRole('link',{name:'返回身份分布',exact:true}).click();
     await page.waitForFunction(()=>document.activeElement?.id.startsWith('identity-conflict-'));
 
     await page.goto(new URL('/#reports?report='+id(2),base).href);
     await page.getByRole('heading',{name:'身份声明不一致'}).waitFor();
-    await page.getByText(/system.board/).first().waitFor();
-    await page.getByText(/mt6985/).first().waitFor();
+    const notice=page.getByRole('status',{name:'身份声明不一致'});
+    await page.getByText('查看读数',{exact:true}).click();
+    await notice.getByText('system.propertyModel',{exact:true}).waitFor();
     assert(await screenOK());
     await snap('reader-identity-390');
 

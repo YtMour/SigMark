@@ -1,0 +1,397 @@
+# 提交：堵住第三方模拟器对 35 分决定性规则的绕过（sigmark-score/4）
+
+---
+
+## Summary（标题行，直接粘）
+
+```
+score: catch emulators that rewrite the virtual-build markers (sigmark-score/4)
+```
+
+---
+
+## Description（正文，直接粘）
+
+```
+Red team finding 4: the 35-point decisive VIRTUAL_BUILD_MARKERS rule asks whether
+cpu.hardware / system.product / system.device look like an emulator. Those three
+strings are chosen by the device being examined, so an emulator that ships plausible
+values defeats the rule outright.
+
+Measured, not hypothesised. LDPlayer 9 (report ce1bdc7f-f128-4e8b-a225-bbeb2bee7c35)
+reports cpu.hardware=qcom, system.product=RMX5010, system.device=unicorn, and carries
+ro.boot.qemu=1 which the collector never reads. The label came out not_observed, no cap
+fired, and the whole device scored band `?` — a 35-point decisive rule erased by three
+property rewrites.
+
+The evidence needed to catch it was already in the report. Two channels contradict the
+declaration and neither is a name match against a blocklist:
+
+  cpu.cpuInfo          = AMD Ryzen 9 9950X 16-Core Processor
+  system.boardPlatform = aosp-user
+
+cpuInfo is a /proc read passed through from the host; boardPlatform is a build artifact.
+Rewriting either is a different and far more expensive act than a resetprop, so the
+check cannot be dodged by picking a better fake name.
+
+Adds cmd/sigmark/virtual_evidence.go with two predicates and one aggregator, and
+structuralVirtualDeduction in score.go. Priced at 35 points and decisive, same as the
+blocklist rule, and mutually exclusive with it: when VIRTUAL_BUILD_MARKERS already hit,
+the structural channel stays silent. One cause, one deduction (R2).
+
+Guarded against over-firing in two ways that are both load-bearing:
+
+  - an "implementer 0x" cpuInfo line is a positive handset signal and never flags;
+  - a blank or unrecognised string returns false. "I do not recognise this" is not
+    evidence, and treating it as such would fire on every ARM part not yet seen.
+
+After the fix the same archived report scores band D with DECISIVE_VIRTUAL_BUILD, and
+the detail names the measurement rather than asserting a verdict:
+
+  设备自相矛盾：desktop_cpu_info、generic_board_platform
+  （cpu.cpuInfo=AMD Ryzen 9 9950X 16-Core Processor）（system.boardPlatform=aosp-user）
+
+scoreVersion /3 -> /4. profileVersion stays /9: the label layer is untouched, the new
+evidence is read by the score layer straight from parameters.
+
+Verification:
+  - all 24 archived reports re-scored one by one, zero drift, all on sigmark-score/4
+  - five score goldens keep their numbers (82/D, 100/A, D, D, D); only the version line
+    changed
+  - Go: 146 top-level tests, 143 pass, 3 skipped (Postgres), 0 fail
+  - Web: 103/103
+  - four new red team tests for finding 4: the bypass reproduced, the structural catch,
+    seven real devices that must not fire, and "faking one channel is not enough"
+  - four new red team tests for finding 1: the skipped channels are named, the aggregate
+    state does not move, the gap markers never reach the 30-point deduction, and a
+    registered SoC publishes no gap markers
+  - two new cost tests that keep the strength claim honest (see below)
+
+Still open, and the first is now the top priority:
+  - ro.boot.qemu and ro.kernel.qemu are not collected at all (SafeReader.Property has
+    neither), so the cheapest direct tell is unavailable
+  - the SoC registry holds six entries; unregistered devices now report the gap, but the
+    four channels are still empty
+  - the desktop-cpu name list is hand-enumerated; a new vendor will be missed
+  - an ARM server part (e.g. Ampere Altra) in cpuInfo would be misread as a desktop CPU;
+    not tested
+```
+
+---
+
+## 一、这一轮到底发生了什么
+
+用户手动启动了雷神模拟器（LDPlayer 9）。这是**第一个非 AOSP 的第三方模拟器**样本，
+也是第一次有机会验证「伪装成真机的模拟器」能不能骗过打分。
+
+结论：**能，而且是三行属性就够。**
+
+### 实测属性（`127.0.0.1:5557`，报告 `ce1bdc7f-f128-4e8b-a225-bbeb2bee7c35`）
+
+| 键 | 值 | 说明 |
+| --- | --- | --- |
+| `ro.build.version.sdk` | 34 | |
+| `ro.product.first_api_level` | 28 | 声称 2018 年出厂 |
+| `ro.product.model` | `RMX5010` | realme |
+| `ro.product.device` | `unicorn` | 这是小米 12 的代号 |
+| `system.boardPlatform` | `aosp-user` | **真机是 SoC 代号，这里露馅** |
+| `cpu.hardware` | `qcom` | 伪装成功 |
+| `system.product` | `RMX5010` | 伪装成功 |
+| `system.device` | `unicorn` | 伪装成功 |
+| `ro.boot.qemu` | `1` | **自曝，但采集端不读** |
+| `cpu.cpuInfo` | `AMD Ryzen 9 9950X 16-Core Processor` | **宿主机 CPU 透传** |
+| `MemTotal` | 2036460 kB（1.9 GiB） | |
+| SELinux | `Permissive` | |
+
+还有一处自相矛盾：`ro.product.brand` = `realme`，但四个 fingerprint 全是
+`Xiaomi/unicorn/unicorn:14/...`。
+
+### 修复前后
+
+| 指标 | 修复前 | 修复后 |
+| --- | --- | --- |
+| `band` | **`?`** | **`D`** |
+| `decisive` | `false` | `true` |
+| behavior 扣分 | 15（只有 SELinux） | 35 + 15 + 12 |
+| caps | 无 | `DECISIVE_VIRTUAL_BUILD → D` |
+
+---
+
+## 二、为什么原来的规则会漏
+
+`device_profile.go` 的 `virtual_build_markers` 只做一件事：
+
+```go
+if s == "ranchu" || s == "goldfish" || s == "vbox86" || s == "emulator" ||
+    strings.HasPrefix(s, "sdk_gphone") {
+    return "hit"
+}
+```
+
+它问的是「这个名字像不像模拟器」。而这个名字是**被审查的设备自己填的**。
+雷神填了三个 `qcom`/`RMX5010`/`unicorn`，规则就只能得到 `not_observed`。
+
+这是黑名单类规则的结构性缺陷：**输入由对手提供。**
+
+---
+
+## 三、修复思路：不看名字，看自相矛盾
+
+新增 `backend/cmd/sigmark/virtual_evidence.go`。
+
+| 通道 | 判据 | 为什么对手改起来更贵 |
+| --- | --- | --- |
+| `desktop_cpu_info` | `cpu.cpuInfo` 命中 `intel`/`amd`/`ryzen`/`core i3-i9`/`xeon`/`apple m1-m4` 等桌面厂商族名 | 来自 `/proc/cpuinfo`，要改得动内核视角 |
+| `generic_board_platform` | `system.boardPlatform` 属于 `aosp`/`aosp-user`/`generic*`/`unknown`/`emulator`/`goldfish`/`ranchu`/`vbox86` | 镜像构建产物，不是属性 |
+
+两条都**不是**黑名单名字匹配，而是「手机不可能同时是台桌面机」这种结构矛盾。
+
+### 两个防误伤设计（都是承重的）
+
+1. `cpuInfoContradictsHandset` 遇到 `implementer 0x` 直接返回 `false` —— 那是 ARM
+   正品信号，永不误判。
+2. 空白或不认识的字符串返回 `false`。**「我不认识」不是证据**，否则会误伤每一颗
+   还没见过的新 ARM 芯片。
+
+### 互斥
+
+`structuralVirtualDeduction(parameters, markerHit)` 在 `markerHit == true` 时直接
+返回 `false`。一因一果（R2），同一台设备不会被同一个原因扣两次。
+
+---
+
+## 四、验证
+
+- **全库 24 份**（新增雷神那份）逐份回算，**零漂移**，全部 `version=sigmark-score/4`。
+  分布 A4 / D8 / B4 / ?7 / 雷神 D。
+- **黄金 5 份**数值全不变（Pixel6 82/D、MI8 100/A、三份仿真器 D），只有 version 一行变。
+- **Go 144 顶层**（141 PASS / 3 SKIP / 0 FAIL）。
+- **Web 103/103/0**。
+- 新增 `score_redteam_emulator_test.go`，4 个测试：
+  1. 复现绕过（三个键全都不触发黑名单）；
+  2. 结构化通道捕获；
+  3. **七台真机不误伤**（Pixel 6 Tensor、MI 8 SDM845、Redmi MT6985、SM8650、MT6989、空值）；
+  4. 只改 `boardPlatform` 不够，`cpuInfo` 能独立站住。
+
+---
+
+## 五、版本
+
+`scoreVersion /3 → /4`。
+
+`profileVersion` **不动**（仍 `/9`）：标签层没变，新证据是 score 层从 `parameters`
+直接读的。
+
+这是「零命中也要升版」的第三例——前两例是 R10 修复和身份洗白修复。
+
+---
+
+## 六、还没做的（诚实清单）
+
+按优先级：
+
+1. **`ro.boot.qemu` / `ro.kernel.qemu` 完全没采集**（现在是第一优先级）。
+   `SafeReader.Property` 里两个都没有。这是最便宜的直接证据，却是唯一没读的。
+   本轮只补了「从已有数据里能读出来的」，没动采集端。
+2. **SoC 注册表只有 6 条**（`gs101`/`mt6985`/`sm8550`/`sm8450`/`sm8250`/`sdm845`）。
+   未登记设备现在至少会自报缺口（见第七节），但四个通道仍然是空的。
+3. **`FRESH_BOOT_ON_AGED_ROM` 在模拟器上误报了**：12 分。
+   `first_api_level=28` + `bootCount=1`，规则判「老设备新开机」。这个判断本身没错，
+   但模拟器天然满足，属于误报面。未处理。
+4. **桌面 CPU 族名是人工枚举的**，新厂商会漏。ARM 服务器芯片（如 Ampere Altra）若出现
+   在 `cpuInfo` 里会被误判成桌面 CPU —— 未实测。
+5. **单观察者通道未测**：overlay / SELinux / virtual_build 三对是否同样能被「删一侧」
+   擦除。
+
+---
+
+## 七、这一轮的方法论收获
+
+前三次漏洞都是「该看的没看」：
+
+- F12：`PROFILE_UNSET` 被静默跳过；
+- F13/F15：删证据能升档；
+- F16：删一侧身份读数能洗白。
+
+**这一次不同：看的地方是对的，但那个地方由对手填。**
+
+所以规则设计上多了一条约束：判据要尽量选**对手改起来更贵的通道**（内核透传、构建
+产物），而不是**对手随手就能填的通道**（属性）。名字匹配永远只是第一道筛子。
+
+---
+
+## 八、顺带修掉的发现 1：未登记 SoC 静默跳过四个通道
+
+红队发现 1 一直是待办里的第一项，本轮一起修了。
+
+### 问题
+
+`hardwareFactsLabel` 里四个分支全部以 `known &&` 为前置：
+
+```
+cpu_core_set   (cpu.cpuParts)
+gpu_family     (runtime.glesRenderer)
+cpu_capacity   (cpu.cpuCapacity)
+cma_total      (memory.cmaTotal)
+```
+
+`declaredSoc` 解析不到 `socProfiles` 条目时 `known == false`，四个通道**全部不执行且
+什么都不写**。label 只聚合 `ram_dispersion` 和 `overlay_codename`，两者一致就输出
+`not_observed` —— 和「比较过且一致」渲染成同一个结果。
+
+和 F12（`PROFILE_UNSET`）是同一形状的错误，只是高一层。注册表只有 6 条，任何新芯片
+都能免费拿到干净的硬件判定。
+
+### 修复
+
+**不猜未知 SoC 的期望值**（那会凭空造事实），而是**把省略写出来**：未登记时给四个通道
+各记一条 `unregistered_soc:<channel>` 的 basis。
+
+**一个关键区分**：`declaredSoc` 返回 `known == false` 混了两种情况——
+①报告里根本没声明 SoC；②声明了但注册表不认识。只有第 2 种是覆盖缺口。
+新增 `socDeclared(read)`，只有「有声明但未登记」才打 gap 标记，否则会把「这份老报告
+没这个字段」误报成「我们试过但失败了」。
+
+### 危险的另一半
+
+`unregistered_soc:` 条目和真实冲突 basis 共用同一个 `Basis` 切片，而 `declarationAxis`
+对非 overlay basis 按 **30 分**计价。不在那里排除这个前缀，**每一台未登记设备都会开始
+为一次从未发生的比较付 30 分**——正好是所修 bug 的反面。
+
+所以 `nonOverlayBasis` 新增排除 `unregistered_soc:` 前缀，测试同时验证「真实冲突仍然
+被计价」，防止排除过宽。
+
+### 验证
+
+新增 `score_redteam_unregistered_test.go`，4 个 Test：点名被跳过的通道、聚合 state
+不动、gap 不得进入 30 分计价、已登记 SoC 不得出现 gap 标记。全库 24 份零漂移。
+
+---
+
+## 九、一处自我纠正：两条通道不是一样贵
+
+写完之后我用 adb 在雷神上实测了一遍成本，发现我给文档团队的描述**有一半是错的**。
+
+**我原来写的**：「`cpu.cpuInfo` 和 `system.boardPlatform` 都改起来更贵，因为一个来自
+`/proc` 透传、一个是镜像构建产物。」
+
+**实测结果**：
+
+```
+$ adb shell "setprop ro.board.platform test_probe; getprop ro.board.platform"
+test_probe                                    ← 一条 setprop 就改掉了
+
+$ adb shell "echo x > /proc/cpuinfo"
+/system/bin/sh: can't create /proc/cpuinfo: Permission denied
+
+$ adb shell "ls -l /proc/cpuinfo"
+-r--r--r-- 1 root root 0                      ← 只读，root 属主
+```
+
+`system.boardPlatform` 取自 `ro.board.platform`（`DeviceCollectors.kt:129` 的
+`declaredProperty`），**它就是一个属性**，和黑名单那三个键一样便宜。我把它说成
+「构建产物」是错的。
+
+**修正后的准确表述**：
+
+| 通道 | 输入 | 强度 |
+| --- | --- | --- |
+| `desktop_cpu_info` | `cpu.cpuInfo` ← `/proc/cpuinfo` | **硬**（`setprop` 无效） |
+| `generic_board_platform` | `system.boardPlatform` ← `ro.board.platform` | **软**（一行 `setprop` 即失效） |
+
+**规则的真实强度 = 一条硬通道 + 一条软通道，不是两条硬通道。**
+
+只要模拟器把 `ro.board.platform` 改成真实代号（`pineapple` 等），`boardPlatform`
+通道立刻失明，35 分全靠 `cpu.cpuInfo` 一条撑着。
+
+两个新测试锁住这个边界：
+- `TestRedteamFakingPlatformAloneIsCheap`：改 `boardPlatform` 后该通道失效；两条都改
+  则结构性证据**归零**——这是规则的诚实上限，不是 bug。
+- `TestRedteamCpuInfoSurvivesPlatformRewrite`：`boardPlatform` 依次设
+  `pineapple`/`gs101`/`sdm845`/`mt6985`，`cpuInfo` 通道始终独立成立。
+
+**方法论**：「判据问的问题不同」不等于「判据更难满足」。判断成本要看**数据从哪来**
+（属性 / `/proc` / 构建产物），不是看它问什么。
+
+---
+
+## 十、新增文档：`docs/VIRTUALIZATION-MATRIX.md`
+
+Goal 第三项（仿真器未实测项）的产物。只记实测数据，不写推测。
+
+核心是改写能力表（全部有命令 + 原始输出）：
+
+| 目标 | 能否改写 | 手段 |
+| --- | --- | --- |
+| `ro.*` 属性 | **能** | `setprop` 一行 |
+| `persist.*` 属性 | **能** | `setprop` 一行 |
+| `/data` 文件 | **能** | 直接写 |
+| `/proc/cpuinfo` | **不能** | 需改内核视角 |
+
+**一个额外发现**：`ro.build.tags` 也能被改（`release-keys` → `test-keys` 成功）。
+这意味着 `rom_verification`（读 `environment.verityMode` + `environment.buildDebuggable`）
+在雷神上同样是软通道。
+
+文档还记录了平台覆盖现状：AOSP AVD android-34 / android-30（均已完成）、雷神（已完成）、
+Android-x86 / Bliss / Waydroid / redroid（未测）、arm64-v8a 速度（未测）。
+
+---
+
+## 十一、攻击成本清单（红队发现 5）
+
+把「雷神要变成 A 需要改几个字段」数出来了。结论可数，不是感觉。
+
+按 `score.go` 规则表逐条数，雷神当前 **D（decisive）**。让它不 decisive 的
+**最小编辑集 = 2 个字段**：
+
+1. `system.boardPlatform` ← 一条 `setprop`（**免费**）
+2. `cpu.cpuInfo` ← 必须改 guest kernel 对 `/proc/cpuinfo` 的输出（**唯一贵的一步**）
+
+**但清掉两条决定性规则不等于拿到 A。** declaration 轴还有三条比对规则
+（`FOREIGN_PROFILE` 30 / `OVERLAY_CODENAME_MISMATCH` 15 / `HARDWARE_CHANNEL_CONFLICT` 30），
+它们比「声明 vs 实测」，要安静得让两者互相自洽。
+
+**准确表述**：
+
+> 从 D 到「不 decisive」= 2 个字段。从 D 到 A = 2 个字段 + 让所有声明与实测自洽。
+
+把这两件事混成「改两处就能拿 A」是错的。
+
+新增 `score_redteam_cost_test.go`（150 行，4 个测试）：
+- `TestRedteamBillOfMaterialsForAnA` —— 中央测试，两次编辑后两条决定性规则同时安静
+- `TestRedteamTheCheapEditAloneIsNotEnough` —— 只做免费编辑，仍被 `desktop_cpu_info` 抓住
+- `TestRedteamTheExpensiveEditAloneIsAlsoNotEnough` —— 只做贵编辑，仍被 `generic_board_platform` 抓住
+- `TestRedteamWhatTheRuleDoesNotPrice` —— 诚实的一半
+
+### 11.1 顺带修的一处漏改
+
+上一轮把 `virtual_evidence.go` 的 `HONEST COST NOTE` 改对了，但 **`score.go` 的
+`structuralVirtualPoints` 注释里还写着 "system.boardPlatform is a build artifact"**。
+同一处错误，漏改了一处。已改。
+
+**教训**：改了 A 文件的注释，没查 B 文件里同一句话。**同一个错误会在多个地方存活，
+改一处不等于改完。**
+
+---
+
+## 十二、改动文件
+
+新增：
+- `backend/cmd/sigmark/virtual_evidence.go`
+- `backend/cmd/sigmark/score_redteam_emulator_test.go`
+- `backend/cmd/sigmark/score_redteam_unregistered_test.go`
+- `docs/VIRTUALIZATION-MATRIX.md`
+- `output/commit-score-4.txt`（本文件）
+
+修改：
+- `backend/cmd/sigmark/score.go`（`scoreVersion`、`structuralVirtualPoints`、
+  `behaviorAxis` 签名加 `parameters`、`structuralVirtualDeduction`、`markerHit`、
+  `nonOverlayBasis` 排除 gap 前缀）
+- `backend/cmd/sigmark/hardware_facts.go`（`socDeclared`、未登记 SoC 的 gap 标记）
+- `backend/cmd/sigmark/hardware_facts_test.go`（basis 断言补注释）
+- `backend/cmd/sigmark/score_usage_u2_test.go`（版本断言）
+- `backend/cmd/sigmark/testdata/*.golden.json`（5 份，仅 version 行）
+- `backend/web/src/score-view.ts`（`scoreVersion`）
+- `backend/web/test/score-view.test.mjs`（版本用例、未知版本改成 `/5`）
+- `backend/web/test/fixtures-emulator-score.json`（version）
+- `docs/SCORE-REDTEAM.md`、`docs/SECURITY-SCORE.md`（另由文档任务补）

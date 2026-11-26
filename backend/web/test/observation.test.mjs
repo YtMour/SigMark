@@ -1,10 +1,28 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {fields,shellObservationFields,identityObservationFields,rootObservationFields,parseObservation,compareObservation,followupFor} from '../src/observation.mjs';
+import {fields,shellObservationFields,identityObservationFields,rootObservationFields,extendedObservationFields,parseObservation,compareObservation,
+  followupFor,parseAppIdentity,summarizeObservationIdentity} from '../src/observation.mjs';
 
 const document = {schema:'sigmark-adb-evidence/1',observedAtEpochMs:1795422795043,model:'MI 8',
   readings:{...Object.fromEntries(fields.map(([key])=>[key,null])),'system.selinux':'Enforcing','device.serial':'unneeded'}};
 const read = (data=document)=>parseObservation(JSON.stringify(data));
+test('local App identity imports only six declared rows and preserves denied and missing states',()=>{
+  const missing={status:'NOT_ARCHIVED',value:null,source:null};
+  const readings=Object.fromEntries(['model','device','initialSdk','boardPlatform','bootHardware','hardwareSku']
+    .map(key=>['system.'+key,missing]));
+  readings['system.model']={status:'AVAILABLE',value:'测试机',source:'Build.MODEL'};
+  readings['system.hardwareSku']={status:'RESTRICTED',value:null,source:'getprop',reason:'ACCESS_DENIED',errno:13};
+  readings['environment.androidIdSha256']='private';
+  const input={schema:'sigmark-app-identity/1',observer:'APP',collectorVersion:'1.13.0',
+    capturedAtEpochMs:1795422795043,readings};
+  const parsed=parseAppIdentity(JSON.stringify(input));
+  assert.equal(parsed.model,'测试机');
+  assert.deepEqual(parsed.parameters.map(row=>[row.key,row.status]),[['model','AVAILABLE'],['hardwareSku','RESTRICTED']]);
+  assert.equal(parsed.parameters[1].errno,13);
+  assert.throws(()=>parseAppIdentity(JSON.stringify({...input,observer:'ADB_SHELL'})));
+  assert.throws(()=>parseAppIdentity(JSON.stringify({...input,readings:{...readings,
+    'system.model':{...readings['system.model'],value:null}}})));
+});
 test('observation accepts only projected keys and explicit unknowns',()=>{
   assert.equal(read().readings['system.selinux'],'Enforcing');
   assert.equal(read().readings['device.serial'],undefined);
@@ -73,7 +91,9 @@ test('v3 shell observation carries the readings the app is refused',()=>{
 
 test('inferred SELinux and context-rewritten properties are compared, not merged',()=>{
   assert.match(compareObservation('system.selinux',
-    {status:'AVAILABLE',value:'Enforcing（强制模式，推断）'},'Enforcing'),/推断值.*直接读取/);
+    {status:'AVAILABLE',value:'Enforcing（强制模式，推断）'},'Enforcing'),/实时模式未确认/);
+  assert.equal(compareObservation('system.selinux',{status:'AVAILABLE',value:'Enforcing'},'Enforcing',true,'inferred_mac'),
+    'App 实时模式未确认');
   assert.equal(compareObservation('system.selinux',
     {status:'AVAILABLE',value:'Enforcing（强制模式）'},'Enforcing'),'读数一致');
   assert.match(compareObservation('system.bootloader',
@@ -126,6 +146,58 @@ const v5 = {
     'system.selinux':'Enforcing','system.selinuxPolicy':'sha256:'+'c'.repeat(64),
     'system.boardPlatform':'gs101','battery.sysBatteryTemp':'265'},
 };
+test('identity summary finds cross-source divergence only after a timely same-device pairing',()=>{
+  const app = new Map(Object.entries({
+    'system.boardPlatform':{status:'AVAILABLE',value:'mt6985'},
+    'system.bootHardware':{status:'AVAILABLE',value:'mtk'},
+    'system.hardwareSku':{status:'AVAILABLE',value:'23078PND5G'},
+  }));
+  const summarize=(observation,confirmed=true,inWindow=true)=>
+    summarizeObservationIdentity('23078PND5G',app,observation,confirmed,inWindow);
+  assert.equal(summarize(undefined).state,'not_loaded');
+  assert.equal(summarize(read(v4),false).state,'unpaired');
+  assert.equal(summarize(read(v4),true,false).state,'stale');
+  assert.deepEqual(summarize(read(v4)),{state:'different',compared:4,different:4,total:4});
+  assert.deepEqual(summarize({...read(v4),model:'23078PND5G'}),{state:'different',compared:4,different:3,total:4});
+});
+
+test('matching identity claims report coverage, with denied, absent and placeholder rows omitted',()=>{
+  const app = new Map([
+    ['system.boardPlatform',{status:'AVAILABLE',value:'unknown'}],
+    ['system.bootHardware',{status:'RESTRICTED',value:'anything'}],
+  ]);
+  const external=read(v4);
+  assert.deepEqual(summarizeObservationIdentity(' pixel 6 ',app,external,true,true),
+    {state:'matching',compared:1,different:0,total:4});
+  assert.deepEqual(summarizeObservationIdentity('unknown',app,external,true,true),
+    {state:'insufficient',compared:0,different:0,total:4});
+  assert.equal(compareObservation('system.boardPlatform',app.get('system.boardPlatform'),'gs101'),'缺少一方可比较的读数');
+});
+
+test('v6 compares device and initial API and preserves read-only observations from incomplete devices',()=>{
+  const v6 = {...v4, schema:'sigmark-adb-evidence/6', model:null,
+    readings:{...v4.readings,'system.device':'oriole','system.initialSdk':'31'}};
+  assert.equal(read(v6).model,null);
+  assert.equal(read(v6).readings['system.initialSdk'],'31');
+  assert.equal(extendedObservationFields.length,identityObservationFields.length+2);
+  assert.throws(()=>read({...v6,observer:'ROOT'}));
+  assert.throws(()=>read({...v6,model:'phone\u0000subsystem'}));
+  for(const [key,value] of [['system.device','unknown'],['system.initialSdk','0'],
+    ['system.initialSdk','100'],['environment.verifiedBoot','false']]){
+    assert.throws(()=>read({...v6,readings:{...v6.readings,[key]:value}}));
+  }
+  const app = new Map([
+    ['system.device',{status:'AVAILABLE',value:'corot'}],
+    ['system.initialSdk',{status:'AVAILABLE',value:'33'}],
+  ]);
+  assert.deepEqual(summarizeObservationIdentity('23078PND5G',app,read(v6),true,true),
+    {state:'different',compared:2,different:2,total:6});
+  assert.deepEqual(summarizeObservationIdentity('23078PND5G',new Map(),read(v6),true,true),
+    {state:'insufficient',compared:0,different:0,total:6});
+  assert.equal(compareObservation('system.initialSdk',{status:'AVAILABLE',value:'unknown'},'31'),'缺少一方可比较的读数');
+  assert.match(compareObservation('system.patch',{status:'AVAILABLE',value:'2026-07-05'},'2026-07-05',false),/仅展示/);
+});
+
 test('root observation is a separate observer and carries the policy digest',()=>{
   const info=read(v5);
   assert.equal(info.observer,'ROOT');

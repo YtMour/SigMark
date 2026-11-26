@@ -2,6 +2,33 @@
 
 目标不只是增加采集字段，而是让测试团队能回答：**哪一部设备、在哪个 ROM 和测试条件下、相比上次有什么变化、能否复现？** 下面各路线可独立推进；暂不把未选路线写成本版本特性。
 
+## 当前优先级 · 1.21.2 / 字段集 25（2026-11-25）
+
+从 [智能体交接](HANDOFF.md) 获取真实部署、试装位置、源码状态和复验命令。**采集方向已从"加字段"改为"加第二观察通道"：不再问还能读到什么，而问这个读数能不能被声明层一起改写。**
+
+| 优先级 | 交付 | 完成标准 |
+| --- | --- | --- |
+| P0 | 1.21.2 三项遗留收口（已完成） | 构建 1.21.2（50，APK `85ec158f…`，12 006 913 字节）并**发布到构建中心**（job `b62209513e…`，`/api/downloads/current` 已是 1.21.2/50，下载渠道不再是 1.16.0/43）；仪器测试 22 条断言全 PASS；浏览器 QA 两个脚本对着真实部署 PASS；SKU per-UID 跨机型用 MI 8 验证并反转结论。 |
+| P0 | 字段集 25 overlay 证据串（已完成） | `latestFieldSet=25`、词典 `sigmark-lan-fields/16`（235 项）、`maxFields` 分档 `>=25 → 259` 生效，`/readyz` ready；Pixel 6 上传 v25 报告（`745264e0-3227-452b-bb87-65f9bd314fe9`，归档 207 项，`state=hit`）；MI 8 上传 v25 报告（`77e577c1-c84b-4c5e-bb53-a9fe882be7bf`，归档 204 项，`state=not_observed`）；两台 `assetLinked=true`。 |
+| P0 | 字段集 24 后台闭环（已完成） | 构建 1.20.0（47）并在 Pixel 6 复测；`latestFieldSet=24`、词典 `sigmark-lan-fields/15`（234 项）；真机上传 v24 报告（`c0f517f1-5bc6-4766-a7ae-3c507bf4c07d`，归档 206 项）；后台 `/device-profile` 返回 `ruleVersion=sigmark-profile/7`，`hardware_declaration_conflict` 的 **10 条证据全部 `AVAILABLE`**。 |
+| P1 | 字段集 24 的两条内核口径通道（已交付） | `cpu.cpuCapacity`（`/sys/devices/system/cpu/cpu{N}/cpu_capacity`，内核按实际核心类型写入的算力权重，按核心顺序去重，`160/498/1024`）与 `memory.cmaTotal`（`/proc/meminfo` 的 `CmaTotal`，启动预留连续内存池，`652 MiB`）；判定用「登记表反查」。剩余：登记表只有 `gs101` 有这两项，`mt6985`／`sm8550`／`sm8450`／`sm8250` 待补，`sdm845` 故意留空；补之前对非 Tensor 机型只能判未确认。 |
+| P1 | 第二通道扩面 | 已用 MI 8（API 29、未改装）拿到第一台非 Tensor 对照：`cpu.cpuParts = 0x51:0x802×4 / 0x51:0x803×4`、`glesRenderer = Adreno (TM) 630`、`memory.cmaTotal = 200 MiB`，`cpuCapacity`／`overlayEvidence` 诚实降级为 `UNAVAILABLE`。下一步：API 26–28 与其它非 AOSP ROM 复核同样的降级路径；把三簇 `cpuinfo_max_freq` 作为下一条通道；传感器改为 `type+name+vendor` 指纹比对。**相机指纹明确不做**——通道已被改机层注入的假 HAL provider 接管，理由见 [伪装面与盲区](DEVICE-DISGUISE-SURFACE.md) 第三节第 6 小节。 |
+| P2 | 可选的独立设备证明与运维 | 前者另立策略和验收，不并入普通采集；后者验证发布与回滚兼容、备份、恢复。新字段仅在真机用例证明有价值后评估。 |
+
+### 1.18.0 已完成的判断（2026-11-25）
+
+字段集 21 的同义核对在 Pixel 6 改写机上得到"3 对一致"，说明成对核对只能检验改写是否完整。字段集 22 改走三条与声明无关的通道，同一台机上立刻暴露两处不一致（内存三口径 12/12/7.44 GiB；`mt6985` 声明应有的核心与实测 `0xd05/0xd0b/0xd44` 无交集），而 GPU 字符串仍与声明一致。由此确定后续原则：
+
+- **优先找"改写层没盖住的地方"**：`/proc` 节点、C 库调用、驱动自报字符串，比再读一个 `getprop` 有价值。
+- **登记表要小且可追**：SoC→核心/GPU 映射只收有书面依据的型号，未登记记未确认；映射本身要能被复核，所以放在代码里而不是阈值配置里。
+- **别名先于阈值**：`Mali-G715` 与 `Immortalis-G715` 是同一核，首版误报就出在这里。新加映射前先查同核别名。
+- **构建产物比属性更硬**：1.19.0 的 `environment.overlayDeviceCodename` 取自 framework RRO 文件名，改机层改属性不会重建该文件；但它证明的是"镜像构建产品名"，不是物理机器型号，措辞必须停在"核对测试条件"。
+- **内核写入值优于进程级改写**：字段集 24 的 `cpu.cpuCapacity`（内核调度器按实际核心类型写下的算力权重）与 `memory.cmaTotal`（内核启动时预留的连续内存池）都不是进程能伪造的读数——改机层 hook 的是 `Build`、`getprop`、`sysconf` 这些进程侧接口，不会重算内核的簇结构与板级预留。判定上采用"登记表反查"：实测命中**另一个已登记 SoC** 的 profile 即判冲突（正向识别），命中声明 SoC 自己的登记值判一致，两边都不在表内记未确认，不用"最接近的一项"去猜。
+- **属性只在被改装的设备上按 UID 分裂，文件名始终是硬的**：字段集 25 的实测给出这条的边界，1.21.2 又用第二台机器把它收窄了。改装机 Pixel 6 上 `ro.boot.hardware.sku` 在 shell（`GR1YH`）与 `run-as`（`23078PND5G`）之间分裂，App 侧声明 SKU 与三个 overlay 候选全不匹配，证据串按设计退回 `sku:g9s9b,gb7n6,gr1yh` 并列形态；而**未改装的 MI 8 在两个 UID 下读到完全相同的值，且 `ro.boot.hardware.sku` 根本不存在（两边都读空）**。所以正确表述是「**被改装的设备上，属性按 UID 改写；未改装设备上两个 UID 一致**」——per-UID 改写是改机层行为，不是 Android 行为。`sku:` 只作旁证、不参与代号判定；代号仍由 `rro`／`vendor_dir`／`product_dir` 裁决。**把"声明值"当证据时，必须先问它在哪个 UID 下读到。**
+- **登记表宁可留空，也不要猜**：`sdm845` 只登记了 label、cores（`0x802`／`0x803`）、gpu（`adreno`）与别名，**capacities 与 cmaMiB 故意留空**——内核 4.9 根本不暴露 `cpu_capacity`，`CmaTotal` 是设备树值不是 SoC 常量（MI 8 是 200 MiB，同 SoC 其它机型可能不同）。留空让这两条通道在该机型上判未确认，比填一个"看起来合理"的数字安全得多。新增登记会改变判定结果，所以画像规则随之 `/7` → `/8`。
+
+产品验收仅使用 App 自行采集的证据。旧 ADB 对照只是独立历史，不参与评分，不要求复现「6 项」。下文为历史评估和长期备选，提到的旧候选、规则、实验命令或状态不覆盖本节。
+
 ## 0.18.1 双机测试后的优先级（2026-11-21）
 
 只读核对仓库时，共 2 部已归组手机、7 份在库报告、0 份未归组。MI 8 有 4 份，另一部有 3 份，两部最新样本均为 0.18.1 / 字段集 7。MI 8 的 Android 10 样本中，默认上网为 Wi-Fi、卡槽 1 就绪、已观察到注册 LTE 小区，单小区带宽标为 MODEM_NOT_REPORTED。报告头的 radio 却是 unknown。当前采集器仅在 API 33+ 创建 cellular.dataRat，报告头只从该字段计算制式。该方法从 API 24 起公开。修复应覆盖版本、运行时权限、有效订阅和系统返回 UNKNOWN 四种条件。[Android TelephonyManager](https://developer.android.com/reference/android/telephony/TelephonyManager#getDataNetworkType())

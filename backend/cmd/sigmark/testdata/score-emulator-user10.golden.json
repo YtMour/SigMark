@@ -1,0 +1,89 @@
+{
+  "version": "sigmark-score/4",
+  "value": null,
+  "band": "D",
+  "bandLabel": "高度可疑",
+  "coverage": 0.67,
+  "coverageLabel": "部分可判",
+  "decisive": true,
+  "axes": [
+    {
+      "code": "declaration",
+      "label": "声明一致性",
+      "weight": 40,
+      "score": null,
+      "coverage": 0.33,
+      "deductions": []
+    },
+    {
+      "code": "behavior",
+      "label": "行为风险",
+      "weight": 35,
+      "score": null,
+      "coverage": 0.83,
+      "deductions": [
+        {
+          "code": "VIRTUAL_BUILD_MARKERS",
+          "label": "virtual_build_markers",
+          "axis": "behavior",
+          "points": 35,
+          "keys": [
+            "cpu.hardware",
+            "system.product",
+            "system.device"
+          ],
+          "detail": "构建标记指向模拟器或虚拟设备：cpu.hardware=ranchu；system.product=sdk_gphone64_x86_64；system.device=emu64xa"
+        },
+        {
+          "code": "MULTI_OPEN",
+          "label": "multi_open",
+          "axis": "behavior",
+          "points": 8,
+          "keys": [
+            "environment.userProfile"
+          ],
+          "detail": "运行在分身／工作资料中：environment.userProfile=secondary"
+        }
+      ]
+    },
+    {
+      "code": "usage",
+      "label": "使用真实性",
+      "weight": 25,
+      "score": null,
+      "coverage": 1,
+      "deductions": []
+    }
+  ],
+  "caps": [
+    {
+      "code": "DECISIVE_VIRTUAL_BUILD",
+      "band": "D",
+      "reason": "构建标记指向模拟器或虚拟设备：cpu.hardware=ranchu；system.product=sdk_gphone64_x86_64；system.device=emu64xa"
+    }
+  ],
+  "undetermined": [
+    {
+      "axis": "declaration",
+      "keys": [
+        "environment.overlayDeviceCodename"
+      ],
+      "reason": "UNAVAILABLE"
+    },
+    {
+      "axis": "declaration",
+      "keys": [
+        "system.hardwareSku",
+        "system.sku"
+      ],
+      "reason": "UNAVAILABLE"
+    },
+    {
+      "axis": "behavior",
+      "keys": [
+        "system.selinux"
+      ],
+      "reason": "RESTRICTED"
+    }
+  ]
+}

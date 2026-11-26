@@ -24,8 +24,24 @@ class LanReportTest {
         assertEquals(setOf("runtime.vulkanVersion","media.cameraCapabilitySummary","sensors.typeWakeupSummary"),
             lanParameters(snapshot).map { it.group+"."+it.key }.toSet())
         val report = lanReport(snapshot,"0.20.0","")
-        assertEquals(20, report.fieldSetVersion)
+        assertEquals(25, report.fieldSetVersion)
         assertEquals(7, report.copy(fieldSetVersion = 7).copy(feedback = "old draft").fieldSetVersion)
+    }
+
+    @Test fun appIdentityPropertiesKeepBothProvenanceAndRestrictedState() {
+        val snapshot = DeviceSnapshot(1, listOf(DeviceSection("system", "系统", listOf(
+            DeviceInfoItem("model", "型号", "Model A", "Build.MODEL"),
+            DeviceInfoItem("propertyModel", "型号属性", "Model B", "getprop ro.product.model"),
+            DeviceInfoItem("propertyDevice", "设备代号属性", null, "getprop ro.product.device",
+                ValueStatus.RESTRICTED, reason = ReadReason.ACCESS_DENIED, errno = 13),
+        ))))
+        val rows = lanParameters(snapshot).associateBy { it.key }
+        assertEquals("Model A", rows.getValue("model").value)
+        assertEquals("Model B", rows.getValue("propertyModel").value)
+        assertEquals("getprop ro.product.model", rows.getValue("propertyModel").source)
+        assertNull(rows.getValue("propertyDevice").value)
+        assertEquals("RESTRICTED", rows.getValue("propertyDevice").status)
+        assertEquals(13, rows.getValue("propertyDevice").errno)
     }
 
     @Test fun headerUsesInstalledVariantVersion() {
@@ -49,7 +65,30 @@ class LanReportTest {
             DeviceInfoItem(key,key,value,"public Android API")
         })))
         assertEquals(setOf("keyguardSecure","storageEncryption"),lanParameters(snapshot).map { it.key }.toSet())
-        assertEquals(20,LanFieldSetVersion)
+        assertEquals(25,LanFieldSetVersion)
+    }
+
+    // Field set 25 projects the multi-path overlay evidence next to the single codename.
+    @Test fun projectsOverlayEvidenceBesideTheOverlayCodename() {
+        val snapshot = DeviceSnapshot(1800000000000, listOf(DeviceSection("environment", "环境", listOf(
+            DeviceInfoItem("overlayDeviceCodename", "系统 overlay 记录的产品代号", "oriole", "/proc/self/maps"),
+            DeviceInfoItem("overlayEvidence", "系统 overlay 多路径证据",
+                "rro:oriole / vendor_dir:oriole / product_dir:oriole / sku:gr1yh / soc:gs101",
+                "/proc/self/maps + /vendor|product|system_ext|odm/overlay"),
+            DeviceInfoItem("overlayEvidenceCopy", "本地副本", "local", "test"),
+        ))))
+        val rows = lanParameters(snapshot).associateBy { it.key }
+        assertEquals(setOf("overlayDeviceCodename", "overlayEvidence"), rows.keys)
+        assertEquals("rro:oriole / vendor_dir:oriole / product_dir:oriole / sku:gr1yh / soc:gs101",
+            rows.getValue("overlayEvidence").value)
+        // A denied evidence trail keeps its RESTRICTED state on the wire.
+        val restricted = lanParameters(DeviceSnapshot(0, listOf(DeviceSection("environment", "环境", listOf(
+            DeviceInfoItem("overlayEvidence", "系统 overlay 多路径证据", null, "test",
+                ValueStatus.RESTRICTED, reason = ReadReason.ACCESS_DENIED, errno = 13),
+        ))))).single()
+        assertNull(restricted.value)
+        assertEquals("RESTRICTED", restricted.status)
+        assertEquals(13, restricted.errno)
     }
 
     @Test fun onlyProjectsVersion11CompatibilityEvidenceInItsGroup() {

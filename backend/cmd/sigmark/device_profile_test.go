@@ -50,9 +50,10 @@ func TestDeviceProfileLabelOrderAndVersion(t *testing.T) {
 		"rom_verification",
 		"software_drm",
 		"identity_conflict",
+		"hardware_declaration_conflict",
 	}
-	if profileVersion != "sigmark-profile/3" {
-		t.Fatalf("profileVersion = %q, want sigmark-profile/3", profileVersion)
+	if profileVersion != "sigmark-profile/9" {
+		t.Fatalf("profileVersion = %q, want sigmark-profile/9", profileVersion)
 	}
 	if profileLimit != 50 || profileDays != 30 {
 		t.Fatalf("history window changed: limit=%d days=%d", profileLimit, profileDays)
@@ -125,8 +126,9 @@ func TestDeviceProfileLegacyLabels(t *testing.T) {
 		{"unexpected mode vocabulary", []Parameter{profileField("system", "selinux", "not recorded"), profileField("app", "debuggerConnected", "?")}, [3]string{unknown, unknown, unknown}},
 		{"explicit positive", []Parameter{profileField("system", "selinux", "Permissive（宽容模式）"), profileField("app", "debuggerConnected", "是")}, [3]string{unknown, hit, hit}},
 		{"explicit negative", []Parameter{profileField("system", "selinux", "Enforcing（强制模式）"), profileField("app", "debuggerConnected", "否"), profileField("environment", "tracerPid", "0")}, [3]string{unknown, no, no}},
-		{"inferred permissive is still permissive", []Parameter{profileField("system", "selinux", "Permissive（宽容模式，推断）")}, [3]string{unknown, hit, unknown}},
-		{"inferred enforcing is still enforcing", []Parameter{profileField("system", "selinux", "Enforcing（强制模式，推断）")}, [3]string{unknown, no, unknown}},
+		{"inferred permissive is insufficient", []Parameter{profileField("system", "selinux", "Permissive（宽容模式，推断）")}, [3]string{unknown, unknown, unknown}},
+		{"inferred enforcing is insufficient", []Parameter{profileField("system", "selinux", "Enforcing（强制模式，推断）")}, [3]string{unknown, unknown, unknown}},
+		{"explicit inference overrides display text", []Parameter{profileField("system", "selinux", "Enforcing"), profileField("system", "selinuxEvidence", "inferred_mac")}, [3]string{unknown, unknown, unknown}},
 		{"disabled inference is not a mode", []Parameter{profileField("system", "selinux", "未启用（推断）")}, [3]string{unknown, unknown, unknown}},
 		{"tracer pid alone completes the debugger label", []Parameter{profileField("environment", "tracerPid", "4242")}, [3]string{unknown, unknown, hit}},
 		{"zero tracer pid is a negative only with the direct flag", []Parameter{profileField("app", "debuggerConnected", "否"), profileField("environment", "tracerPid", "0")}, [3]string{unknown, unknown, no}},
@@ -329,8 +331,8 @@ func TestDeviceProfileOlderReportKeepsOtherLabels(t *testing.T) {
 		"identity_conflict": "insufficient",
 	}
 	labels := profileSignals(params)
-	if len(labels) != 9 {
-		t.Fatalf("label count on an old report = %d, want 9", len(labels))
+	if len(labels) != 10 {
+		t.Fatalf("label count on an old report = %d, want 10", len(labels))
 	}
 	if labels[8].Code != "identity_conflict" {
 		t.Fatalf("labels[8] = %q, want identity_conflict", labels[8].Code)
@@ -377,7 +379,7 @@ func TestDeviceProfileHistoryLimit(t *testing.T) {
 	}
 }
 
-// The ninth label compares two independent declarations of the same identity, so
+// The ninth label compares App reads of the same declaration, so
 // it cannot be expressed by per-field classify: a pair only counts when both sides
 // are usable, and one conflict beats agreement in the other pairs.
 func TestDeviceProfileIdentityConflict(t *testing.T) {
@@ -389,43 +391,61 @@ func TestDeviceProfileIdentityConflict(t *testing.T) {
 	}{
 		{"board pair disagrees", []Parameter{
 			profileField("system", "board", "corot"),
-			profileField("system", "boardPlatform", "slider")}, hit},
+			profileField("system", "boardPlatform", "slider")}, unknown},
 		{"hardware pair disagrees", []Parameter{
 			profileField("cpu", "hardware", "qcom"),
-			profileField("system", "bootHardware", "mtk")}, hit},
+			profileField("system", "bootHardware", "mtk")}, unknown},
+		{"model pair disagrees", []Parameter{
+			profileField("system", "model", "Model A"),
+			profileField("system", "propertyModel", "Model B")}, hit},
+		{"device pair disagrees", []Parameter{
+			profileField("system", "device", "A"),
+			profileField("system", "propertyDevice", "B")}, hit},
 		{"sku pair disagrees", []Parameter{
 			profileField("system", "sku", "GR1YH"),
 			profileField("system", "hardwareSku", "23078PND5G")}, hit},
 		{"all three pairs agree", []Parameter{
-			profileField("system", "board", "corot"),
-			profileField("system", "boardPlatform", "corot"),
-			profileField("cpu", "hardware", "qcom"),
-			profileField("system", "bootHardware", "qcom"),
+			profileField("system", "model", "Model A"),
+			profileField("system", "propertyModel", "model A"),
+			profileField("system", "device", "QCOM"),
+			profileField("system", "propertyDevice", "qcom"),
 			profileField("system", "sku", "GR1YH"),
 			profileField("system", "hardwareSku", "GR1YH")}, no},
-		{"case differences are agreement", []Parameter{
-			profileField("system", "board", "COROT"),
-			profileField("system", "boardPlatform", "corot")}, no},
 		{"only one comparable pair agrees", []Parameter{
-			profileField("system", "board", "corot"),
-			profileField("system", "boardPlatform", "corot"),
-			profileField("cpu", "hardware", "qcom")}, no},
+			profileField("system", "model", "MODEL A"),
+			profileField("system", "propertyModel", "Model A")}, unknown},
+		{"old API does not require Build.SKU", []Parameter{
+			profileField("system", "api", "29"),
+			profileField("system", "model", "Model A"), profileField("system", "propertyModel", "Model A"),
+			profileField("system", "device", "device"), profileField("system", "propertyDevice", "device")}, no},
 		{"one conflict beats an agreeing pair", []Parameter{
-			profileField("system", "board", "corot"),
-			profileField("system", "boardPlatform", "corot"),
+			profileField("system", "device", "corot"),
+			profileField("system", "propertyDevice", "corot"),
 			profileField("system", "sku", "GR1YH"),
 			profileField("system", "hardwareSku", "23078PND5G")}, hit},
 		{"trimmed values still compare", []Parameter{
-			profileField("system", "board", " COROT "),
-			profileField("system", "boardPlatform", "corot-1.0.9")}, hit},
+			profileField("system", "device", " COROT "),
+			profileField("system", "propertyDevice", "corot-1.0.9")}, hit},
 		{"a single side is not comparable", []Parameter{
 			profileField("system", "board", "corot")}, unknown},
-		{"unknown placeholder is missing evidence", []Parameter{
-			profileField("system", "board", " UnKnOwN "),
-			profileField("system", "boardPlatform", "corot")}, unknown},
+		// One side reads a real value, the other reads a placeholder. Both rows exist and
+		// both reads succeeded, so this is not "a key we could not read" — it is a
+		// declaration that only half-arrived, and that is now evidence.
+		//
+		// This used to be `insufficient` on the reasoning that a placeholder means "missing".
+		// That let an attacker launder a real conflict by writing "unknown" instead of
+		// emptying the property: the pair would be skipped, the axis would lose coverage, and
+		// the report would become indistinguishable from a clean one. Placeholders are cheap
+		// to write, so treating them as absence made the guard optional.
+		{"one-sided placeholder is asymmetry evidence", []Parameter{
+			profileField("system", "device", " UnKnOwN "),
+			profileField("system", "propertyDevice", "corot")}, hit},
+		{"placeholder on both sides is still not comparable", []Parameter{
+			profileField("system", "device", "unknown"),
+			profileField("system", "propertyDevice", "unknown")}, unknown},
 		{"restricted side is not comparable", []Parameter{
-			profileField("system", "board", "corot"),
-			profileRestricted("system", "boardPlatform")}, unknown},
+			profileField("system", "device", "corot"),
+			profileRestricted("system", "propertyDevice")}, unknown},
 		{"restricted side hides no conflict", []Parameter{
 			profileField("system", "sku", "GR1YH"),
 			profileField("system", "hardwareSku", "23078PND5G"),
@@ -443,13 +463,13 @@ func TestDeviceProfileIdentityConflict(t *testing.T) {
 	// Fixed evidence shape: six rows in pair order, whatever was archived, so the
 	// history counter and the detail table never shift with the sample.
 	empty := profileSignals(nil)
-	if len(empty) != 9 {
-		t.Fatalf("label count = %d, want 9", len(empty))
+	if len(empty) != 10 {
+		t.Fatalf("label count = %d, want 10", len(empty))
 	}
 	if empty[8].Code != "identity_conflict" {
 		t.Fatalf("labels[8] = %q, want identity_conflict", empty[8].Code)
 	}
-	keys := []string{"system.board", "system.boardPlatform", "cpu.hardware", "system.bootHardware", "system.sku", "system.hardwareSku"}
+	keys := []string{"system.model", "system.propertyModel", "system.device", "system.propertyDevice", "system.sku", "system.hardwareSku"}
 	if len(empty[8].Evidence) != len(keys) {
 		t.Fatalf("evidence rows = %d, want %d", len(empty[8].Evidence), len(keys))
 	}
@@ -467,18 +487,19 @@ func TestDeviceProfileIdentityConflict(t *testing.T) {
 
 func TestDeviceProfileIdentityConflictHistory(t *testing.T) {
 	p := &deviceProfile{Labels: profileSignals(nil)}
-	if len(p.Labels) != 9 {
-		t.Fatalf("labels = %d, want 9", len(p.Labels))
+	if len(p.Labels) != 10 {
+		t.Fatalf("labels = %d, want 10", len(p.Labels))
 	}
 	// A conflicting sample is a hit.
 	p.addHistory("conflict", Report{CapturedAt: 1000, Parameters: []Parameter{
-		profileField("system", "board", "corot"),
-		profileField("system", "boardPlatform", "slider"),
+		profileField("system", "device", "corot"),
+		profileField("system", "propertyDevice", "slider"),
 	}})
-	// An agreeing pair is evaluable and not a hit.
+	// Three agreeing pairs are evaluable and not a hit.
 	p.addHistory("agree", Report{CapturedAt: 2000, Parameters: []Parameter{
-		profileField("system", "board", "corot"),
-		profileField("system", "boardPlatform", "corot"),
+		profileField("system", "model", "Model A"), profileField("system", "propertyModel", "Model A"),
+		profileField("system", "device", "corot"), profileField("system", "propertyDevice", "corot"),
+		profileField("system", "sku", "SKU"), profileField("system", "hardwareSku", "SKU"),
 	}})
 	// A restricted basis field is counted, never a hit and never a negative.
 	p.addHistory("restricted", Report{CapturedAt: 3000, Parameters: []Parameter{
@@ -492,15 +513,15 @@ func TestDeviceProfileIdentityConflictHistory(t *testing.T) {
 	p.addHistory("conflict-restricted", Report{CapturedAt: 5000, Parameters: []Parameter{
 		profileField("system", "sku", "GR1YH"),
 		profileField("system", "hardwareSku", "23078PND5G"),
-		profileRestricted("system", "board"),
+		profileRestricted("system", "propertyModel"),
 	}})
 	p.addHistory("agree-second", Report{CapturedAt: 6000, Parameters: []Parameter{
-		profileField("cpu", "hardware", "QCOM"),
-		profileField("system", "bootHardware", "qcom"),
+		profileField("system", "sku", "sku"),
+		profileField("system", "hardwareSku", "SKU"),
 	}})
 	l := profileLabelByCode(t, p.Labels, "identity_conflict")
-	if l.HistoryHits != 2 || l.HistoryEvaluable != 4 || l.HistoryRestricted != 2 {
-		t.Errorf("identity history = %+v, want hits=2 evaluable=4 restricted=2", l)
+	if l.HistoryHits != 2 || l.HistoryEvaluable != 3 || l.HistoryRestricted != 2 {
+		t.Errorf("identity history = %+v, want hits=2 evaluable=3 restricted=2", l)
 	}
 	if l.LastHit == nil || l.LastHit.ID != "conflict-restricted" || l.LastHit.CapturedAt != 5000 {
 		t.Errorf("identity last hit = %+v, want conflict-restricted@5000", l.LastHit)

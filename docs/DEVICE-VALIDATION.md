@@ -1,5 +1,224 @@
 # 设备验证记录与复测清单
 
+## 2026-11-25 · 1.21.2 / 50 三项遗留收口 + MI 8 双机对照
+
+### 构建与发布
+
+- 版本 **1.21.2 / versionCode 50**，APK `app/build/outputs/apk/debug/SigMark-1.21.2-LAN-debug.apk`，**12 006 913 字节**，SHA-256 **`85ec158ffa40737f70c2c0988b1e85bf3e114c22ddd1948362cec337ae134833`**。此前所有散列（`b80abba5…` / `30e015d3…` / `0debb136…`）**全部作废**。
+- **已发布到构建中心**：job id `b62209513e1b43c991ae4964dbf248a0`，发布方式 `build_worker.py import-apk --publish`。`GET /api/downloads/current` 返回 `version=1.21.2 versionCode=50 size=12006913 sha256=85ec158f… signerSha256=e424900e…`。**下载渠道不再是 1.16.0 / 43。**
+- 画像规则 `sigmark-profile/7` → **`/8`**：新增 `sdm845` 到 SoC 登记表（会改变该家族设备的判定结果）。证据行仍 10 条、标签仍 10 个。
+
+### 新增 SoC 登记：`sdm845`（Snapdragon 845）
+
+从 MI 8 真机实测得到：
+
+| 项 | 值 |
+| --- | --- |
+| label | `Snapdragon 845` |
+| cores | `0x802`、`0x803`（实测 `cpu.cpuParts = 0x51:0x802×4 / 0x51:0x803×4`） |
+| gpu | `adreno`（实测 `runtime.glesRenderer = Adreno (TM) 630`） |
+| capacities / cmaMiB | **故意留空**——内核 4.9 根本不暴露 `cpu_capacity`；`CmaTotal` 是设备树值不是 SoC 常量（MI 8 是 200 MiB，但同 SoC 其他机型可能不同），所以不猜 |
+| alias | `snapdragon 845` → `sdm845` |
+| 解析入口 | `ro.board.platform`（API 29 没有 `ro.soc.model`） |
+
+### 未做项 1（仪器测试）：已完成
+
+新增 `app/src/androidTest/java/com/sigmark/app/collector/SafeReaderInstrumentedTest.kt`，**22 条断言全 PASS**。跑法不是 `-e class`（runner 是手写 Instrumentation）：
+
+```powershell
+adb -s 35241FDF6S1P3K shell am instrument -w -e probe safereader com.sigmark.app.test/com.sigmark.app.CapabilitySmoke
+# → SafeReader instrumented: 22 passed, 0 failed
+```
+
+覆盖：`cpuCapacitySignature` 9 条（非空、每段正整数、无重复段、`maxCores=1` 只有一段、`maxCores=0` 返回 null、段数不超存在核心数）；`listNames` 13 条（可读目录 `/proc/self/task`、升序、默认上限 64、`maxEntries=3`、不存在路径、被拒目录 `/data/resource-cache`）。
+
+**仍测不了的三条**：① `cpuCapacitySignature` 的 ENOENT 跳过分支——`cpuCapacityBase` 是私有常量无法注入，且本机 cpu0–cpu7 八个 `cpu_capacity` 全部存在；② `bounded` 的 400 ms 超时分支——需要卡死的挂载点才能复现；③ `cpuCapacity` 的非 ENOENT errno 分支——同上，本机全可读。
+
+### 仪器测试顺带修掉的真实缺陷（重要）
+
+仪器测试暴露了 `listNames` 的真实行为错误：原来 `File.list()` 对「不存在」和「无权限」都返回 `null`，两者都落到 `UNAVAILABLE / NOT_REPORTED`，**被拒的目录被报成「目录不存在」**——这正是伪装检测最不能犯的错（把「读不到」当成「没有」）。
+
+现在 `SafeReader.listNames` 先 `Os.stat(path)`：
+
+| stat 结果 | 返回值 |
+| --- | --- |
+| 抛 ENOENT / ENOTDIR | `UNAVAILABLE / NODE_MISSING`（errno 有值） |
+| 成功但不是目录 | `UNAVAILABLE / NODE_MISSING`，detail「该路径存在但不是目录。」 |
+| 成功但 `list()` 返回 null | **`RESTRICTED / ACCESS_DENIED`，errno=13**，detail「目录存在（stat 可见）但列出条目被拒绝，不能据此断言其中没有文件。」 |
+| 成功 | `AVAILABLE`，升序、截断 |
+
+实测：`/data/resource-cache` 从 `UNAVAILABLE/NOT_REPORTED` 变成 `RESTRICTED/ACCESS_DENIED errno=13`。`SecurityProbes.scanOverlayDir` 相应简化为只看 `RESTRICTED`。
+
+### 未做项 2（浏览器 QA）：已完成
+
+- `backend/web/package.json` 加 devDependency `playwright ^1.65.1`，**没有下载自带 Chromium**，用系统 `channel:'chrome'`（回落 `msedge`）。
+- 新增 `backend/web/qa/run-browser-qa.cjs`、`backend/web/qa/README.md`，`package.json` 加 `"qa": "node qa/run-browser-qa.cjs"`。
+- 实测（对着 `http://192.168.1.114:48272` 真实部署）：
+  - `PASS browser: retry, 390px, keyboard, evidence, denominator, JSON contents, history link/back, unassigned.`
+  - `PASS dossier browser: inventory entry, 12 sections, keyboard disclosure, 320px and desktop, gap filter, export, original report, comparison and focus return.`
+- 修掉三处过时断言（都是**脚本假设问题，不是 UI 缺陷**）：① `details[open].count()===labels.length` 过严——真实报告有 11 个展开项，因为 `device-profile.tsx:61` 在有历史时额外渲染 `data-profile="identity-history"`，改为排除该项后与标签 code 集合 deepEqual；② `ROM-B` / `未授予精确位置` 是 `qa_device_profile.py` 种子数据假设，改为从 dossier 接口现取探针；③ `/errno=13/` 撞 strict mode——真实 system 组有 4 行 errno=13，改为 `.first()`。
+- 复跑一行：
+
+  ```powershell
+  cd backend/web
+  $env:SIGMARK_QA_URL='http://192.168.1.114:48272'
+  $env:SIGMARK_QA_TOKEN='<ADMIN_TOKEN>'
+  $env:SIGMARK_QA_DOSSIER_ASSET='<ASSET_ID>'
+  npm.cmd run qa
+  ```
+
+### 未做项 3（SKU per-UID 跨机型）：已完成，结论有反转
+
+第二部手机是 **Xiaomi MI 8（`dipper`）API 29、内核 4.9.186、未改装**。实测：
+
+| 读数 | `adb shell` | `run-as com.sigmark.app` |
+| --- | --- | --- |
+| `ro.boot.hardware.sku` | **空** | **空**（这台机器根本没有这个属性） |
+| `ro.product.model` | `MI 8` | `MI 8` |
+| `ro.product.device` | `dipper` | `dipper` |
+
+`/vendor/overlay`、`/product/overlay` 存在但是 MIUI 命名（`CarrierConfigResCommon.apk`、`AccentColorBlack` 等），没有 `__device_user__auto_generated_rro` 模式，因此 `environment.overlayEvidence = UNAVAILABLE`。
+
+**结论：per-UID 改写不是 Android 行为，是改机层行为。** 未改装的 MI 8 在两个 UID 下读到完全相同的值；被改装的 Pixel 6 才会出现 shell `GR1YH` / run-as `23078PND5G` 的分裂。所以「属性一律按 UID 改写」要收窄成「**被改装的设备上，属性按 UID 改写；未改装设备上两个 UID 一致**」。这条现在有两个机型对照，不再是单机型孤证。
+
+### MI 8 真机记录（未改装，第二台对照机）
+
+- 报告 id **`77e577c1-c84b-4c5e-bb53-a9fe882be7bf`**，`requestId=63807aa3-da73-45d7-b6af-9836352b38d0`，`fieldSet=25`、`archived=204`、`assetLinked=true`。
+- 快照 258 项（`AVAILABLE=233`、`UNAVAILABLE=21`、`RESTRICTED=4`）。
+- 后台 `/device-profile`：`ruleVersion=sigmark-profile/8`、10 个标签、`hardware_declaration_conflict` **`state=not_observed`**（一致，不是 hit）。
+- 证据行实际值：`memory.totalRam/physicalRam/kernelMemTotal` 全 `5.50 GiB`；`cpu.cpuParts = 0x51:0x802×4 / 0x51:0x803×4`；`runtime.glesRenderer = Adreno (TM) 630`；`system.device = dipper`；`memory.cmaTotal = 200 MiB`；`system.socModel = NOT_ARCHIVED`（API 29 无 `ro.soc.model`）；`environment.overlayDeviceCodename = UNAVAILABLE`；`cpu.cpuCapacity = UNAVAILABLE`。
+- **两个降级事实**：内核 4.9 不暴露 `cpu_capacity` → `cpuCapacity` 为 `UNAVAILABLE/NOT_REPORTED`（不是 0，不是猜）；MIUI 没有 AOSP 命名的 RRO → `overlayEvidence` 为 `UNAVAILABLE`。这两条证明新字段在旧内核 / 非 AOSP ROM 上是**诚实降级**，不是崩掉。
+
+### Pixel 6 最新一轮（改装机，1.21.2 / 50）
+
+- 报告 id **`745264e0-3227-452b-bb87-65f9bd314fe9`**，`requestId=70233f02-5043-445b-ae11-28e2a901f906`，`fieldSet=25`、`archived=207`、`hardware_declaration_conflict state=hit`。
+- 证据 10 条全 `AVAILABLE`，含 `cpu.cpuCapacity=160/498/1024`、`memory.cmaTotal=652 MiB`。
+
+### 测试（最终）
+
+- Android JVM 单测：27 类 / **139 项** / 0 失败
+- Android 仪器测试：**22 条断言** 全 PASS
+- Go：`go test -count=1 ./...` 全绿，`go vet` 干净
+- Web：`npm test` **85 / 85 / 0**；`npm run build` exit 0
+- 浏览器 QA：两个脚本 PASS
+
+### 已知未覆盖项（真实限制，不是已完成）
+
+1. `cpuCapacitySignature` 的 ENOENT 跳过分支、`bounded` 超时分支、非 ENOENT errno 分支——需要可注入路径或卡死挂载点，当前测不了。
+2. `backend/scripts/qa_device_profile.py` **已过期且未修**：硬断言 `latestFieldSet==21`、`dictionaryVersion=='sigmark-lan-fields/12'`、`ruleVersion=='sigmark-profile/5'`、9 个标签、`buildId=='ROM-B'`、字段集 12——现在分别是 25 / `/16` / `/8` / 10 个标签 / 真机值。它会在跑到浏览器之前就失败。
+3. MI 8 的 `cpu.cpuCapacity` 与 `environment.overlayEvidence` 降级路径只在 MI 8 一台旧内核机上验证过；API 26–28 与其它非 AOSP ROM 未测。
+4. 回滚风险（来自 [发布与回滚兼容](RELEASE-COMPAT.md)）：回滚到字段集 22 会让 v23+ 客户端整份 400，而客户端提示是「请检查设备时间」完全误导。
+
+## 2026-11-25 · 1.21.0 字段集 25 overlay 多路径证据串（已被 1.21.2 取代）
+
+- Pixel 6（`35241FDF6S1P3K`，被改写为 Xiaomi `23078PND5G` / `corot` / Dimensity 9200+）覆盖安装 1.21.0（48）。同签名 debug 包 `SigMark-1.21.0-LAN-debug.apk`，12 243 428 字节，SHA-256 `b80abba5…`（**已被 1.21.2 的 `85ec158f…` 取代，此处仅存历史**），已注入 LAN 地址 `http://192.168.1.114:48272`。
+- 本机证据由 `am instrument -e evidence dump` 生成：快照 258 项（`AVAILABLE=244`、`UNAVAILABLE=11`、`RESTRICTED=3`），LAN 归档 **207** 项，`fieldSet=25`，`assetLinked=true`。
+- 新增字段实测值（普通 App 权限下取得）：
+  - `environment.overlayEvidence = AVAILABLE · rro:oriole / vendor_dir:oriole / product_dir:oriole / sku:g9s9b,gb7n6,gr1yh / soc:gs101 · /proc/self/maps + /vendor|product|system_ext|odm/overlay`
+  - `environment.overlayDeviceCodename = AVAILABLE · oriole · /proc/self/maps`（旧字段保留，语义与行为不变）
+- 本机判定：`overlay_codename` 行 = `REVIEW · 属性报告的设备代号为 corot，镜像 overlay 记录的却是 oriole。…`
+- **与设计预测的偏差（实测确认，属设计正确降级）**：设计稿 §3.4 预测 `sku:gr1yh`，真机实际是 `sku:g9s9b,gb7n6,gr1yh`。原因：`ro.boot.hardware.sku` 也被按 UID 改写——`adb shell` 读到 `GR1YH`（真机原值），`run-as com.sigmark.app getprop ro.boot.hardware.sku` 读到 **`23078PND5G`**（小米 SKU）。App 侧声明 SKU 与三个 overlay 候选（`G9S9B`／`GB7N6`／`GR1YH`）全都不匹配，按设计退回「逗号并列全部候选」。因此 `sku:` 只是旁证，**不参与代号判定**；代号仍由 `rro`／`vendor_dir`／`product_dir` 裁决。这条偏差本身也有价值：**SKU 属性与 `device`／`model` 一样是 per-UID 改写的，只有 overlay 文件名是硬的。**
+- **本轮收口（超时包裹）**：目录列举从 `java.io.File(path).list()` 改为走 `SafeReader.listNames(path, maxEntries = 64)`，用既有的 `bounded(path, fileTimeoutMs)` 包裹（`fileTimeoutMs = 400L`），按名称排序后截断；`SecurityProbes.scanOverlayDir` 改为调用它，`RESTRICTED` 判定同时看 `listing.status` 与 `statMode`。四个 overlay 目录在慢 IO 下不会再拖长采集。
+- 真实上传（App 自身代码路径）：报告 `7c786f17-5652-4070-8e86-42066093200e`，`requestId=5b1dbad0-7f74-42d2-b48c-4778e280213d`，`fieldSetVersion=25`，归档 207 项，`assetLinked=true`。
+- 后台存库核对：`fieldSetVersion=25`、`params=207`；两条 overlay 字段均为 `AVAILABLE`，且值与真机读数逐字一致——`overlayEvidence` 仍是 `rro:oriole / vendor_dir:oriole / product_dir:oriole / sku:g9s9b,gb7n6,gr1yh / soc:gs101`，与重构前逐字相同，说明这次超时改造是**行为等价**的。当轮画像规则未动（`sigmark-profile/7`）；**随后 1.21.2 因新增 `sdm845` 登记升到 `/8`**。
+- 部署：重建 API 后 `/readyz` = `{"status":"ready"}`；字段词典 `latestFieldSet=25`、`dictionaryVersion=sigmark-lan-fields/16`、`items=235`；`maxFields` 分档 `>=25 → 259`；fixture `lan-projection-v25.txt` 235 行。
+- 单元测试：Android 27 类 / **139 项** / 0 失败；后台 Go `go test -count=1 ./...` → `ok sigmark/lan/cmd/sigmark`，`go vet` 干净；控制台 **85 / 85 / 0**。构建、签名与真机安装另行验证，不以编译成功代替真机结论。
+- 未验证：其他机型与 API 26–30 路径；v24 客户端被后台接收的在线实测（在线入口需 App 身份，未构造特权请求）；改名 ROM 上多路径全部落空时的表现（只有合成 fixture 覆盖）。
+- 当轮列的已知未覆盖项（仪器测试、浏览器 QA、SKU 跨机型）**已在 1.21.2 全部做掉**，见本文件顶部那一节。
+
+## 2026-11-25 · 字段集 24 内核算力权重与预留连续内存
+
+- Pixel 6（`35241FDF6S1P3K`，被改写为 Xiaomi `23078PND5G` / `corot` / Dimensity 9200+）覆盖安装 1.20.0（47）。同签名 debug 包 `SigMark-1.20.0-LAN-debug.apk`，12 027 823 字节，SHA-256 `4fa62aabe47ed4c632f7f629639450b8ddddfef973670bcc4a85e9d1c16a7a76`（含 `DevicePosture.kt` 证据来源串的最后修改，此前中间产物作废），已注入 LAN 地址 `http://192.168.1.114:48272`。
+- 本机证据由 `am instrument -e evidence dump` 生成：快照 257 项（`AVAILABLE=243`、`UNAVAILABLE=11`、`RESTRICTED=3`），LAN 归档 206 项，`fieldSet=24`。
+- 新增两条内核口径通道，均在普通 App 权限下取得：`cpu.cpuCapacity = 160/498/1024`（`cpu0–3 = 160`、`cpu4–5 = 498`、`cpu6–7 = 1024`，来源 `/sys/devices/system/cpu/cpu{N}/cpu_capacity`，单位 `capacity_profile`）；`memory.cmaTotal = 652 MiB`（来源 `/proc/meminfo` 的 `CmaTotal = 667648 kB`）。
+- 判定：手机侧 `hardware_facts` 判 `REVIEW`。两条新冲突文案原文为「声明为 Dimensity 9200+（mt6985），实测算力权重 160/498/1024 与 Tensor G1 的登记值一致。」和「声明为 Dimensity 9200+（mt6985），实测预留连续内存 652 MiB 与 Tensor G1 的登记值一致。」两组值都命中 `gs101` 的登记值，而声明侧是 `mt6985`——按「与另一个已登记 SoC 相同即冲突」成立；登记表其余 SoC 的这两项仍为空，未登记一律未确认。
+- 真实上传（App 自身代码路径，`-e lanUpload live`）成功：报告 `c0f517f1-5bc6-4766-a7ae-3c507bf4c07d`，`requestId=a9fa8fbf-424c-4d59-b82d-0e427b84c030`，`fieldSetVersion=24`，归档 206 项，`assetLinked=true`。同批另有 `c9cf53d5-80b5-431b-80f6-b1d241c45bc0`（早一版中间 APK 产生，结论相同）。
+- 后台复算：`GET /api/admin/reports/<id>/device-profile` 返回 `ruleVersion=sigmark-profile/7`、10 个标签；`hardware_declaration_conflict` 状态 `hit`，**10 条证据全部为 `AVAILABLE` 真实读数**（原 8 条 + `cpu.cpuCapacity`、`memory.cmaTotal`），没有占位符。
+- 部署：重建 API 后 `/readyz` = `{"status":"ready"}`；字段词典 `latestFieldSet=24`、`dictionaryVersion=sigmark-lan-fields/15`、`items=234`。
+- 单元测试：Android 27 类 / 126 项全通过；后台 Go 全通过；控制台 81 项全通过。构建、签名与真机安装另行验证，不以编译成功代替真机结论。（字段集 25 落地后本行项数会变，以最新一次运行为准。）
+- 测试明细（本行对应当前工作树）：Android `.\gradlew.bat :app:cleanTestDebugUnitTest :app:testDebugUnitTest` → 27 个测试类 / 126 个测试 / 0 失败 0 错误 / `BUILD SUCCESSFUL`，其中字段集 24 新增 11 条（`HardwareConsistencyTest` +10、`HardwareObservationsTest` +1）；Go `go test ./...` → `ok sigmark/lan/cmd/sigmark` 全绿；Web `npm.cmd test` → 81 tests / 81 pass / 0 fail（字段集 24 新增 4 条），`npm.cmd run build` exit 0，产物 `dist/assets/index-D-tQ6A_W.js` 529 466 B、`index-BR796lnh.css` 59 131 B。
+- 未验证：其他机型（MI 8 / API 29）与 API 26–30 路径；老内核或厂商改过的调度器不写 `cpu_capacity` 时的 `UNAVAILABLE` 表现；未启用 CMA 的机型上 `CmaTotal` 是否缺失；v23 客户端被后台接收的在线实测（在线入口需 App 身份，未构造特权请求，改由 `field.valid(4, 23)` 单测覆盖）。
+- **已知未覆盖项（真实限制，不是已完成）**：
+  1. `SafeReader.cpuCapacitySignature()` 的「ENOENT 跳过 / 非 ENOENT 整项失败 / 去重拼接」三条分支**无法用 JVM 单测覆盖**。本地单测跑在 android.jar 桩上，`Os.open` 首句即抛 `RuntimeException("Stub!")`，被 `SafeReader.read` 兜成 `ERROR/READ_FAILED`，永远走不到这些分支。目前只有真机验证（Pixel 6 实测 `160/498/1024`）。后续应在 `app/src/androidTest/` 补仪器测试，用真实 `Os.open` 造出 ENOENT 与非 ENOENT 两类失败。
+  2. 控制台 `backend/web/qa/device-profile.cjs` 里针对 10 条证据行的浏览器断言**已写好但未执行**（本机无 Playwright、无 QA URL/Token）。`npm test` 侧另有一组契约测试直接解析 Go 源码的 `hardwareKeys` 与 fixture 逐条比对，兜住了条数一致性——这只能证明"条数与键名对齐"，不等于浏览器里那 10 行真的渲染正确。
+
+  > 这两条是**当轮**状态。1.21.2 已补仪器测试（`SafeReaderInstrumentedTest`，22 条断言）并跑通浏览器 QA，当前生效的「已知未覆盖项」见本文件顶部那一节。
+- 排查提示：本轮期间工作树的字段集从 23 跳到 24，后台也曾短暂停在 23。字段集版本不一致时客户端会被整份 400 拒收，而客户端把 400 统一提示为「报告未通过校验。请检查设备时间，刷新采集后重试。」（`LanReport.kt:131`），容易误判成设备时间问题。上传失败时应先比对 App 字段集与后台 `latestFieldSet`。
+
+## 2026-11-25 · 1.19.0 镜像 overlay 代号与真实上传闭环
+
+- Pixel 6（`35241FDF6S1P3K`，被改写为 Xiaomi `23078PND5G` / `corot` / Dimensity 9200+）覆盖安装 1.19.0（46）。同签名 debug 包，`SigMark-1.19.0-LAN-debug.apk` SHA-256 `d5152b1ce60398b9824d498afbc646c98762f3a3c06207f6ddbc9a381ee650ec`，已注入 LAN 地址 `http://192.168.1.114:48272`。
+- 本机证据由 `am instrument -e evidence dump` 生成：快照 255 项（`AVAILABLE=241`、`UNAVAILABLE=11`、`RESTRICTED=3`），`fieldSet=23`。新增 `environment.overlayDeviceCodename = AVAILABLE · oriole · /proc/self/maps`。
+- **首次出现属性链与构建产物互相矛盾**：`system.device` 报 `corot`，而进程映射里的 `framework-res__oriole_user__auto_generated_rro_{product,vendor}.apk` 记录 `oriole`。手机侧新增 `overlay_codename` 行判 `REVIEW`，措辞为“先核对改机、移植 ROM 或虚拟化环境”。
+- 真实上传（App 自身代码路径，`-e lanUpload live`）成功两份：报告 `4263018e-e94b-4bc1-a5e0-309a0f4ba52a` 与 `76423849-04ec-4f8c-a79a-8c08c55b0cb0`，`fieldSetVersion=23`，归档 204 项，`assetLinked=true`，`batch=lan-direct`。
+- 后台复算：`GET /api/admin/reports/<id>/device-profile` 返回 `ruleVersion=sigmark-profile/6`、10 个标签；`hardware_declaration_conflict` 状态 `hit`，**8 条证据全部为真实读数**（`memory.totalRam`、`memory.physicalRam`、`memory.kernelMemTotal`、`cpu.cpuParts`、`system.socModel`、`runtime.glesRenderer`、`system.device`、`environment.overlayDeviceCodename`），没有占位符。
+- 旧报告兼容：v22 报告 `ddb2b82e-5217-412b-8ab6-44026d2c472c` 仍可读，203 项参数、不含 v23 新键，同一画像接口对 `environment.overlayDeviceCodename` 正确返回 `NOT_ARCHIVED`，不推断旧报告未保存的值。
+- 部署：`docker compose up --build -d` 重建 API；`/readyz` = `{"status":"ready"}`；字段词典 `latestFieldSet=23`、`dictionaryVersion=sigmark-lan-fields/14`、`items=232`。
+- 构建与测试：`.\gradlew.bat :app:assembleDebug :app:testDebugUnitTest` 通过，Android 单测 115 项（新增 overlay 解析与 `overlay_codename` 判定用例）；`go test ./...` 通过，含 v23 词典契约、`TestFieldSet23OverlayCodename`、`TestHardwareFactsCatchARewrittenCodenameAlone`；Web `npm test` 77 项通过（本轮未改 Web 逻辑，仅先前补了两条词典文案）。
+- 未验证：其他机型（MI 8 / API 29）与 API 26–30 路径；overlay 命名不符合 AOSP 格式的第三方 ROM；v22 客户端被后台接收的在线实测（在线入口需 App 身份，未构造特权请求，改由 `field.valid(4, 22)` 单测覆盖）。
+
+## 2026-11-25 · 1.18.0 第二观察通道与实测硬件核对
+
+- Pixel 6（`35241FDF6S1P3K`，被改写为 Xiaomi `23078PND5G` / `corot` / Dimensity 9200+）覆盖安装 1.18.0（45）。同签名 debug 包，`app-debug.apk` SHA-256 `bc7ce35236f032334fb28b0833803efa10079cf27b19cb31fbc0c9bf5f91e5f5`。
+- 真机证据由 `am instrument -e evidence dump` 生成，落在 App 专属外部目录后拉回 `output/device-evidence-20261125-118/`：本机快照 254 项（`AVAILABLE=240`、`UNAVAILABLE=11`、`RESTRICTED=3`），LAN 投影 191 项，`fieldSetVersion=22`。报告 SHA-256 `b234be75a545ee05887c91956fc2fce6c755905871524680e6e4383a3c948413`。未上传，本轮不产生后台报告。
+- 新增字段全部在普通 App 权限下取得：`cpu.cpuParts=0x41:0xd05×4 / 0x41:0xd0b×2 / 0x41:0xd44×2`（`/proc/cpuinfo`）、`memory.physicalRam=12.00 GiB`（`sysconf`）、`memory.kernelMemTotal=7.44 GiB`（`/proc/meminfo`）、`runtime.glesRenderer=Immortalis-G715`、`runtime.glesVendor=ARM`（离屏 EGL）。
+- `hardware_facts` 判定为 `REVIEW`，两行冲突：内存三通道 12.00 / 12.00 / 7.44 GiB；声明 `mt6985` 应有的核心 `0xd46`／`0xd4d`／`0xd4e` 与实测 `0xd05`／`0xd0b`／`0xd44` 无交集。GPU 行判为一致（`Immortalis-G715` 与 `mali-g715` 同核别名），本轮据此修正了首版的别名误报。
+- 同一份样本的 `app_identity` 仍为 `OBSERVED · 已比较的 3 对读数一致`：字段集 21 的同义核对对改写层无效，这正是新增第二通道的原因。
+- 构建与测试：`.\gradlew.bat :app:assembleDebug :app:testDebugUnitTest` 通过，Android 单测 113 项；`go test ./...`（`backend/`）通过，含 v22 词典契约、字段集 21 拒绝新键的用例，以及把这份真机 v22 报告按 `schemaVersion 4` 严格解码后过一遍归档白名单（191 项全部接受，用后删除临时用例）。Web 侧本轮未改，未重跑浏览器回归。
+- 未验证：其他机型（MI 8 / API 29）与 API 26–30 路径；`cpu.cpuParts` 在厂商 `/proc/cpuinfo` 不含 MIDR 时的表现；后台实际接收 v22 上报（本轮未上传，部署侧仍需确认 `latestFieldSet=22` 与 `sigmark-lan-fields/13` 已上线）。
+## 2026-11-25 · 1.17.0 App 自采集与身份声明核对
+
+- Android 1.17.0（44）已构建并验证签名；104 项 Android 单测、77 项 Web 单测、Go 测试与浏览器回归通过。独立临时 PostgreSQL 验证了字段集 21 上报、字段集 20 拒绝新键、受限读数保留，以及设备画像和仓库级冲突的计算。
+- 正式内网后台已升级；PostgreSQL 容器及卷未重建，两份抽检原报告及历史外部对照的校验值未变。真实归档仅做只读页面检查。1.17.0 为构建中心试装包，默认更新仍为 1.16.0。
+- 本轮未用 ADB、未执行真机安装或采集。待用手机安装试装包后手动完成「整体获取 → 查看检查依据 → 上传报告」，确认新版在 Pixel 6 和其他设备的实际读数、来源及受限状态。
+
+## 2026-11-25 · 1.16.0 上传确认与密钥自测
+
+- Pixel 6 安装 1.16.0（43），实际操作「整体获取 → 上传报告 → 选择这份报告」，核对精简确认页、展开隐私与备注、查看上传参数以及稍后上传。
+- 真机仪器测试通过临时密钥加解密，系统报告保护级别为 TEE。Android 103 项与 Web 76 项单测、Go test/vet 和后台浏览器回归通过。
+- 正式后台部署前后 PostgreSQL 容器、卷、26 份报告和 1 条身份对照的内容校验一致。下载包完成 SHA-256 核验，本轮界面试采保持待上传。截图、APK 和密钥测试日志位于 `app/build/lan-qa/upload-preview-116/`。
+
+## 2026-11-25 · 1.15.0 身份复核与界面精简
+
+- Pixel 6 上安装 1.15.0（42），从首页完成采集，并在上传预览确认发送本轮真实报告。配对 ADB 与 App 采样相差 2027 ms，正式后台保存后显示六项身份声明不一致。同设备旧报告也显示这条复核记录。
+- 320 px 与 390 px 浏览器测试覆盖首屏摘要、键盘展开、刷新读回及其他设备范围。Pixel 6 实测通过精简首页、安全详情、展开诊断后查看身份导出入口。
+- Android 102 项、Web 75 项单测及 Go test/vet 通过。正式下载文件 SHA-256 与安装构建一致。APK 与截图位于 `app/build/lan-qa/identity-review-115/`。
+
+## 2026-11-25 · 1.14.0 自动安全检查上线
+
+- 在 Pixel 6 安装正式内网 APK 后，从首页点「整体获取」。手机完成采样及主动自测后自动显示安全摘要。实测有一项优先处理（锁屏凭证）和一项未确认读数。「查看检查依据」可打开对应详情。
+- 内网发布 1.14.0（41），下载文件与构建 SHA-256 一致。正式后台打开已有报告立即显示 App 风险评估。辅助对照默认收起。部署前后数据库卷及 23 份报告的内容校验一致。
+- Android 102 项和 Web 75 项单测、生产构建、浏览器风险和辅助对照回归通过。APK 和截图位于 `app/build/lan-qa/auto-security-114/`。
+
+## 2026-11-25 · 1.13.0 本地身份对照上线
+
+- 内网发布 1.13.0（40）并在 Pixel 6 覆盖安装同签名正式包。下载 APK 的 SHA-256 与构建产物一致。真机点击「指纹安全 → 保存身份对照 JSON」，通过系统文件选择器保存，回读得到六项 App 读数。
+- 320 px 和 390 px Chrome 在正式内网后台导入手机界面保存的 JSON 和同机 ADB v6 文件，确认同机后显示 6 项可比、6 项不同。浏览器仅发送 GET。部署前后原 PostgreSQL 容器、卷及 23 份报告的内容校验一致。
+- Android 101 项单测、Web 75 项单测、Web 生产构建和 Go test/vet 通过。APK、两份 JSON 和截图位于 `app/build/lan-qa/identity-release-113/`。本轮真机为 Pixel 6。
+
+## 2026-11-25 · 六项跨来源身份对照
+
+- Pixel 6 隔离 APK 安装通过。本机标准采样归档 184 项。Python 与 PowerShell 分别生成 v6 ADB 记录，两组相对 App 的采样时间差为 476 ms 和 2067 ms。对照均为 6 项可比、6 项不同。新增设备代号读数为 App `corot`、ADB `oriole`，初始 API 级别为 App `33`、ADB `31`。
+- 历史 MI 8 v4 样本离线重放为 3 项可比、0 项不同。旧版格式、缺失型号和缺失属性均有回归覆盖。320 px 浏览器通过两份 v6 文件及 Pixel 6 旧 v4 文件的导入、同机确认和超时检查。390 px 风险页合成用例、101 项 Android 单测、74 项 Web 单测、11 项观察脚本单测、Web 生产构建通过。
+- 真机 JSON、安装包和采样日志位于 `app/build/lan-qa/pixel6-identity-v6/`。本轮仅连接 Pixel 6，其他机型使用历史或合成样本。正式后台待发布。
+
+## 2026-11-25 · Pixel 6 自定义 ROM 对照基线
+
+- 在 Pixel 6 上以 `com.sigmark.app.qa` 完成两轮 App 标准采集和 ADB 系统侧配对观察。两轮 App 各归档字段集 20 的 184 项，App 与 ADB 记录的时间差分别为 583 ms 和 546 ms。配置码仪器测试确认商品、硬件、ROM 三分量在同条件重复采样时稳定。
+- App 在两轮都报告小米型号及可用的平台、启动硬件和 SKU 声明。三项声明在确认同机后均与 ADB 观察不同。App 的 SELinux 实时模式两轮均为 `RESTRICTED / ACCESS_DENIED / errno=13`，ADB 两轮为 `Enforcing`，来源分别保留。
+- 以实际 App 投影离线重放 `sigmark-observation-risk/3`，两轮均为黄色，唯一复核项是系统报告当前用户未配置安全锁屏（`LOCKSCREEN`）。SELinux 为未确认，独立证明未执行。
+- 隔离 APK 安装及采样、101 项 Android 单测、71 项 Web 单测和生产构建通过。320 px Chromium 使用实际真机 JSON 与拦截的报告详情接口验证同机确认、原始读数、格式错误和文件替换，全程仅有 GET。证据在 `app/build/lan-qa/pixel6-cross-channel-20261125/`。复测未覆盖本轮正式后台发布及新 ROM 前后比较。
+
+### 身份结论复核
+
+- 离线重放 Pixel 6 的两组原始报告。App 内部身份检查均未发现冲突。确认同机后，两组的跨来源摘要均为 4 项可比、4 项不同。历史 MI 8 样本为 3 项可比、0 项不同，另一项无读数。
+- 73 项 Web 单测、生产构建、390 px 风险页合成测试和两组 Pixel 6 记录的 320 px 浏览器回归通过。风险卡显示「设备身份未验证」，跨来源摘要在导入并确认同机后显示差异。测试使用本地预览和拦截的报告接口。
+
+## 2026-11-25 · SELinux 证据复核
+
+- Pixel 6 和 MI 8 运行了隔离测试包。App 的 `enforce` 与 `policy` 均为 `RESTRICTED / ACCESS_DENIED / errno=13`，风险检查为未确认。仪器测试核对了 App 采集值与 LAN 投影的状态、数值和 errno。
+- 两台手机的 ADB shell 均报告 `Enforcing`。浏览器在 320 和 390 px 的隔离页面上打开实机观察文件，分别显示 App 受限读数和 ADB 模式。记录位于 `app/build/lan-qa/selinux-20261125/`。
+
 ## 1.12.0 / 39 整体获取实测
 
 - 通过 101 项 Android 单测、71 项 Web 单测、Go test/vet 和生产镜像构建。内网发布包与上版签名一致，下载和两台手机已安装 APK 的 SHA-256 均为 `724fdfb4000e996c79d810eb22bdaa82ca89b629d8b10f3a3c93b9061c262b82`。

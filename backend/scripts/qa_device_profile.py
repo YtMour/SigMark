@@ -97,8 +97,20 @@ def main(browser, image, mobile_payloads):
             ('runtime','declaredInput','touchscreen'),('runtime','glesProbeResult','pass'),('runtime','glesProbeVersion','3.2'),
             ('runtime','glesProbeStage','done'),('media','cameraModes','raw / high_speed_video'),
             ('sensors','reportingModes','1/2/0/0/0'),('sensors','fifoCount','1'),('sensors','directChannelTypes','none')]]
-        current_fields = evidence('fail','approximate')+points+status_pair+extra+observation+hardware
-        current = upload(12,current_fields,asset_key,at)['reportId']
+        # Field set 22-25: second observation channels, overlay codename, capacity
+        # profile and the multi-path overlay evidence behind the codename.
+        second_channels = [dict(group=g,key=k,label=k,status='AVAILABLE',source='fixture',value=v) for g,k,v in [
+            ('cpu','cpuParts','4/0/4'),('memory','physicalRam','7.4 GiB'),('memory','kernelMemTotal','7.3 GiB'),
+            ('runtime','glesRenderer','Adreno (TM) 640'),('runtime','glesVendor','Qualcomm')]]
+        overlay_codename = [dict(group='environment',key='overlayDeviceCodename',label='overlayDeviceCodename',
+                                 status='AVAILABLE',source='fixture',value='oriole')]
+        capacity_profile = [dict(group=g,key=k,label=k,status='AVAILABLE',source='fixture',value=v) for g,k,v in [
+            ('cpu','cpuCapacity','160/498/1024'),('memory','cmaTotal','652 MiB')]]
+        overlay_evidence = [dict(group='environment',key='overlayEvidence',label='overlayEvidence',status='AVAILABLE',source='fixture',
+            value='rro:oriole / vendor_dir:oriole / product_dir:oriole / sku:600 / soc:gs101')]
+        current_fields = (evidence('fail','approximate')+points+status_pair+extra+observation+hardware
+                          +second_channels+overlay_codename+capacity_profile+overlay_evidence)
+        current = upload(25,current_fields,asset_key,at)['reportId']
         assert get('/api/admin/reports/'+current)['report']['parameters']==current_fields
         try: upload(8,evidence('pass','precise'))
         except HTTPError as e: assert e.code==400,e.code
@@ -115,16 +127,56 @@ def main(browser, image, mobile_payloads):
         try: upload(11,hardware)
         except HTTPError as e: assert e.code==400,e.code
         else: raise AssertionError('v11 accepted v12 fields')
+        # Each later field set must reject its own keys from the previous version
+        # and accept them from its own version. Sleep stays: /v1/reports is 2/s.
+        def rejects(version, fields, message):
+            time.sleep(.6)
+            try: upload(version,fields)
+            except HTTPError as e: assert e.code==400,(message,e.code)
+            else: raise AssertionError(message)
+
+        def accepts(version, fields, message):
+            time.sleep(.6)
+            saved = upload(version,fields)['reportId']
+            assert get('/api/admin/reports/'+saved)['report']['parameters']==fields,message
+            return saved
+        rejects(21,second_channels,'v21 accepted v22 second observation channels')
+        accepts(22,second_channels,'v22 rejected its own second observation channels')
+        rejects(22,overlay_codename,'v22 accepted v23 overlay codename')
+        accepts(23,overlay_codename,'v23 rejected its own overlay codename')
+        rejects(23,capacity_profile,'v23 accepted v24 capacity profile')
+        accepts(24,capacity_profile,'v24 rejected its own capacity profile')
+        rejects(24,overlay_evidence,'v24 accepted v25 overlay evidence')
+        accepts(25,overlay_evidence,'v25 rejected its own overlay evidence')
+        print('PASS API: v22-v25 new keys are rejected by the previous version and accepted by their own.',flush=True)
         dictionary = get('/api/admin/field-dictionary')
         duration = next(item for item in dictionary['items'] if item['key']=='media.avcElapsed')
         bits = next(item for item in dictionary['items'] if item['key']=='cpu.processBitness')
-        assert dictionary['latestFieldSet']==20 and dictionary['dictionaryVersion']=='sigmark-lan-fields/11'
+        assert dictionary['latestFieldSet']==25 and dictionary['dictionaryVersion']=='sigmark-lan-fields/16'
         assert (duration['unit'], duration['sinceFieldSet'], duration['plan'], duration['temporal'])==('ms',9,'rom','experiment')
         assert duration['alsoPlans']==['full']
         assert (bits['unit'],bits['sinceFieldSet'],bits['valueKind'],bits['scope'])==('bit',11,'integer_text','lan_projection')
         cell = next(item for item in dictionary['items'] if item['key']=='cellular.cellLTEBandwidth')
         assert cell['minApi']==28 and cell['requires']==['android.permission.ACCESS_FINE_LOCATION','system_location_enabled']
         print('PASS API: field set 9, explicit test failure, old-version rejection, and field dictionary.',flush=True)
+        time.sleep(.6)
+        app_fields = [
+            dict(group='system',key='model',label='Model',status='AVAILABLE',source='Build.MODEL',value='Capability fixture'),
+            dict(group='system',key='propertyModel',label='Model property',status='AVAILABLE',source='getprop ro.product.model',value='Alternate declaration'),
+            dict(group='system',key='propertyDevice',label='Device property',status='RESTRICTED',source='getprop ro.product.device',value=None,reason='ACCESS_DENIED',errno=13),
+        ]
+        try: upload(20,app_fields)
+        except HTTPError as e: assert e.code==400,e.code
+        else: raise AssertionError('v20 accepted v21 app identity fields')
+        time.sleep(.6)
+        identity_id=upload(21,app_fields)['reportId']
+        assert get('/api/admin/reports/'+identity_id)['report']['parameters']==app_fields
+        identity_profile=get('/api/admin/reports/'+identity_id+'/device-profile')
+        app_label=next(l for l in identity_profile['labels'] if l['code']=='identity_conflict')
+        assert app_label['state']=='hit' and any(e.get('errno')==13 for e in app_label['evidence'])
+        store_identity=get('/api/admin/identity-summary')
+        assert any(row['reportId']==identity_id and row['pairs'][0]['rightKey']=='system.propertyModel' for row in store_identity['conflictSamples'])
+        print('PASS API: v21 upload, v20 rejection, app identity evidence and repository summary.',flush=True)
         sheet = get('/api/admin/reports/'+current+'/lab')
         assert sheet['current']['id']==current and [p['id'] for p in sheet['history']]==[baseline]
         assert not sheet['hasEarlier']
@@ -165,9 +217,10 @@ def main(browser, image, mobile_payloads):
         def profile(rid): return get(url(rid))
         def label(p, code): return next(l for l in p['labels'] if l['code']==code)
         p = profile(selected)
-        assert (p['reportId'], p['ruleVersion'], p['linked'],p['historySamples'],p['historyLimited']) == (selected,'sigmark-profile/3',True,4,False),p
+        assert (p['reportId'], p['ruleVersion'], p['linked'],p['historySamples'],p['historyLimited']) == (selected,'sigmark-profile/8',True,4,False),p
         assert [l['code'] for l in p['labels']]==['virtual_build_markers','selinux_permissive','debugger_attached',
-            'hook_injection','root_manager_visible','multi_open','rom_verification','software_drm','identity_conflict'],p
+            'hook_injection','root_manager_visible','multi_open','rom_verification','software_drm','identity_conflict',
+            'hardware_declaration_conflict'],p
         assert all('historyRestricted' in l for l in p['labels']),p
         dbg = label(p,'debugger_attached')
         assert (dbg['state'],dbg['historyHits'],dbg['historyEvaluable'],dbg['lastHistoricalHit']) == ('not_observed',2,3,{'id':last,'capturedAtEpochMs':now-2000}),dbg
@@ -218,7 +271,7 @@ def main(browser, image, mobile_payloads):
         delayed = upload(9,[build_field('ROM-A uploaded late')],asset_key,at-2000)['reportId']
         assert get('/api/admin/reports/'+delayed)['receivedAt'] > sheet['current']['receivedAt']
         dossier = get(dossier_url(asset))
-        assert (dossier['reportId'],dossier['buildId'],dossier['fieldSetVersion'])==(current,'ROM-B',12),dossier
+        assert (dossier['reportId'],dossier['buildId'],dossier['fieldSetVersion'])==(current,'ROM-B',25),dossier
         assert 'android' not in dossier and len(dossier['categories'])==12
         by_group = {group['group']:group for group in dossier['categories']}
         assert by_group['system']['counts']['restricted']==1

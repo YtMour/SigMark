@@ -2,23 +2,26 @@ import {useEffect,useState} from 'react';
 import {errorMessage,request} from './console';
 import {date,saveDownload} from './reports';
 import {followReadLink} from './reader-history';
+import {ScorePanel} from './score-panel';
+import type {ScorePayload} from './score-view';
 
 type State='hit'|'not_observed'|'insufficient';
 type Evidence={key:string;status:string;value?:string;source?:string;reason?:string;errno?:number};
 type Label={code:string;state:State;evidence:Evidence[];historyHits:number;historyEvaluable:number;historyRestricted:number;lastHistoricalHit?:{id:string;capturedAtEpochMs:number}};
 type Identity={model?:string;device?:string;board?:string;boardPlatform?:string;bootHardware?:string;hardwareSku?:string;samples:number;lastCapturedAtEpochMs:number;lastReportId:string};
-type Profile={reportId:string;ruleVersion:string;linked:boolean;capturedAtEpochMs:number;historyDays:number;historyLimit:number;historySamples:number;historyLimited:boolean;identityHistory?:Identity[];identityTruncated?:boolean;labels:Label[]};
-// 顺序与后端 sigmark-profile/2 的标签下标一致；历史统计按下标对齐，不要调整顺序。
+type Profile={reportId:string;ruleVersion:string;linked:boolean;capturedAtEpochMs:number;historyDays:number;historyLimit:number;historySamples:number;historyLimited:boolean;identityHistory?:Identity[];identityTruncated?:boolean;labels:Label[];score?:ScorePayload};
+// 规则说明按稳定代码匹配；后端维护对应历史统计。
 const rules:Record<string,[string,string]>={
   virtual_build_markers:['虚拟环境声明','仅核对已归档的硬件、产品、设备代号。它们来自同一系统，不是三份独立证据；未见标记不证明是真机。'],
-  selinux_permissive:['SELinux 宽容模式','只认报告中直接读取或写明推断的实时模式；读取受限不推断关闭，也不把推断当直接读数。'],
+  selinux_permissive:['SELinux 宽容模式','此项以直接读数判定。系统拒读和历史推断均为未确认。'],
   debugger_attached:['印迹进程连接调试器','指采样时印迹进程自身的状态：调试器连接标志与 /proc/self/status 的 TracerPid。可调试的测试包、开发者选项或 USB 调试开关不代表已连接调试器。'],
   hook_injection:['注入与 Hook 线索','只扫描本进程映射、系统分区挂载线索和包可见性范围内的 Root 管理应用。这些线索不代表设备已注入或已 Root。'],
   root_manager_visible:['可见的 Root 管理应用','只匹配固定包名列表，并受 Android 11+ 包可见性限制；未见不等于未安装。'],
   multi_open:['多用户 / 分身环境','应用运行在非所有者用户或工作资料。多用户、双开和工作资料本身不是恶意结论。'],
   rom_verification:['ROM 验证与可调试声明','dm-verity 模式、可调试声明和分区构建日期来自属性快照；属性声明不证明镜像内容，属性缺失不代表分区不存在。'],
   software_drm:['DRM 密钥保护级别','系统 DRM 插件声明的密钥保护级别；L3 只表示软件级密钥保护，不等于模拟器。'],
-  identity_conflict:['身份字段冲突','App 归档里 Build 声明与只读属性声明不一致'],
+  identity_conflict:['App 身份声明核对','只比较同义读数；一致不等于身份已验证。'],
+  hardware_declaration_conflict:['实测硬件与声明核对','比较 /proc、驱动自报与内核侧读数（算力权重、连续内存池）；读数与另一已登记 SoC 相同也判冲突。冲突只提示核对测试条件，不判定设备真伪。'],
 };
 const states:Record<State,string>={hit:'本次观察到',not_observed:'本次未见',insufficient:'本次证据不足'};
 const missing:Record<string,string>={NOT_ARCHIVED:'这份报告未保存该字段',RESTRICTED:'系统限制读取',UNAVAILABLE:'采样时未取得读数',ERROR:'采集出错'};
@@ -31,7 +34,8 @@ const nextSteps:Record<string,string>={
   multi_open:'核对是否为双开或工作资料测试环境；这不是恶意结论。',
   rom_verification:'核对 ROM 来源、dm-verity 与 ro.debuggable，不当作真伪结论。',
   software_drm:'L3 是软件级密钥保护，不等于模拟器；核对测试设备是否本来就没有硬件 DRM。',
-  identity_conflict:'核对 ROM 是否改写 ro.* 属性；不据此判定真伪。'};
+  identity_conflict:'在同一测试条件下用 App 复采，并比对两次报告。',
+  hardware_declaration_conflict:'先核对改机工具、虚拟化或实验 ROM，再判断是否需要继续比对。'};
 
 export function DeviceProfilePanel({reportId}:{reportId:string}) {
   const [data,setData]=useState<Profile>();const [error,setError]=useState('');const [retry,setRetry]=useState(0);
@@ -45,9 +49,8 @@ export function DeviceProfilePanel({reportId}:{reportId:string}) {
     {!data?(error?<div className="inset"><span role="alert">{error}</span> <button type="button" className="secondary" onClick={()=>setRetry(n=>n+1)}>重试读取画像</button></div>:<p role="status">正在读取画像…</p>):<>
       <p>{!data.linked?'这份报告未关联设备资产，仅分析本次；不会按型号猜测归属。':
         '同一已归组资产 · 采样前 '+data.historyDays+' 天内的 '+data.historySamples+' 份先前报告'+(data.historyLimited?'（仅计最近 '+data.historyLimit+' 份）':'')+'。'}</p>
-      {data.labels.some(label=>label.code==='identity_conflict'&&label.state==='hit')&&
-        <p className="identity-notice" role="status">本份报告的身份声明不一致：Build 与只读属性对不上（详见下方「身份字段冲突」）；先核对 ROM 属性改写，不据此判定真伪。</p>}
       <div className="profile-body">
+      <ScorePanel score={data.score}/>
       <div className="security-readings">{data.labels.map(l=><details key={l.code} className="panel security-card" data-profile={l.code}>
         <summary><strong>{rules[l.code]?.[0]??l.code}</strong> <span className={'tag security-'+(l.state==='hit'?'review':l.state==='insufficient'?'unknown':'context')}>{states[l.state]}</span>
           <span className="security-finding">{!data.linked?'未作历史关联':data.historySamples===0?'暂无此前采样':!l.historyEvaluable?'此前采样证据不足':'历史观察到 '+l.historyHits+' / '+l.historyEvaluable+' 份可判断报告'}</span></summary>

@@ -9,7 +9,7 @@ SigMark 当前采用单模块 Kotlin / Compose 结构，目标是让每一项信
 - `CollectionAccess.kt` 集中定义蜂窝字段的授权前置条件和 UI 路由。只对已知可由用户处理的受限原因显示入口。权限回调使用不创建草稿的刷新路径，遇到正在进行的采集时等待后补刷新。
 - `MediaDecodeProbe.kt` 是按需执行的本机能力实测，和常规采集及指纹判定独立。内置 `sigmark-avc/1` 固定样片，通过 MediaExtractor/MediaCodec 检查首个非配置输出，区分文件、解码器初始化与首帧阶段，不读取个人文件、不上传。
 
-- 管理端设备画像由 Go 按当前规则从原报告只读计算，React 只渲染返回值。上传字段集、移动端权限和库表均不变；导出的派生结果以稳定的规则代码、字段键及规则版本为准，不解析界面中文文案。详见[读取契约](LAN-PILOT.md#设备风险画像读取契约)。
+- 管理端设备画像由 Go 按当前规则从原报告只读计算，React 渲染返回值。画像本身不会修改归档、权限或数据库；导出的派生结果以稳定的规则代码、字段键及规则版本为准，不解析界面中文文案。详见[读取契约](LAN-PILOT.md#设备风险画像读取契约)。
 
 `DeviceCollector` → `DeviceRepository` → `MainViewModel (StateFlow)` → Compose 页面 → 系统文档选择器导出 JSON。
 
@@ -69,7 +69,8 @@ Debug 内网试验分支：冻结当前本地快照 → `lan/LanReport.kt` 按�
 ### 普通设备兼容策略
 
 - LAN v4 字段集 7：`system.partitionCount`、`system.partition_<name>`、`system.webViewProvider/webViewVersion/webViewCode`、`system.systemSpl/vendorSpl`、`environment.keyProtection`、`app.package/channel/certSha256`。动态分区名仅限小写字母、数字、下划线（1–32 字符、最多 24 个），只允许在 system 下。v7 最多 192 条，旧 v3/v4 仍最多 160 条。对照按稳定键，不按显示顺序。按需密钥测试的采样时刻在该项说明里，不改原快照时间。
-- 启动规则的 Kotlin / TypeScript 实现共用测试样例 `app/src/test/resources/security-boot.tsv`；单份和对比都先判红色与冲突，再判符合预期的解锁。复测 JSON 的 `ruleVersion` 为 `rom-evidence/4`，与采集器和字段集版本独立。
+- 启动规则的 Kotlin / TypeScript 实现共用测试样例 `app/src/test/resources/security-boot.tsv`；单份和对比都先判红色与冲突，再判符合预期的解锁。当前复测 JSON 的 `ruleVersion` 为 `rom-evidence/6`，与采集器和字段集版本独立。
+- 字段集 21 增加 `system.propertyModel`、`system.propertyDevice`，分别为普通 App 权限下固定读取的 `ro.product.model` 和 `ro.product.device`。使用既有只读属性快照和限时回退，不增加权限；当前词典 `sigmark-lan-fields/12` 包含 226 个静态键，单帧最多 250 项。旧字段集不接收这两个新键，旧数据不补行。
 - 管理端 `GET /api/admin/release-signer?package=com.sigmark.app&channel=lan-debug&version=0.18.0&code=20` 仅查已发布版本。当前记录来自发布指针，切换前将原发布证书摘要保存在构建数据目录 `published-signers/`；旧文件中从未记录的历史不作猜测。无对应数据是 `unregistered`，存储不可读是服务故障，不能作为证书不匹配。未改变用户归组或报告鉴权机制。
 
 - 公开 API 优先：Build、ActivityManager、StatFs、Display、BatteryManager、SensorManager、ConnectivityManager。CPU 文本、首核频率、Swap、SELinux 与厂商属性是可选补充，不阻断其他参数。
@@ -102,6 +103,6 @@ Debug 内网试验分支：冻结当前本地快照 → `lan/LanReport.kt` 按�
 - 机器码升级为 `sigmark-config-code/2`，分为商品 `P2-`、硬件 `H2-`、ROM `R2-` 三个独立分量；硬件分量使用 `cpu.hardware`、`system.board`、`cpu.coresConfigured`、`system.initialSdk`。任一分量输入不全只影响该分量。它只编码 App 归档视角，不代表物理设备真相。
 - Android 投影新增 11 个静态键：`environment.hookSignals`、`tracerPid`、`rootMountHints`、`rootManagerVisible`、`userProfile`、`drmSecurityLevel`、`verityMode`、`buildDebuggable`，`system.partitionBuildDates`、`selinuxEvidence`，`cpu.coresConfigured`。`environment.androidIdSha256` 只在本机 JSON 中，不进入上传投影。静态键 218 个，单帧上限 242（218 + 最多 24 个分区行）。共享登记表为 `app/src/test/resources/lan-projection-v17.txt`，Go 契约测试逐键比对。
 - 采集侧统一「先公开 API、再固定节点、再只读属性」的顺序。属性读取每份快照执行一次 `getprop` 并解析成内存表，未命中的键回退单键读取；`battery.sysBatteryTemp` 允许 `battery/temp` 与 `bms/temp`，服务端按「命中任一允许路径」校验来源，词典与档案仍展示主路径。
-- `system.selinux` 与 `system.selinuxEvidence` 必须成对解释：直接读数为 `exact`，EACCES 且 DAC 允许读取为 `inferred_mac`，selinuxfs 未挂载为 `inferred_disabled`。推断值在值串里带「推断」，任何消费者都不得把推断当成直接读数；规则与画像只把 `Permissive` 当风险线索。
+- `system.selinux` 仅保存直接读到的模式，失败时保留原状态、原因和 errno。`system.selinuxEvidence=exact` 表示直接读数。`inferred_mac` 沿用字段集 17 的枚举，表示拒读时取得的文件权限线索。历史归档中的 `inferred_disabled` 和带「推断」的模式在安全评估和对比中均为未确认。
 - 前端安全规则升到 `rom-evidence/3`，检查项增加 `hook`、`trace`、`profile`、`drm`、`rom`；对照每行带 `category`，结论新增 `restricted`（一侧被系统拒绝）与 `not_archived`（一侧字段集未包含该键），并提供 `compareSummary` 汇总。`regression.ts` 生成的对比导出使用同一规则版本。
 - 设备风险画像升到 `sigmark-profile/2`，标签顺序固定为 `virtual_build_markers`、`selinux_permissive`、`debugger_attached`、`hook_injection`、`root_manager_visible`、`multi_open`、`rom_verification`、`software_drm`，并输出 `historyRestricted`。历史样本的受限字段不进入命中，也不作为反证。

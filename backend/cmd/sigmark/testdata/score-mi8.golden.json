@@ -1,0 +1,59 @@
+{
+  "version": "sigmark-score/4",
+  "value": 100,
+  "band": "A",
+  "bandLabel": "一致",
+  "coverage": 0.81,
+  "coverageLabel": "部分可判",
+  "decisive": false,
+  "axes": [
+    {
+      "code": "declaration",
+      "label": "声明一致性",
+      "weight": 40,
+      "score": 100,
+      "coverage": 0.67,
+      "deductions": []
+    },
+    {
+      "code": "behavior",
+      "label": "行为风险",
+      "weight": 35,
+      "score": 100,
+      "coverage": 0.83,
+      "deductions": []
+    },
+    {
+      "code": "usage",
+      "label": "使用真实性",
+      "weight": 25,
+      "score": 100,
+      "coverage": 1,
+      "deductions": []
+    }
+  ],
+  "caps": [],
+  "undetermined": [
+    {
+      "axis": "declaration",
+      "keys": [
+        "memory.cmaTotal"
+      ],
+      "reason": "PROFILE_UNSET"
+    },
+    {
+      "axis": "declaration",
+      "keys": [
+        "environment.overlayDeviceCodename"
+      ],
+      "reason": "UNAVAILABLE"
+    },
+    {
+      "axis": "behavior",
+      "keys": [
+        "system.selinux"
+      ],
+      "reason": "RESTRICTED"
+    }
+  ]
+}

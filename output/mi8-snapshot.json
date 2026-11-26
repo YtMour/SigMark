@@ -1,0 +1,2173 @@
+{
+  "schemaVersion": 1,
+  "collectorVersion": "1.21.0",
+  "app": "SigMark",
+  "collectedAtEpochMs": 1795610102424,
+  "sections": [
+    {
+      "key": "system",
+      "title": "系统与固件",
+      "items": [
+        {
+          "key": "release",
+          "label": "Android 版本",
+          "value": "10",
+          "source": "Build.VERSION.RELEASE",
+          "status": "AVAILABLE",
+          "note": null
+        },
+        {
+          "key": "api",
+          "label": "API 级别",
+          "value": "29",
+          "source": "Build.VERSION.SDK_INT",
+          "status": "AVAILABLE",
+          "note": null
+        },
+        {
+          "key": "patch",
+          "label": "安全补丁",
+          "value": "2020-12-01",
+          "source": "Build.VERSION.SECURITY_PATCH",
+          "status": "AVAILABLE",
+          "note": null
+        },
+        {
+          "key": "initialSdk",
+          "label": "设备初始 API 级别",
+          "value": "27",
+          "source": "getprop ro.product.first_api_level",
+          "status": "AVAILABLE",
+          "note": "出厂时的 API 级别；低于当前 API 属于正常的系统升级，只作世代对照，不据此判定真伪。"
+        },
+        {
+          "key": "bootCount",
+          "label": "开机次数",
+          "value": "56",
+          "source": "Settings.Global.BOOT_COUNT",
+          "status": "AVAILABLE",
+          "note": "系统设置项；每次冷启动递增，恢复出厂或清数据会重置。它不代表使用时长，也不推断刷机。"
+        },
+        {
+          "key": "mediaPerformanceClass",
+          "label": "媒体性能等级",
+          "value": null,
+          "source": "Build.VERSION.MEDIA_PERFORMANCE_CLASS",
+          "status": "UNAVAILABLE",
+          "note": "该字段需要 API 31。",
+          "reason": "INTERFACE_UNSUPPORTED"
+        },
+        {
+          "key": "partitionCount",
+          "label": "公开的分区指纹数",
+          "value": "4",
+          "source": "Build.getFingerprintedPartitions",
+          "status": "AVAILABLE",
+          "note": "仅列出此接口返回的分区；按名排序，最多记录前 24 个。没有单独指纹不表示分区不存在。"
+        },
+        {
+          "key": "partition_bootimage",
+          "label": "bootimage 分区构建",
+          "value": "Xiaomi\/dipper\/dipper:10\/QKQ1.190828.002\/V12.5.2.0.QEACNXM:user\/release-keys · 2021-10-28T07:01:40Z",
+          "source": "Build.getFingerprintedPartitions",
+          "status": "AVAILABLE",
+          "note": "应用视角的分区构建指纹及 UTC 时间，不是分区内容哈希或签名验证。"
+        },
+        {
+          "key": "partition_odm",
+          "label": "odm 分区构建",
+          "value": "Xiaomi\/dipper\/dipper:10\/QKQ1.190828.002\/V12.5.2.0.QEACNXM:user\/release-keys · 2021-10-28T07:01:40Z",
+          "source": "Build.getFingerprintedPartitions",
+          "status": "AVAILABLE",
+          "note": "应用视角的分区构建指纹及 UTC 时间，不是分区内容哈希或签名验证。"
+        },
+        {
+          "key": "partition_system",
+          "label": "system 分区构建",
+          "value": "Xiaomi\/dipper\/dipper:10\/QKQ1.190828.002\/V12.5.2.0.QEACNXM:user\/release-keys · 2021-10-28T07:01:40Z",
+          "source": "Build.getFingerprintedPartitions",
+          "status": "AVAILABLE",
+          "note": "应用视角的分区构建指纹及 UTC 时间，不是分区内容哈希或签名验证。"
+        },
+        {
+          "key": "partition_vendor",
+          "label": "vendor 分区构建",
+          "value": "Xiaomi\/dipper\/dipper:10\/QKQ1.190828.002\/V12.5.2.0.QEACNXM:user\/release-keys · 2021-10-28T07:01:40Z",
+          "source": "Build.getFingerprintedPartitions",
+          "status": "AVAILABLE",
+          "note": "应用视角的分区构建指纹及 UTC 时间，不是分区内容哈希或签名验证。"
+        },
+        {
+          "key": "webViewProvider",
+          "label": "WebView 提供程序",
+          "value": "com.google.android.webview",
+          "source": "WebView.getCurrentWebViewPackage",
+          "status": "AVAILABLE",
+          "note": "只查询当前提供程序，不启动网页。"
+        },
+        {
+          "key": "webViewVersion",
+          "label": "WebView 版本",
+          "value": "83.0.4103.101",
+          "source": "WebView.getCurrentWebViewPackage",
+          "status": "AVAILABLE",
+          "note": "只查询当前提供程序，不启动网页。"
+        },
+        {
+          "key": "webViewCode",
+          "label": "WebView 内部版本号",
+          "value": "410410183",
+          "source": "WebView.getCurrentWebViewPackage",
+          "status": "AVAILABLE",
+          "note": "只查询当前提供程序，不启动网页。"
+        },
+        {
+          "key": "vendorSpl",
+          "label": "厂商组件声明补丁",
+          "value": "2020-12-01",
+          "source": "getprop ro.vendor.build.security_patch",
+          "status": "AVAILABLE",
+          "note": "当前 App 可见的厂商补丁日期（YYYY-MM-DD），不表示已核验补丁内容。"
+        },
+        {
+          "key": "partitionBuildDates",
+          "label": "分区构建日期",
+          "value": "system 2021-10-28 · vendor 2021-10-28 · odm 2021-10-28 · bootimage 2021-10-28",
+          "source": "getprop ro.<partition>.build.date.utc",
+          "status": "AVAILABLE",
+          "note": "按固定顺序读取 system、vendor、product、odm、system_ext、bootimage 的 UTC 构建时间；属性缺失不代表分区不存在。"
+        },
+        {
+          "key": "declaredCapabilities",
+          "label": "系统声明能力",
+          "value": "NFC 已声明 \/ BLE 已声明 \/ Wi-Fi RTT 未声明 \/ 陀螺仪 已声明 \/ USB Host 已声明",
+          "source": "PackageManager.hasSystemFeature",
+          "status": "AVAILABLE",
+          "note": "ROM 声明，实际功能仍需真机验证。"
+        },
+        {
+          "key": "interfaceCapabilities",
+          "label": "设备接口声明",
+          "value": "nfc \/ gnss \/ usb_host \/ usb_accessory",
+          "source": "PackageManager.hasSystemFeature",
+          "status": "AVAILABLE",
+          "note": "NFC、GNSS（GPS）、USB 主机及配件模式的声明；none 表示这四项均未声明。未探测设备标识或接口是否可用。"
+        },
+        {
+          "key": "gnssHardwareYear",
+          "label": "GNSS 硬件与软件型号年",
+          "value": "2018",
+          "source": "LocationManager.getGnssYearOfHardware",
+          "status": "AVAILABLE",
+          "note": "这是 Android 报告的 GNSS 硬件与软件构建型号年，不是芯片生产年或整机上市年。"
+        },
+        {
+          "key": "gnssProvider",
+          "label": "Android 暴露 GPS 提供器",
+          "value": "yes",
+          "source": "LocationManager.getAllProviders",
+          "status": "AVAILABLE",
+          "note": "仅检查 provider 名称列表是否包含 GPS，不等于已搜星。"
+        },
+        {
+          "key": "gnssHardwareModel",
+          "label": "GNSS 构建型号名称（仅本机）",
+          "value": "Broadcom, BCM4775, GLL ver. 107.20.22 __CHLST__",
+          "source": "LocationManager.getGnssHardwareModelName",
+          "status": "AVAILABLE",
+          "note": "厂商返回的原始名称仅保留在本机，不用于验证型号年。"
+        },
+        {
+          "key": "gnssModelReported",
+          "label": "系统是否返回 GNSS 型号名称",
+          "value": "yes",
+          "source": "LocationManager.getGnssHardwareModelName",
+          "status": "AVAILABLE",
+          "note": "仅归档名称是否存在；不上传名称本身。"
+        },
+        {
+          "key": "gnssAntennaSupport",
+          "label": "声明支持 GNSS 天线信息",
+          "value": null,
+          "source": "LocationManager.getGnssCapabilities().hasAntennaInfo",
+          "status": "UNAVAILABLE",
+          "note": "需要 API 30。",
+          "reason": "INTERFACE_UNSUPPORTED"
+        },
+        {
+          "key": "gnssCapabilities",
+          "label": "GNSS 高级能力",
+          "value": null,
+          "source": "LocationManager.getGnssCapabilities",
+          "status": "UNAVAILABLE",
+          "note": "原始测量与导航消息的公开能力查询需要 API 31；Android 11 的天线声明另列。",
+          "reason": "INTERFACE_UNSUPPORTED"
+        },
+        {
+          "key": "fingerprint",
+          "label": "构建指纹",
+          "value": "Xiaomi\/dipper\/dipper:10\/QKQ1.190828.002\/V12.5.2.0.QEACNXM:user\/release-keys",
+          "source": "Build.FINGERPRINT",
+          "status": "AVAILABLE",
+          "note": "应用进程视角；可能与 ADB 属性不同"
+        },
+        {
+          "key": "buildId",
+          "label": "构建 ID",
+          "value": "QKQ1.190828.002",
+          "source": "Build.ID",
+          "status": "AVAILABLE",
+          "note": null
+        },
+        {
+          "key": "display",
+          "label": "构建显示名",
+          "value": "QKQ1.190828.002 test-keys",
+          "source": "Build.DISPLAY",
+          "status": "AVAILABLE",
+          "note": null
+        },
+        {
+          "key": "incremental",
+          "label": "增量构建号",
+          "value": "V12.5.2.0.QEACNXM",
+          "source": "Build.VERSION.INCREMENTAL",
+          "status": "AVAILABLE",
+          "note": null
+        },
+        {
+          "key": "buildTime",
+          "label": "构建时间",
+          "value": "2021-10-28T07:01:40Z",
+          "source": "Build.TIME",
+          "status": "AVAILABLE",
+          "note": "UTC；应用进程视角。"
+        },
+        {
+          "key": "buildUser",
+          "label": "构建用户",
+          "value": "builder",
+          "source": "Build.USER",
+          "status": "AVAILABLE",
+          "note": null
+        },
+        {
+          "key": "buildHost",
+          "label": "构建主机",
+          "value": "c5-miui-ota-bd38.bj",
+          "source": "Build.HOST",
+          "status": "AVAILABLE",
+          "note": null
+        },
+        {
+          "key": "board",
+          "label": "主板代号",
+          "value": "sdm845",
+          "source": "Build.BOARD",
+          "status": "AVAILABLE",
+          "note": null
+        },
+        {
+          "key": "boardPlatform",
+          "label": "平台代号声明",
+          "value": "sdm845",
+          "source": "getprop ro.board.platform",
+          "status": "AVAILABLE",
+          "note": "只读平台声明，与 Build.BOARD 的含义不同，保留原值，不据此判断冲突。"
+        },
+        {
+          "key": "bootHardware",
+          "label": "启动硬件声明",
+          "value": "qcom",
+          "source": "getprop ro.boot.hardware",
+          "status": "AVAILABLE",
+          "note": "只读启动硬件声明，与 Build.HARDWARE 的含义不同，保留原值。"
+        },
+        {
+          "key": "hardwareSku",
+          "label": "启动硬件 SKU",
+          "value": null,
+          "source": "getprop ro.boot.hardware.sku",
+          "status": "UNAVAILABLE",
+          "note": "属性未设置或对当前应用不可见。 与 Build.SKU（API 31+）核对同一声明，可能共享底层数据。",
+          "reason": "NOT_REPORTED"
+        },
+        {
+          "key": "baseOs",
+          "label": "基础系统版本",
+          "value": null,
+          "source": "Build.VERSION.BASE_OS \/ getprop ro.build.version.base_os",
+          "status": "UNAVAILABLE",
+          "note": "OEM 可选字段，当前 ROM 未提供。Android 版本见上方独立字段。",
+          "reason": "OPTIONAL_UNSET"
+        },
+        {
+          "key": "type",
+          "label": "构建类型",
+          "value": "user",
+          "source": "Build.TYPE",
+          "status": "AVAILABLE",
+          "note": null
+        },
+        {
+          "key": "tags",
+          "label": "构建标签",
+          "value": "release-keys",
+          "source": "Build.TAGS",
+          "status": "AVAILABLE",
+          "note": null
+        },
+        {
+          "key": "manufacturer",
+          "label": "制造商",
+          "value": "Xiaomi",
+          "source": "Build.MANUFACTURER",
+          "status": "AVAILABLE",
+          "note": null
+        },
+        {
+          "key": "brand",
+          "label": "品牌",
+          "value": "Xiaomi",
+          "source": "Build.BRAND",
+          "status": "AVAILABLE",
+          "note": null
+        },
+        {
+          "key": "model",
+          "label": "型号",
+          "value": "MI 8",
+          "source": "Build.MODEL",
+          "status": "AVAILABLE",
+          "note": "应用进程视角"
+        },
+        {
+          "key": "device",
+          "label": "设备代号",
+          "value": "dipper",
+          "source": "Build.DEVICE",
+          "status": "AVAILABLE",
+          "note": "应用进程视角"
+        },
+        {
+          "key": "propertyModel",
+          "label": "型号属性",
+          "value": "MI 8",
+          "source": "getprop ro.product.model",
+          "status": "AVAILABLE",
+          "note": "当前 App 读取的只读属性；与 Build 核对同一声明，不是独立身份证据。"
+        },
+        {
+          "key": "propertyDevice",
+          "label": "设备代号属性",
+          "value": "dipper",
+          "source": "getprop ro.product.device",
+          "status": "AVAILABLE",
+          "note": "当前 App 读取的只读属性；与 Build 核对同一声明，不是独立身份证据。"
+        },
+        {
+          "key": "product",
+          "label": "产品代号",
+          "value": "dipper",
+          "source": "Build.PRODUCT",
+          "status": "AVAILABLE",
+          "note": null
+        },
+        {
+          "key": "bootloader",
+          "label": "Bootloader",
+          "value": null,
+          "source": "Build.BOOTLOADER \/ getprop ro.bootloader",
+          "status": "UNAVAILABLE",
+          "note": "当前 ROM 未向应用提供 Bootloader 版本。",
+          "reason": "OPTIONAL_UNSET"
+        },
+        {
+          "key": "uptime",
+          "label": "开机时长",
+          "value": "13 天 3 小时 25 分钟",
+          "source": "SystemClock.elapsedRealtime",
+          "status": "AVAILABLE",
+          "note": null
+        },
+        {
+          "key": "selinux",
+          "label": "SELinux 实时模式",
+          "value": null,
+          "source": "\/sys\/fs\/selinux\/enforce",
+          "status": "RESTRICTED",
+          "note": "EACCES \/ errno=13 · Android 文件权限或系统策略拒绝普通应用访问。 系统拒绝读取，实时模式未确认。",
+          "reason": "ACCESS_DENIED",
+          "errno": 13
+        },
+        {
+          "key": "selinuxEvidence",
+          "label": "SELinux 读取依据",
+          "value": "inferred_mac",
+          "source": "\/sys\/fs\/selinux\/enforce",
+          "status": "AVAILABLE",
+          "note": "目录与节点的权限位允许其他用户搜索和读取。系统策略是可能原因之一。"
+        },
+        {
+          "key": "selinuxPolicy",
+          "label": "SELinux 策略节点",
+          "value": null,
+          "source": "\/sys\/fs\/selinux\/policy",
+          "status": "RESTRICTED",
+          "note": "EACCES \/ errno=13 · Android 文件权限或系统策略拒绝普通应用访问。 仅探测节点可打开性。读取二进制策略内容还需要独立的 security:read_policy 授权。 普通应用通常受系统策略限制。打开检查与读取策略正文使用不同权限。",
+          "reason": "ACCESS_DENIED",
+          "errno": 13
+        },
+        {
+          "key": "selinuxBootHint",
+          "label": "SELinux 启动属性（参考）",
+          "value": null,
+          "source": "getprop ro.boot.selinux",
+          "status": "UNAVAILABLE",
+          "note": "当前应用未得到该属性值。 启动参考属性，量产 ROM 可留空。不代表实时模式。",
+          "reason": "OPTIONAL_UNSET"
+        },
+        {
+          "key": "selinuxBuildHint",
+          "label": "SELinux 构建属性（参考）",
+          "value": null,
+          "source": "getprop ro.build.selinux",
+          "status": "UNAVAILABLE",
+          "note": "当前应用未得到该属性值。 历史构建属性，现代 ROM 可省略。不代表实时模式。",
+          "reason": "OPTIONAL_UNSET"
+        },
+        {
+          "key": "romHint",
+          "label": "ROM 版本线索",
+          "value": "V125",
+          "source": "getprop ro.miui.ui.version.name",
+          "status": "AVAILABLE",
+          "note": "厂商属性，仅反映当前应用读取结果。"
+        }
+      ]
+    },
+    {
+      "key": "cpu",
+      "title": "内核与 CPU",
+      "items": [
+        {
+          "key": "kernel",
+          "label": "内核版本",
+          "value": "4.9.186-perf-g10af704",
+          "source": "System.getProperty(os.version)",
+          "status": "AVAILABLE",
+          "note": null
+        },
+        {
+          "key": "kernelFull",
+          "label": "内核编译信息",
+          "value": "Linux 4.9.186-perf-g10af704 #1 SMP PREEMPT Thu Oct 28 15:12:35 CST 2021 aarch64",
+          "source": "Os.uname()",
+          "status": "AVAILABLE",
+          "note": "通过 uname 获取；\/proc\/version 在部分设备上禁止读取。"
+        },
+        {
+          "key": "kernelMachine",
+          "label": "内核报告的架构",
+          "value": "aarch64",
+          "source": "Os.uname()",
+          "status": "AVAILABLE",
+          "note": "应用进程看到的 uname 架构，不是物理芯片证明。"
+        },
+        {
+          "key": "abis",
+          "label": "支持的 ABI",
+          "value": "arm64-v8a, armeabi-v7a, armeabi",
+          "source": "Build.SUPPORTED_ABIS",
+          "status": "AVAILABLE",
+          "note": null
+        },
+        {
+          "key": "arch",
+          "label": "进程架构",
+          "value": "aarch64",
+          "source": "System.getProperty(os.arch)",
+          "status": "AVAILABLE",
+          "note": null
+        },
+        {
+          "key": "processBitness",
+          "label": "印迹进程位宽",
+          "value": "64",
+          "source": "android.os.Process.is64Bit()",
+          "status": "AVAILABLE",
+          "note": "单位 bit。64 位系统运行 32 位进程属于正常兼容模式。"
+        },
+        {
+          "key": "abi32",
+          "label": "支持的 32 位 ABI",
+          "value": "armeabi-v7a, armeabi",
+          "source": "Build.SUPPORTED_32_BIT_ABIS",
+          "status": "AVAILABLE",
+          "note": null
+        },
+        {
+          "key": "abi64",
+          "label": "支持的 64 位 ABI",
+          "value": "arm64-v8a",
+          "source": "Build.SUPPORTED_64_BIT_ABIS",
+          "status": "AVAILABLE",
+          "note": null
+        },
+        {
+          "key": "hardware",
+          "label": "硬件代号",
+          "value": "qcom",
+          "source": "Build.HARDWARE",
+          "status": "AVAILABLE",
+          "note": null
+        },
+        {
+          "key": "cores",
+          "label": "可用逻辑核心",
+          "value": "8",
+          "source": "Runtime.availableProcessors",
+          "status": "AVAILABLE",
+          "note": null
+        },
+        {
+          "key": "coresConfigured",
+          "label": "内核配置的逻辑 CPU 数",
+          "value": "8",
+          "source": "Os.sysconf(_SC_NPROCESSORS_CONF)",
+          "status": "AVAILABLE",
+          "note": "内核配置的逻辑 CPU 数，可能大于当前在线数或本进程可用数。"
+        },
+        {
+          "key": "pageSize",
+          "label": "内存页大小",
+          "value": "4096 B",
+          "source": "Os.sysconf(_SC_PAGESIZE)",
+          "status": "AVAILABLE",
+          "note": null
+        },
+        {
+          "key": "cpuInfo",
+          "label": "CPU 描述",
+          "value": "Qualcomm Technologies, Inc SDM845",
+          "source": "\/proc\/cpuinfo",
+          "status": "AVAILABLE",
+          "note": null
+        },
+        {
+          "key": "features",
+          "label": "CPU 指令特性",
+          "value": "fp, asimd, evtstrm, aes, pmull, sha1, sha2, crc32, atomics, fphp, asimdhp",
+          "source": "\/proc\/cpuinfo",
+          "status": "AVAILABLE",
+          "note": null
+        },
+        {
+          "key": "cpuParts",
+          "label": "CPU 分块微架构签名",
+          "value": "0x51:0x802×4 \/ 0x51:0x803×4",
+          "source": "\/proc\/cpuinfo",
+          "status": "AVAILABLE",
+          "note": "按 \/proc\/cpuinfo 全部分块的 CPU implementer\/part 计数；格式 implementer:part×核心数。这是内核报告的微架构标识，不是性能评分，也不单独判定 SoC 型号。"
+        },
+        {
+          "key": "cpu0MaxFrequency",
+          "label": "CPU 0 \/ policy0 最高频率",
+          "value": "1766 MHz",
+          "source": "\/sys\/devices\/system\/cpu\/cpu0\/cpufreq\/cpuinfo_max_freq",
+          "status": "AVAILABLE",
+          "note": "CPU 0 或 policy0 的样本，不代表整颗处理器峰值。"
+        },
+        {
+          "key": "cpuCapacity",
+          "label": "CPU 算力权重（内核口径）",
+          "value": null,
+          "source": "\/sys\/devices\/system\/cpu\/cpu{N}\/cpu_capacity",
+          "status": "UNAVAILABLE",
+          "note": "逐个读取 cpu0–cpu7 的 cpu_capacity，按首次出现顺序去重；缺少任一存在的核心即整项记受限。",
+          "reason": "NOT_REPORTED"
+        },
+        {
+          "key": "sysCpuPossible",
+          "label": "内核可支持的逻辑 CPU 编号",
+          "value": "0-7",
+          "source": "\/sys\/devices\/system\/cpu\/possible",
+          "status": "AVAILABLE",
+          "note": "普通 App 进程直接读取。节点格式检查通过，单位／格式：Linux CPU list。"
+        },
+        {
+          "key": "sysCpuOnline",
+          "label": "采样时在线的逻辑 CPU 编号",
+          "value": "0-7",
+          "source": "\/sys\/devices\/system\/cpu\/online",
+          "status": "AVAILABLE",
+          "note": "普通 App 进程直接读取。节点格式检查通过，单位／格式：Linux CPU list。"
+        }
+      ]
+    },
+    {
+      "key": "memory",
+      "title": "内存与存储",
+      "items": [
+        {
+          "key": "totalRam",
+          "label": "总运行内存",
+          "value": "5.50 GiB",
+          "source": "ActivityManager.MemoryInfo.totalMem",
+          "status": "AVAILABLE",
+          "note": null
+        },
+        {
+          "key": "physicalRam",
+          "label": "物理内存（内核口径）",
+          "value": "5.50 GiB",
+          "source": "Os.sysconf(_SC_PHYS_PAGES) × _SC_PAGESIZE",
+          "status": "AVAILABLE",
+          "note": "直接按内核报告的内存页总数换算；与上面的框架读数互相独立。"
+        },
+        {
+          "key": "availableRam",
+          "label": "可用运行内存",
+          "value": "2.30 GiB",
+          "source": "ActivityManager.MemoryInfo.availMem",
+          "status": "AVAILABLE",
+          "note": null
+        },
+        {
+          "key": "lowMemory",
+          "label": "低内存状态",
+          "value": "否",
+          "source": "ActivityManager.MemoryInfo.lowMemory",
+          "status": "AVAILABLE",
+          "note": null
+        },
+        {
+          "key": "lowMemoryThreshold",
+          "label": "低内存阈值",
+          "value": "0.21 GiB",
+          "source": "ActivityManager.MemoryInfo.threshold",
+          "status": "AVAILABLE",
+          "note": null
+        },
+        {
+          "key": "ramUseEstimate",
+          "label": "内存占用率（估算）",
+          "value": "58.2%",
+          "source": "ActivityManager.MemoryInfo",
+          "status": "AVAILABLE",
+          "note": "(总量 − 可用量) \/ 总量；包含系统对可回收内存的估计。"
+        },
+        {
+          "key": "swap",
+          "label": "Swap 总量",
+          "value": "2621436 kB",
+          "source": "\/proc\/meminfo",
+          "status": "AVAILABLE",
+          "note": null
+        },
+        {
+          "key": "kernelMemTotal",
+          "label": "内核内存总量",
+          "value": "5.50 GiB",
+          "source": "\/proc\/meminfo",
+          "status": "AVAILABLE",
+          "note": "\/proc\/meminfo 的 MemTotal，按 1 GiB = 1048576 KiB 换算。"
+        },
+        {
+          "key": "cmaTotal",
+          "label": "连续内存池（内核预留）",
+          "value": "200 MiB",
+          "source": "\/proc\/meminfo",
+          "status": "AVAILABLE",
+          "note": "\/proc\/meminfo 的 CmaTotal，按 1 MiB = 1024 KiB 换算；由内核在启动时按内存布局预留。"
+        },
+        {
+          "key": "internalTotal",
+          "label": "内部存储总量",
+          "value": "52.41 GiB",
+          "source": "StatFs(dataDirectory)",
+          "status": "AVAILABLE",
+          "note": null
+        },
+        {
+          "key": "internalAvailable",
+          "label": "内部存储可用",
+          "value": "11.93 GiB",
+          "source": "StatFs(dataDirectory)",
+          "status": "AVAILABLE",
+          "note": null
+        },
+        {
+          "key": "sharedState",
+          "label": "共享存储状态",
+          "value": "mounted",
+          "source": "Environment.getExternalStorageState",
+          "status": "AVAILABLE",
+          "note": null
+        },
+        {
+          "key": "volumeSummary",
+          "label": "可见存储卷",
+          "value": "主卷 · mounted · 模拟存储 · 不可移除",
+          "source": "StorageManager.storageVolumes",
+          "status": "AVAILABLE",
+          "note": "仅显示卷属性，不含 UUID、路径或标签。"
+        },
+        {
+          "key": "systemSpace",
+          "label": "系统路径空间",
+          "value": "0.02 GiB 可用 \/ 2.91 GiB 总量",
+          "source": "StatFs(rootDirectory)",
+          "status": "AVAILABLE",
+          "note": "仅表示该路径所见文件系统。"
+        },
+        {
+          "key": "appCacheSpace",
+          "label": "应用缓存路径空间",
+          "value": "11.93 GiB 可用 \/ 52.41 GiB 总量",
+          "source": "StatFs(Context.cacheDir)",
+          "status": "AVAILABLE",
+          "note": "是所在文件系统空间，不是 App 缓存配额；可能与数据区相同。"
+        }
+      ]
+    },
+    {
+      "key": "display",
+      "title": "屏幕与显示",
+      "items": [
+        {
+          "key": "resolution",
+          "label": "当前显示模式分辨率",
+          "value": "1080 × 2248",
+          "source": "Display.mode",
+          "status": "AVAILABLE",
+          "note": null
+        },
+        {
+          "key": "densityDpi",
+          "label": "应用显示密度",
+          "value": "440 dpi",
+          "source": "DisplayMetrics.densityDpi",
+          "status": "AVAILABLE",
+          "note": null
+        },
+        {
+          "key": "density",
+          "label": "密度缩放",
+          "value": "2.75×",
+          "source": "DisplayMetrics.density",
+          "status": "AVAILABLE",
+          "note": null
+        },
+        {
+          "key": "fontScale",
+          "label": "字体缩放",
+          "value": "0.81×",
+          "source": "Configuration.fontScale",
+          "status": "AVAILABLE",
+          "note": null
+        },
+        {
+          "key": "refresh",
+          "label": "当前刷新率",
+          "value": "60.0 Hz",
+          "source": "Display.refreshRate",
+          "status": "AVAILABLE",
+          "note": null
+        },
+        {
+          "key": "modes",
+          "label": "支持的显示模式",
+          "value": "1080×2248 @ 60.0 Hz",
+          "source": "Display.supportedModes",
+          "status": "AVAILABLE",
+          "note": null
+        },
+        {
+          "key": "hdr",
+          "label": "HDR 能力",
+          "value": "HDR10 \/ HLG",
+          "source": "Display.hdrCapabilities",
+          "status": "AVAILABLE",
+          "note": "显示器公开的 HDR 类型，不等于当前内容正在以 HDR 播放。"
+        },
+        {
+          "key": "wideGamut",
+          "label": "广色域",
+          "value": "是",
+          "source": "Display.isWideColorGamut",
+          "status": "AVAILABLE",
+          "note": null
+        },
+        {
+          "key": "visibleDisplays",
+          "label": "可见显示器",
+          "value": "默认显示 · 1080×2248 · 60.000004 Hz",
+          "source": "DisplayManager.getDisplays",
+          "status": "AVAILABLE",
+          "note": "仅应用可见的显示，不等于物理屏幕数量。"
+        },
+        {
+          "key": "sizeEstimate",
+          "label": "屏幕尺寸（估算）",
+          "value": "6.2 英寸",
+          "source": "Display.mode \/ DisplayMetrics.xdpi,ydpi",
+          "status": "AVAILABLE",
+          "note": "由系统 DPI 标定推算，不是实测尺寸。"
+        }
+      ]
+    },
+    {
+      "key": "battery",
+      "title": "电池",
+      "items": [
+        {
+          "key": "present",
+          "label": "电池存在状态",
+          "value": "yes",
+          "source": "BatteryManager.EXTRA_PRESENT",
+          "status": "AVAILABLE",
+          "note": "仅使用广播明确返回的值，字段缺失不代表无电池。"
+        },
+        {
+          "key": "cycleCount",
+          "label": "电池循环次数",
+          "value": null,
+          "source": "BatteryManager.EXTRA_CYCLE_COUNT",
+          "status": "UNAVAILABLE",
+          "note": "公开循环次数字段需要 API 34。",
+          "reason": "INTERFACE_UNSUPPORTED"
+        },
+        {
+          "key": "level",
+          "label": "电量",
+          "value": "100%",
+          "source": "ACTION_BATTERY_CHANGED",
+          "status": "AVAILABLE",
+          "note": null
+        },
+        {
+          "key": "status",
+          "label": "充电状态",
+          "value": "已充满",
+          "source": "BatteryManager.EXTRA_STATUS",
+          "status": "AVAILABLE",
+          "note": null
+        },
+        {
+          "key": "plugged",
+          "label": "电源类型",
+          "value": "交流电",
+          "source": "BatteryManager.EXTRA_PLUGGED",
+          "status": "AVAILABLE",
+          "note": null
+        },
+        {
+          "key": "temperature",
+          "label": "电池温度",
+          "value": "25.0 °C",
+          "source": "BatteryManager.EXTRA_TEMPERATURE",
+          "status": "AVAILABLE",
+          "note": null
+        },
+        {
+          "key": "sysBatteryTemp",
+          "label": "电池驱动温度原值",
+          "value": null,
+          "source": "\/sys\/class\/power_supply\/battery\/temp",
+          "status": "RESTRICTED",
+          "note": "EACCES \/ errno=13 · Android 文件权限或系统策略拒绝普通应用访问。 其他候选：\/sys\/class\/power_supply\/bms\/temp: ACCESS_DENIED errno=13 依次尝试 \/sys\/class\/power_supply\/battery\/temp 与 \/sys\/class\/power_supply\/bms\/temp，均未取得驱动温度。公开温度 battery.temperature 已取得，可作对照。",
+          "reason": "ACCESS_DENIED",
+          "errno": 13
+        },
+        {
+          "key": "voltage",
+          "label": "电池电压",
+          "value": "4170 mV",
+          "source": "BatteryManager.EXTRA_VOLTAGE",
+          "status": "AVAILABLE",
+          "note": null
+        },
+        {
+          "key": "health",
+          "label": "电池健康状态",
+          "value": "良好",
+          "source": "BatteryManager.EXTRA_HEALTH",
+          "status": "AVAILABLE",
+          "note": null
+        },
+        {
+          "key": "capacityPercent",
+          "label": "系统电量百分比",
+          "value": "100%",
+          "source": "BatteryManager.BATTERY_PROPERTY_CAPACITY",
+          "status": "AVAILABLE",
+          "note": null
+        },
+        {
+          "key": "chargeCounter",
+          "label": "剩余电荷",
+          "value": "1817.6 mAh",
+          "source": "BatteryManager.BATTERY_PROPERTY_CHARGE_COUNTER",
+          "status": "AVAILABLE",
+          "note": "µAh 换算为 mAh；不是设计容量。"
+        },
+        {
+          "key": "energyCounter",
+          "label": "剩余能量",
+          "value": null,
+          "source": "BatteryManager.BATTERY_PROPERTY_ENERGY_COUNTER",
+          "status": "UNAVAILABLE",
+          "note": "能量接口返回不支持哨兵值。剩余电荷 mAh 是独立参数，不是能量 Wh。",
+          "reason": "INTERFACE_UNSUPPORTED"
+        },
+        {
+          "key": "energyEstimate",
+          "label": "剩余能量粗估（本机）",
+          "value": "约 7.58 Wh",
+          "source": "CHARGE_COUNTER × ACTION_BATTERY_CHANGED.voltage",
+          "status": "AVAILABLE",
+          "note": "剩余电荷乘采样电压，仅供参考；电压会变化，结果不等同于能量计，也不上传。"
+        },
+        {
+          "key": "currentAverage",
+          "label": "平均充放电电流",
+          "value": null,
+          "source": "BatteryManager.BATTERY_PROPERTY_CURRENT_AVERAGE",
+          "status": "UNAVAILABLE",
+          "note": "系统未提供平均电流属性；可查看独立的瞬时电流读数。",
+          "reason": "INTERFACE_UNSUPPORTED"
+        },
+        {
+          "key": "current",
+          "label": "充放电电流",
+          "value": "0.0 mA",
+          "source": "BatteryManager.BATTERY_PROPERTY_CURRENT_NOW",
+          "status": "AVAILABLE",
+          "note": "Android API 以 µA 返回，显示为 mA； |电流| 超过 30 A 的异常样本不展示，不改写正负号。"
+        },
+        {
+          "key": "powerSaver",
+          "label": "省电模式",
+          "value": "关闭",
+          "source": "PowerManager.isPowerSaveMode",
+          "status": "AVAILABLE",
+          "note": null
+        },
+        {
+          "key": "thermalStatus",
+          "label": "系统热状态",
+          "value": "正常",
+          "source": "PowerManager.currentThermalStatus",
+          "status": "AVAILABLE",
+          "note": "系统热管理分级，不代表 CPU 温度。"
+        }
+      ]
+    },
+    {
+      "key": "sensors",
+      "title": "传感器",
+      "items": [
+        {
+          "key": "count",
+          "label": "传感器数量",
+          "value": "39",
+          "source": "SensorManager.getSensorList",
+          "status": "AVAILABLE",
+          "note": null
+        },
+        {
+          "key": "reportingModes",
+          "label": "传感器上报模式分布",
+          "value": "15\/16\/5\/3\/0",
+          "source": "SensorManager.getSensorList",
+          "status": "AVAILABLE",
+          "note": "连续 \/ 变化触发 \/ 一次性 \/ 特殊触发 \/ 其他，单位为公开传感器条目数。"
+        },
+        {
+          "key": "fifoCount",
+          "label": "支持 FIFO 批处理的传感器数",
+          "value": "32",
+          "source": "SensorManager.getSensorList",
+          "status": "AVAILABLE",
+          "note": "按 Sensor.getFifoMaxEventCount 大于 0 计数；未发起传感器采样。"
+        },
+        {
+          "key": "directChannelTypes",
+          "label": "传感器直通通道类型",
+          "value": "hardware_buffer",
+          "source": "SensorManager.getSensorList",
+          "status": "AVAILABLE",
+          "note": "至少一个公开传感器声明的能力；不创建直通通道。"
+        },
+        {
+          "key": "typeWakeupSummary",
+          "label": "传感器类型与唤醒能力",
+          "value": "1:1\/0 · 2:1\/0 · 3:1\/0 · 4:1\/0 · 5:2\/1 · 6:1\/0 · 8:2\/1 · 9:1\/0 · 10:1\/0 · 11:1\/0 · 14:1\/0 · 15:1\/0 · 16:1\/0 · 17:1\/1 · 18:2\/1 · 19:2\/1 · 20:1\/0 · 22:1\/1 · 27:2\/1 · 29:2\/1 · 30:2\/1 · 35:1\/0 · 其他 10 项",
+          "source": "SensorManager.getSensorList \/ Sensor.isWakeUpSensor",
+          "status": "AVAILABLE",
+          "note": "格式为 Android 类型编号:公开条目数\/可唤醒条目数，最多列出 24 类。"
+        },
+        {
+          "key": "sensor_0",
+          "label": "NonUi  Wakeup",
+          "value": "XiaoMi · xiaomi.sensor.nonui (33171027) · 版本 1\n量程 1.0 · 分辨率 0.01 · 功耗 0.001 mA · 最小延迟 0 µs",
+          "source": "SensorManager.getSensorList(TYPE_ALL)",
+          "status": "AVAILABLE",
+          "note": "最小延迟为采样能力；0 µs 可能表示按变化触发。量程和分辨率单位依传感器类型。"
+        },
+        {
+          "key": "sensor_1",
+          "label": "NonUi  Non-wakeup",
+          "value": "XiaoMi · xiaomi.sensor.nonui (33171027) · 版本 1\n量程 1.0 · 分辨率 0.01 · 功耗 0.001 mA · 最小延迟 0 µs",
+          "source": "SensorManager.getSensorList(TYPE_ALL)",
+          "status": "AVAILABLE",
+          "note": "最小延迟为采样能力；0 µs 可能表示按变化触发。量程和分辨率单位依传感器类型。"
+        },
+        {
+          "key": "sensor_2",
+          "label": "tmd2725 Proximity Sensor Wakeup",
+          "value": "ams AG · android.sensor.proximity (8) · 版本 256\n量程 5.0 · 分辨率 0.01 · 功耗 1.0 mA · 最小延迟 0 µs",
+          "source": "SensorManager.getSensorList(TYPE_ALL)",
+          "status": "AVAILABLE",
+          "note": "最小延迟为采样能力；0 µs 可能表示按变化触发。量程和分辨率单位依传感器类型。"
+        },
+        {
+          "key": "sensor_3",
+          "label": "tmd2725 Proximity Sensor Non-wakeup",
+          "value": "ams AG · android.sensor.proximity (8) · 版本 256\n量程 5.0 · 分辨率 0.01 · 功耗 1.0 mA · 最小延迟 0 µs",
+          "source": "SensorManager.getSensorList(TYPE_ALL)",
+          "status": "AVAILABLE",
+          "note": "最小延迟为采样能力；0 µs 可能表示按变化触发。量程和分辨率单位依传感器类型。"
+        },
+        {
+          "key": "sensor_4",
+          "label": "pedometer  Wakeup",
+          "value": "qualcomm · android.sensor.step_counter (19) · 版本 1\n量程 4.2949673E9 · 分辨率 1.0 · 功耗 0.15 mA · 最小延迟 0 µs",
+          "source": "SensorManager.getSensorList(TYPE_ALL)",
+          "status": "AVAILABLE",
+          "note": "最小延迟为采样能力；0 µs 可能表示按变化触发。量程和分辨率单位依传感器类型。"
+        },
+        {
+          "key": "sensor_5",
+          "label": "pedometer  Non-wakeup",
+          "value": "qualcomm · android.sensor.step_counter (19) · 版本 1\n量程 4.2949673E9 · 分辨率 1.0 · 功耗 0.15 mA · 最小延迟 0 µs",
+          "source": "SensorManager.getSensorList(TYPE_ALL)",
+          "status": "AVAILABLE",
+          "note": "最小延迟为采样能力；0 µs 可能表示按变化触发。量程和分辨率单位依传感器类型。"
+        },
+        {
+          "key": "sensor_6",
+          "label": "stationary_detect_wakeup",
+          "value": "qualcomm · android.sensor.stationary_detect (29) · 版本 1\n量程 1.0 · 分辨率 1.0 · 功耗 0.025 mA · 最小延迟 -1 µs",
+          "source": "SensorManager.getSensorList(TYPE_ALL)",
+          "status": "AVAILABLE",
+          "note": "最小延迟为采样能力；0 µs 可能表示按变化触发。量程和分辨率单位依传感器类型。"
+        },
+        {
+          "key": "sensor_7",
+          "label": "stationary_detect",
+          "value": "qualcomm · android.sensor.stationary_detect (29) · 版本 1\n量程 1.0 · 分辨率 1.0 · 功耗 0.025 mA · 最小延迟 -1 µs",
+          "source": "SensorManager.getSensorList(TYPE_ALL)",
+          "status": "AVAILABLE",
+          "note": "最小延迟为采样能力；0 µs 可能表示按变化触发。量程和分辨率单位依传感器类型。"
+        },
+        {
+          "key": "sensor_8",
+          "label": "bosch_bmp285 Pressure Sensor Non-wakeup",
+          "value": "Bosch · android.sensor.pressure (6) · 版本 8728\n量程 1100.0 · 分辨率 0.01 · 功耗 0.72 mA · 最小延迟 40000 µs",
+          "source": "SensorManager.getSensorList(TYPE_ALL)",
+          "status": "AVAILABLE",
+          "note": "最小延迟为采样能力；0 µs 可能表示按变化触发。量程和分辨率单位依传感器类型。"
+        },
+        {
+          "key": "sensor_9",
+          "label": "Game Rotation Vector  Non-wakeup",
+          "value": "qualcomm · android.sensor.game_rotation_vector (15) · 版本 1\n量程 1.0 · 分辨率 0.01 · 功耗 0.515 mA · 最小延迟 5000 µs",
+          "source": "SensorManager.getSensorList(TYPE_ALL)",
+          "status": "AVAILABLE",
+          "note": "最小延迟为采样能力；0 µs 可能表示按变化触发。量程和分辨率单位依传感器类型。"
+        },
+        {
+          "key": "sensor_10",
+          "label": "har_wakeup",
+          "value": "xiaomi · xiaomi.sensor.har (33171070) · 版本 1\n量程 1.0 · 分辨率 1.0 · 功耗 0.001 mA · 最小延迟 0 µs",
+          "source": "SensorManager.getSensorList(TYPE_ALL)",
+          "status": "AVAILABLE",
+          "note": "最小延迟为采样能力；0 µs 可能表示按变化触发。量程和分辨率单位依传感器类型。"
+        },
+        {
+          "key": "sensor_11",
+          "label": "har",
+          "value": "xiaomi · xiaomi.sensor.har (33171070) · 版本 1\n量程 1.0 · 分辨率 1.0 · 功耗 0.001 mA · 最小延迟 0 µs",
+          "source": "SensorManager.getSensorList(TYPE_ALL)",
+          "status": "AVAILABLE",
+          "note": "最小延迟为采样能力；0 µs 可能表示按变化触发。量程和分辨率单位依传感器类型。"
+        },
+        {
+          "key": "sensor_12",
+          "label": "sns_tilt  Wakeup",
+          "value": "qualcomm · android.sensor.tilt_detector (22) · 版本 1\n量程 1.0 · 分辨率 1.0 · 功耗 0.025 mA · 最小延迟 0 µs",
+          "source": "SensorManager.getSensorList(TYPE_ALL)",
+          "status": "AVAILABLE",
+          "note": "最小延迟为采样能力；0 µs 可能表示按变化触发。量程和分辨率单位依传感器类型。"
+        },
+        {
+          "key": "sensor_13",
+          "label": "sns_smd  Wakeup",
+          "value": "qualcomm · android.sensor.significant_motion (17) · 版本 1\n量程 1.0 · 分辨率 1.0 · 功耗 0.025 mA · 最小延迟 -1 µs",
+          "source": "SensorManager.getSensorList(TYPE_ALL)",
+          "status": "AVAILABLE",
+          "note": "最小延迟为采样能力；0 µs 可能表示按变化触发。量程和分辨率单位依传感器类型。"
+        },
+        {
+          "key": "sensor_14",
+          "label": "Aod  Wakeup",
+          "value": "XiaoMi · xiaomi.sensor.aod (33171029) · 版本 1\n量程 1.0 · 分辨率 0.01 · 功耗 0.001 mA · 最小延迟 0 µs",
+          "source": "SensorManager.getSensorList(TYPE_ALL)",
+          "status": "AVAILABLE",
+          "note": "最小延迟为采样能力；0 µs 可能表示按变化触发。量程和分辨率单位依传感器类型。"
+        },
+        {
+          "key": "sensor_15",
+          "label": "Aod  Non-wakeup",
+          "value": "XiaoMi · xiaomi.sensor.aod (33171029) · 版本 1\n量程 1.0 · 分辨率 0.01 · 功耗 0.001 mA · 最小延迟 0 µs",
+          "source": "SensorManager.getSensorList(TYPE_ALL)",
+          "status": "AVAILABLE",
+          "note": "最小延迟为采样能力；0 µs 可能表示按变化触发。量程和分辨率单位依传感器类型。"
+        },
+        {
+          "key": "sensor_16",
+          "label": "device_orient  Wakeup",
+          "value": "xiaomi · android.sensor.device_orientation (27) · 版本 1\n量程 1.0 · 分辨率 1.0 · 功耗 0.001 mA · 最小延迟 0 µs",
+          "source": "SensorManager.getSensorList(TYPE_ALL)",
+          "status": "AVAILABLE",
+          "note": "最小延迟为采样能力；0 µs 可能表示按变化触发。量程和分辨率单位依传感器类型。"
+        },
+        {
+          "key": "sensor_17",
+          "label": "device_orient  Non-wakeup",
+          "value": "xiaomi · android.sensor.device_orientation (27) · 版本 1\n量程 1.0 · 分辨率 1.0 · 功耗 0.001 mA · 最小延迟 0 µs",
+          "source": "SensorManager.getSensorList(TYPE_ALL)",
+          "status": "AVAILABLE",
+          "note": "最小延迟为采样能力；0 µs 可能表示按变化触发。量程和分辨率单位依传感器类型。"
+        },
+        {
+          "key": "sensor_18",
+          "label": "ak0991x Magnetometer-Uncalibrated Non-wakeup",
+          "value": "akm · android.sensor.magnetic_field_uncalibrated (14) · 版本 10058\n量程 4912.0 · 分辨率 0.15 · 功耗 1.1 mA · 最小延迟 10000 µs",
+          "source": "SensorManager.getSensorList(TYPE_ALL)",
+          "status": "AVAILABLE",
+          "note": "最小延迟为采样能力；0 µs 可能表示按变化触发。量程和分辨率单位依传感器类型。"
+        },
+        {
+          "key": "sensor_19",
+          "label": "gravity  Non-wakeup",
+          "value": "qualcomm · android.sensor.gravity (9) · 版本 1\n量程 156.99008 · 分辨率 0.01 · 功耗 0.515 mA · 最小延迟 5000 µs",
+          "source": "SensorManager.getSensorList(TYPE_ALL)",
+          "status": "AVAILABLE",
+          "note": "最小延迟为采样能力；0 µs 可能表示按变化触发。量程和分辨率单位依传感器类型。"
+        },
+        {
+          "key": "sensor_20",
+          "label": "sns_geomag_rv  Non-wakeup",
+          "value": "qualcomm · android.sensor.geomagnetic_rotation_vector (20) · 版本 1\n量程 1.0 · 分辨率 0.01 · 功耗 1.05 mA · 最小延迟 10000 µs",
+          "source": "SensorManager.getSensorList(TYPE_ALL)",
+          "status": "AVAILABLE",
+          "note": "最小延迟为采样能力；0 µs 可能表示按变化触发。量程和分辨率单位依传感器类型。"
+        },
+        {
+          "key": "sensor_21",
+          "label": "tmd2725  Non-wakeup",
+          "value": "ams AG · xiaomi.sensor.ambientlight.factory (33171007) · 版本 256\n量程 1.0 · 分辨率 0.01 · 功耗 0.08 mA · 最小延迟 10000 µs",
+          "source": "SensorManager.getSensorList(TYPE_ALL)",
+          "status": "AVAILABLE",
+          "note": "最小延迟为采样能力；0 µs 可能表示按变化触发。量程和分辨率单位依传感器类型。"
+        },
+        {
+          "key": "sensor_22",
+          "label": "tmd2725 Ambient Light Sensor Wakeup",
+          "value": "ams AG · android.sensor.light (5) · 版本 256\n量程 1.0 · 分辨率 0.01 · 功耗 0.08 mA · 最小延迟 0 µs",
+          "source": "SensorManager.getSensorList(TYPE_ALL)",
+          "status": "AVAILABLE",
+          "note": "最小延迟为采样能力；0 µs 可能表示按变化触发。量程和分辨率单位依传感器类型。"
+        },
+        {
+          "key": "sensor_23",
+          "label": "tmd2725 Ambient Light Sensor Non-wakeup",
+          "value": "ams AG · android.sensor.light (5) · 版本 256\n量程 1.0 · 分辨率 0.01 · 功耗 0.08 mA · 最小延迟 0 µs",
+          "source": "SensorManager.getSensorList(TYPE_ALL)",
+          "status": "AVAILABLE",
+          "note": "最小延迟为采样能力；0 µs 可能表示按变化触发。量程和分辨率单位依传感器类型。"
+        },
+        {
+          "key": "sensor_24",
+          "label": "pickup  Wakeup",
+          "value": "XiaoMi · xiaomi.sensor.pickup (33171036) · 版本 1\n量程 1.0 · 分辨率 0.01 · 功耗 0.001 mA · 最小延迟 0 µs",
+          "source": "SensorManager.getSensorList(TYPE_ALL)",
+          "status": "AVAILABLE",
+          "note": "最小延迟为采样能力；0 µs 可能表示按变化触发。量程和分辨率单位依传感器类型。"
+        },
+        {
+          "key": "sensor_25",
+          "label": "pickup  Non-wakeup",
+          "value": "XiaoMi · xiaomi.sensor.pickup (33171036) · 版本 1\n量程 1.0 · 分辨率 0.01 · 功耗 0.001 mA · 最小延迟 0 µs",
+          "source": "SensorManager.getSensorList(TYPE_ALL)",
+          "status": "AVAILABLE",
+          "note": "最小延迟为采样能力；0 µs 可能表示按变化触发。量程和分辨率单位依传感器类型。"
+        },
+        {
+          "key": "sensor_26",
+          "label": "tmd2725  Non-wakeup",
+          "value": "ams AG · xiaomi.sensor.proxmity.factory (33171005) · 版本 256\n量程 1.0 · 分辨率 0.01 · 功耗 1.0 mA · 最小延迟 10000 µs",
+          "source": "SensorManager.getSensorList(TYPE_ALL)",
+          "status": "AVAILABLE",
+          "note": "最小延迟为采样能力；0 µs 可能表示按变化触发。量程和分辨率单位依传感器类型。"
+        },
+        {
+          "key": "sensor_27",
+          "label": "orientation  Non-wakeup",
+          "value": "xiaomi · android.sensor.orientation (3) · 版本 1\n量程 1.0 · 分辨率 0.01 · 功耗 0.001 mA · 最小延迟 5000 µs",
+          "source": "SensorManager.getSensorList(TYPE_ALL)",
+          "status": "AVAILABLE",
+          "note": "最小延迟为采样能力；0 µs 可能表示按变化触发。量程和分辨率单位依传感器类型。"
+        },
+        {
+          "key": "sensor_28",
+          "label": "pedometer  Wakeup",
+          "value": "qualcomm · android.sensor.step_detector (18) · 版本 1\n量程 1.0 · 分辨率 1.0 · 功耗 0.15 mA · 最小延迟 0 µs",
+          "source": "SensorManager.getSensorList(TYPE_ALL)",
+          "status": "AVAILABLE",
+          "note": "最小延迟为采样能力；0 µs 可能表示按变化触发。量程和分辨率单位依传感器类型。"
+        },
+        {
+          "key": "sensor_29",
+          "label": "pedometer  Non-wakeup",
+          "value": "qualcomm · android.sensor.step_detector (18) · 版本 1\n量程 1.0 · 分辨率 1.0 · 功耗 0.15 mA · 最小延迟 0 µs",
+          "source": "SensorManager.getSensorList(TYPE_ALL)",
+          "status": "AVAILABLE",
+          "note": "最小延迟为采样能力；0 µs 可能表示按变化触发。量程和分辨率单位依传感器类型。"
+        },
+        {
+          "key": "sensor_30",
+          "label": "ICM20690",
+          "value": "qualcomm · android.sensor.gyroscope_uncalibrated (16) · 版本 257\n量程 17.452778 · 分辨率 5.3265877E-4 · 功耗 2.9 mA · 最小延迟 2500 µs",
+          "source": "SensorManager.getSensorList(TYPE_ALL)",
+          "status": "AVAILABLE",
+          "note": "最小延迟为采样能力；0 µs 可能表示按变化触发。量程和分辨率单位依传感器类型。"
+        },
+        {
+          "key": "sensor_31",
+          "label": "ICM20690",
+          "value": "qualcomm · android.sensor.gyroscope (4) · 版本 257\n量程 17.452778 · 分辨率 5.3265877E-4 · 功耗 2.9 mA · 最小延迟 2500 µs",
+          "source": "SensorManager.getSensorList(TYPE_ALL)",
+          "status": "AVAILABLE",
+          "note": "最小延迟为采样能力；0 µs 可能表示按变化触发。量程和分辨率单位依传感器类型。"
+        },
+        {
+          "key": "sensor_32",
+          "label": "ICM20690",
+          "value": "qualcomm · android.sensor.accelerometer (1) · 版本 257\n量程 78.4532 · 分辨率 0.0023938033 · 功耗 0.44 mA · 最小延迟 2500 µs",
+          "source": "SensorManager.getSensorList(TYPE_ALL)",
+          "status": "AVAILABLE",
+          "note": "最小延迟为采样能力；0 µs 可能表示按变化触发。量程和分辨率单位依传感器类型。"
+        },
+        {
+          "key": "sensor_33",
+          "label": "rotation vector  Non-wakeup",
+          "value": "xiaomi · android.sensor.rotation_vector (11) · 版本 1\n量程 1.0 · 分辨率 0.01 · 功耗 0.001 mA · 最小延迟 5000 µs",
+          "source": "SensorManager.getSensorList(TYPE_ALL)",
+          "status": "AVAILABLE",
+          "note": "最小延迟为采样能力；0 µs 可能表示按变化触发。量程和分辨率单位依传感器类型。"
+        },
+        {
+          "key": "sensor_34",
+          "label": "linear_acceleration",
+          "value": "qualcomm · android.sensor.linear_acceleration (10) · 版本 1\n量程 156.99008 · 分辨率 0.01 · 功耗 0.515 mA · 最小延迟 5000 µs",
+          "source": "SensorManager.getSensorList(TYPE_ALL)",
+          "status": "AVAILABLE",
+          "note": "最小延迟为采样能力；0 µs 可能表示按变化触发。量程和分辨率单位依传感器类型。"
+        },
+        {
+          "key": "sensor_35",
+          "label": "ak0991x Magnetometer Non-wakeup",
+          "value": "akm · android.sensor.magnetic_field (2) · 版本 10058\n量程 4912.0 · 分辨率 0.15 · 功耗 1.1 mA · 最小延迟 10000 µs",
+          "source": "SensorManager.getSensorList(TYPE_ALL)",
+          "status": "AVAILABLE",
+          "note": "最小延迟为采样能力；0 µs 可能表示按变化触发。量程和分辨率单位依传感器类型。"
+        },
+        {
+          "key": "sensor_36",
+          "label": "ICM20690",
+          "value": "qualcomm · android.sensor.accelerometer_uncalibrated (35) · 版本 257\n量程 78.4532 · 分辨率 0.0023938033 · 功耗 0.44 mA · 最小延迟 2500 µs",
+          "source": "SensorManager.getSensorList(TYPE_ALL)",
+          "status": "AVAILABLE",
+          "note": "最小延迟为采样能力；0 µs 可能表示按变化触发。量程和分辨率单位依传感器类型。"
+        },
+        {
+          "key": "sensor_37",
+          "label": "motion_detect_wakeup",
+          "value": "qualcomm · android.sensor.motion_detect (30) · 版本 1\n量程 1.0 · 分辨率 1.0 · 功耗 0.025 mA · 最小延迟 -1 µs",
+          "source": "SensorManager.getSensorList(TYPE_ALL)",
+          "status": "AVAILABLE",
+          "note": "最小延迟为采样能力；0 µs 可能表示按变化触发。量程和分辨率单位依传感器类型。"
+        },
+        {
+          "key": "sensor_38",
+          "label": "motion_detect",
+          "value": "qualcomm · android.sensor.motion_detect (30) · 版本 1\n量程 1.0 · 分辨率 1.0 · 功耗 0.025 mA · 最小延迟 -1 µs",
+          "source": "SensorManager.getSensorList(TYPE_ALL)",
+          "status": "AVAILABLE",
+          "note": "最小延迟为采样能力；0 µs 可能表示按变化触发。量程和分辨率单位依传感器类型。"
+        }
+      ]
+    },
+    {
+      "key": "network",
+      "title": "网络与 Wi-Fi",
+      "items": [
+        {
+          "key": "transport",
+          "label": "当前默认网络",
+          "value": "Wi-Fi",
+          "source": "ConnectivityManager.NetworkCapabilities",
+          "status": "AVAILABLE",
+          "note": "默认路由可能是 VPN，不等于蜂窝注册状态。"
+        },
+        {
+          "key": "visibleTransports",
+          "label": "应用可见网络",
+          "value": "Wi-Fi \/ 蜂窝网络",
+          "source": "ConnectivityManager.getAllNetworks \/ getNetworkCapabilities",
+          "status": "AVAILABLE",
+          "note": "并列展示可见链路类型，不等于默认路由；蜂窝注册或 SIM 就绪不保证 App 可见蜂窝链路。"
+        },
+        {
+          "key": "wifiRouteRole",
+          "label": "Wi-Fi 路由角色",
+          "value": "默认网络",
+          "source": "ConnectivityManager.NetworkCapabilities",
+          "status": "AVAILABLE",
+          "note": "仅表示应用当前观测到的默认网络与 Wi-Fi 链路关系。"
+        },
+        {
+          "key": "wifiFrequency",
+          "label": "Wi-Fi 主链路频率",
+          "value": "5220 MHz",
+          "source": "WifiManager.connectionInfo → WifiInfo.frequency",
+          "status": "AVAILABLE",
+          "note": "多链路连接仅展示系统在当前快照返回的链路。"
+        },
+        {
+          "key": "wifiBandChannel",
+          "label": "Wi-Fi 频段 \/ 信道",
+          "value": "5 GHz \/ 信道 44",
+          "source": "WifiManager.connectionInfo → WifiInfo.frequency",
+          "status": "AVAILABLE",
+          "note": "由频率换算，表示主信道，不是信道宽度。"
+        },
+        {
+          "key": "wifiRssi",
+          "label": "Wi-Fi 信号 RSSI",
+          "value": "-46 dBm",
+          "source": "WifiManager.connectionInfo → WifiInfo.rssi",
+          "status": "AVAILABLE",
+          "note": null
+        },
+        {
+          "key": "wifiLinkSpeed",
+          "label": "Wi-Fi 协商速率",
+          "value": "接收 866 Mbps \/ 发送 866 Mbps",
+          "source": "WifiManager.connectionInfo → WifiInfo.linkSpeed",
+          "status": "AVAILABLE",
+          "note": "链路协商值，不代表互联网吞吐量。"
+        },
+        {
+          "key": "internetValidation",
+          "label": "互联网验证",
+          "value": "系统已验证",
+          "source": "ConnectivityManager.NetworkCapabilities.VALIDATED",
+          "status": "AVAILABLE",
+          "note": "Android 的验证结果；SigMark 不主动发起连接。"
+        },
+        {
+          "key": "metered",
+          "label": "计费属性",
+          "value": "不计量",
+          "source": "ConnectivityManager.NetworkCapabilities.NOT_METERED",
+          "status": "AVAILABLE",
+          "note": null
+        },
+        {
+          "key": "captivePortal",
+          "label": "登录门户",
+          "value": "系统未标记登录门户",
+          "source": "ConnectivityManager.NetworkCapabilities.CAPTIVE_PORTAL",
+          "status": "AVAILABLE",
+          "note": null
+        },
+        {
+          "key": "bandwidthEstimate",
+          "label": "系统带宽估算",
+          "value": "下行 1048576 kbps \/ 上行 1048576 kbps",
+          "source": "ConnectivityManager.NetworkCapabilities.linkDownstream\/UpstreamBandwidthKbps",
+          "status": "AVAILABLE",
+          "note": "不是测速结果。"
+        },
+        {
+          "key": "defaultRouteFamilies",
+          "label": "默认路由地址族",
+          "value": "IPv4",
+          "source": "LinkProperties.routes",
+          "status": "AVAILABLE",
+          "note": "仅显示默认网络公布的 IPv4 \/ IPv6 路由类型，不记录 IP 或网关。"
+        },
+        {
+          "key": "privateDnsActive",
+          "label": "专用 DNS 状态",
+          "value": "未启用",
+          "source": "LinkProperties.isPrivateDnsActive",
+          "status": "AVAILABLE",
+          "note": "当前默认网络的系统状态，不记录 DNS 服务器地址或主机名。"
+        },
+        {
+          "key": "linkMtu",
+          "label": "链路 MTU",
+          "value": "1500 字节",
+          "source": "LinkProperties.interfaceName → NetworkInterface.mtu",
+          "status": "AVAILABLE",
+          "note": "优先读取 Android 公布的 MTU，随后尝试当前网络接口的 MTU。"
+        }
+      ]
+    },
+    {
+      "key": "cellular",
+      "title": "移动网络",
+      "items": [
+        {
+          "key": "simState",
+          "label": "SIM 卡槽状态",
+          "value": "卡槽 1：就绪 \/ 卡槽 2：未检测到 SIM",
+          "source": "TelephonyManager.getSimState(slotIndex)",
+          "status": "AVAILABLE",
+          "note": "只显示逻辑卡槽状态，不读取号码或卡标识。不用 SIM 就绪推定已接入蜂窝网络。"
+        },
+        {
+          "key": "defaultDataSlot",
+          "label": "默认移动数据卡槽",
+          "value": "卡槽 1",
+          "source": "SubscriptionManager.getSlotIndex \/ activeSubscriptionInfoList",
+          "status": "AVAILABLE",
+          "note": "只记录默认数据订阅对应的逻辑卡槽。"
+        },
+        {
+          "key": "slotService",
+          "label": "各卡槽服务状态",
+          "value": null,
+          "source": "SubscriptionManager.activeSubscriptionInfoList → TelephonyManager.serviceState",
+          "status": "UNAVAILABLE",
+          "note": "系统未列出可见活动订阅。",
+          "reason": "NOT_REPORTED"
+        },
+        {
+          "key": "operator",
+          "label": "当前注册运营商",
+          "value": "中国电信",
+          "source": "TelephonyManager.networkOperatorName",
+          "status": "AVAILABLE",
+          "note": "默认数据订阅；漫游时可能和 SIM 运营商不同。"
+        },
+        {
+          "key": "plmn",
+          "label": "运营商代码 MCC\/MNC",
+          "value": "46011",
+          "source": "TelephonyManager.networkOperator",
+          "status": "AVAILABLE",
+          "note": null
+        },
+        {
+          "key": "simOperator",
+          "label": "SIM 运营商",
+          "value": "中国电信",
+          "source": "TelephonyManager.simOperatorName",
+          "status": "AVAILABLE",
+          "note": "由默认数据订阅的 SIM 上报。"
+        },
+        {
+          "key": "dataState",
+          "label": "蜂窝数据状态",
+          "value": "未连接",
+          "source": "TelephonyManager.dataState",
+          "status": "AVAILABLE",
+          "note": "即使蜂窝已注册，默认上网也可能走 Wi-Fi。"
+        },
+        {
+          "key": "mobileDataToggle",
+          "label": "移动数据开关",
+          "value": "关闭",
+          "source": "TelephonyManager.isDataEnabled",
+          "status": "AVAILABLE",
+          "note": "此开关与当前是否通过蜂窝上网是两回事。"
+        },
+        {
+          "key": "roaming",
+          "label": "漫游状态",
+          "value": "未漫游",
+          "source": "TelephonyManager.isNetworkRoaming",
+          "status": "AVAILABLE",
+          "note": null
+        },
+        {
+          "key": "dataRat",
+          "label": "蜂窝数据制式",
+          "value": null,
+          "source": "TelephonyManager.dataNetworkType",
+          "status": "UNAVAILABLE",
+          "note": "系统未返回有效值。 调制解调器的数据制式；不等于状态栏 5G 图标或 NSA 判断。",
+          "reason": "NOT_REPORTED"
+        },
+        {
+          "key": "modemSignalLevel",
+          "label": "调制解调器信号等级",
+          "value": "3 \/ 4",
+          "source": "TelephonyManager.signalStrength.level",
+          "status": "AVAILABLE",
+          "note": "系统综合等级，不是 dBm。"
+        },
+        {
+          "key": "dataSubscriptionService",
+          "label": "默认数据卡服务状态",
+          "value": null,
+          "source": "TelephonyManager.serviceState",
+          "status": "UNAVAILABLE",
+          "note": "系统没有提供可用数据。",
+          "reason": "NOT_REPORTED"
+        },
+        {
+          "key": "carrierBandwidths",
+          "label": "订阅载波带宽（补充）",
+          "value": null,
+          "source": "TelephonyManager.serviceState.cellBandwidths",
+          "status": "UNAVAILABLE",
+          "note": "系统没有提供可用数据。",
+          "reason": "NOT_REPORTED"
+        },
+        {
+          "key": "cellDiagnostics",
+          "label": "小区注册与制式",
+          "value": "LTE",
+          "source": "TelephonyManager.allCellInfo",
+          "status": "AVAILABLE",
+          "note": "设备范围小区数据；每制式显示最新一条，不归属到某张 SIM；NSA 辅小区可能缺失。"
+        },
+        {
+          "key": "cellLTEBands",
+          "label": "LTE 频段",
+          "value": "B3",
+          "source": "EARFCN → 3GPP TS 36.101",
+          "status": "AVAILABLE",
+          "note": "系统频段缺失时，由公开信道号换算已知下行频段。"
+        },
+        {
+          "key": "cellLTEBandRange",
+          "label": "LTE 频段下行范围",
+          "value": "B3：1805–1880 MHz",
+          "source": "EARFCN → 3GPP TS 36.101 \/ 频段标准范围",
+          "status": "AVAILABLE",
+          "note": "此范围表示频段上下界。"
+        },
+        {
+          "key": "cellLTEChannel",
+          "label": "LTE 信道号 EARFCN",
+          "value": "1600",
+          "source": "TelephonyManager.allCellInfo.CellIdentityLte.earfcn",
+          "status": "AVAILABLE",
+          "note": "采样距本次读取约 7337 秒。"
+        },
+        {
+          "key": "cellLTEFrequency",
+          "label": "LTE 下行参考频率",
+          "value": "1845.000 MHz",
+          "source": "EARFCN → 3GPP TS 36.101",
+          "status": "AVAILABLE",
+          "note": "仅转换内置常见频段。"
+        },
+        {
+          "key": "cellLTEBandwidth",
+          "label": "LTE 信道带宽",
+          "value": null,
+          "source": "TelephonyManager.allCellInfo.CellIdentityLte.bandwidth",
+          "status": "UNAVAILABLE",
+          "note": "采样距本次读取约 7337 秒。 已读取 LTE 样本，但系统未提供有效带宽。可在蜂窝连接正常时手动刷新。",
+          "reason": "MODEM_NOT_REPORTED"
+        },
+        {
+          "key": "cellLTESignal",
+          "label": "LTE 无线信号",
+          "value": "RSRP -90 dBm \/ RSRQ -7 dB",
+          "source": "TelephonyManager.allCellInfo.CellSignalStrengthLte",
+          "status": "AVAILABLE",
+          "note": "采样距本次读取约 7337 秒。"
+        }
+      ]
+    },
+    {
+      "key": "runtime",
+      "title": "系统能力与运行时",
+      "items": [
+        {
+          "key": "featureCount",
+          "label": "系统特性数量",
+          "value": "81",
+          "source": "PackageManager.systemAvailableFeatures",
+          "status": "AVAILABLE",
+          "note": null
+        },
+        {
+          "key": "featureList",
+          "label": "系统特性列表",
+          "value": "android.hardware.audio.low_latency\nandroid.hardware.audio.output\nandroid.hardware.audio.pro\nandroid.hardware.bluetooth\nandroid.hardware.bluetooth_le\nandroid.hardware.camera\nandroid.hardware.camera.any\nandroid.hardware.camera.autofocus\nandroid.hardware.camera.capability.manual_post_processing\nandroid.hardware.camera.capability.manual_sensor\nandroid.hardware.camera.capability.raw\nandroid.hardware.camera.flash\nandroid.hardware.camera.front\nandroid.hardware.camera.level.full\nandroid.hardware.ethernet\nandroid.hardware.faketouch\nandroid.hardware.fingerprint\nandroid.hardware.location\nandroid.hardware.location.gps\nandroid.hardware.location.network\nandroid.hardware.microphone\nandroid.hardware.nfc\nandroid.hardware.nfc.any\nandroid.hardware.nfc.ese\nandroid.hardware.nfc.hce\nandroid.hardware.nfc.uicc\nandroid.hardware.opengles.aep\nandroid.hardware.ram.normal\nandroid.hardware.screen.landscape\nandroid.hardware.screen.portrait\nandroid.hardware.sensor.accelerometer\nandroid.hardware.sensor.barometer\nandroid.hardware.sensor.compass\nandroid.hardware.sensor.gyroscope\nandroid.hardware.sensor.hifi_sensors\nandroid.hardware.sensor.light\nandroid.hardware.sensor.proximity\nandroid.hardware.sensor.stepcounter\nandroid.hardware.sensor.stepdetector\nandroid.hardware.telephony\nandroid.hardware.telephony.cdma\nandroid.hardware.telephony.gsm\nandroid.hardware.telephony.ims\nandroid.hardware.touchscreen\nandroid.hardware.touchscreen.multitouch\nandroid.hardware.touchscreen.multitouch.distinct\nandroid.hardware.touchscreen.multitouch.jazzhand\nandroid.hardware.usb.accessory\nandroid.hardware.usb.host\nandroid.hardware.vulkan.compute\nandroid.hardware.vulkan.level · v1\nandroid.hardware.vulkan.version · v4198400\nandroid.hardware.wifi\nandroid.hardware.wifi.direct\nandroid.hardware.wifi.passpoint\nandroid.software.activities_on_secondary_displays\nandroid.software.app_widgets\nandroid.software.autofill\nandroid.software.backup\nandroid.software.cant_save_state\nandroid.software.companion_device_setup\nandroid.software.connectionservice\nandroid.software.cts\nandroid.software.device_admin\nandroid.software.file_based_encryption\nandroid.software.home_screen\nandroid.software.input_methods\nandroid.software.ipsec_tunnels\nandroid.software.live_wallpaper\nandroid.software.managed_users\nandroid.software.midi\nandroid.software.picture_in_picture\nandroid.software.print\nandroid.software.secure_lock_screen\nandroid.software.securely_removes_users\nandroid.software.sip\nandroid.software.sip.voip\nandroid.software.verified_boot\nandroid.software.voice_recognizers\nandroid.software.webview\ncom.nxp.mifare",
+          "source": "PackageManager.systemAvailableFeatures",
+          "status": "AVAILABLE",
+          "note": null
+        },
+        {
+          "key": "openGlEs",
+          "label": "声明的 OpenGL ES 版本",
+          "value": "3.2",
+          "source": "PackageManager.systemAvailableFeatures",
+          "status": "AVAILABLE",
+          "note": null
+        },
+        {
+          "key": "externalInputTypes",
+          "label": "外接输入设备类型",
+          "value": "none",
+          "source": "InputDevice.getDeviceIds \/ isExternal \/ supportsSource",
+          "status": "AVAILABLE",
+          "note": "仅记录可见外设类别，不保存名称、标识或输入内容；none 表示未观察到以下类别。"
+        },
+        {
+          "key": "declaredInput",
+          "label": "系统声明的输入能力",
+          "value": "touchscreen \/ multitouch \/ multitouch_distinct \/ jazzhand",
+          "source": "PackageManager.hasSystemFeature",
+          "status": "AVAILABLE",
+          "note": "触屏、多点触控及手柄声明，和当前连接的外设不是一回事。"
+        },
+        {
+          "key": "vulkanVersion",
+          "label": "声明的 Vulkan 版本",
+          "value": "1.1.0",
+          "source": "PackageManager.systemAvailableFeatures",
+          "status": "AVAILABLE",
+          "note": "系统公开的规范版本，未运行图形驱动探针。"
+        },
+        {
+          "key": "glesRenderer",
+          "label": "实测 GL 渲染器",
+          "value": "Adreno (TM) 630",
+          "source": "EGL14 \/ GLES20.glGetString(GL_RENDERER)",
+          "status": "AVAILABLE",
+          "note": "离屏测试上下文报告的 GPU 字符串；只初始化 1×1 表面，不创建界面。"
+        },
+        {
+          "key": "glesVendor",
+          "label": "实测 GL 厂商",
+          "value": "Qualcomm",
+          "source": "EGL14 \/ GLES20.glGetString(GL_VENDOR)",
+          "status": "AVAILABLE",
+          "note": "离屏测试上下文报告的驱动厂商字符串。"
+        },
+        {
+          "key": "sharedLibraries",
+          "label": "系统共享库",
+          "value": "MiuiSettingsSearchLib.jar\nactivation.jar\nandroid-support-v13.jar\nandroid-support-v4.jar\nandroid-support-v7-recyclerview.jar\nandroid.ext.services\nandroid.ext.shared\nandroid.hidl.base-V1.0-java\nandroid.hidl.manager-V1.0-java\nandroid.test.base\nandroid.test.mock\nandroid.test.runner\ncloud-common.jar\ncom.android.future.usb.accessory\ncom.android.location.provider\ncom.android.media.remotedisplay\ncom.android.mediadrm.signer\ncom.android.nfc_extras\ncom.fingerprints.extension\ncom.google.android.maps\ncom.miui.okhttp\ncom.nxp.nfc.nq\ncom.qti.dpmapi\ncom.qti.dpmframework\ncom.qti.snapdragon.sdk.display\ncom.qualcomm.embmslibrary\ncom.qualcomm.qcrilhook\ncom.qualcomm.qti.QtiTelephonyServicelibrary\ncom.qualcomm.qti.audiosphere\ncom.qualcomm.qti.imscmservice-V2.0-java\ncom.qualcomm.qti.imscmservice-V2.1-java\ncom.qualcomm.qti.imscmservice-V2.2-java\ncom.qualcomm.qti.imscmservice@1.0-java\ncom.qualcomm.qti.lpa.uimlpalibrary\ncom.qualcomm.qti.remoteSimlock.manager.remotesimlockmanagerlibrary\ncom.qualcomm.qti.remoteSimlock.uimremotesimlocklibrary\ncom.qualcomm.qti.uim.uimservicelibrary\ncom.qualcomm.qti.uimGba.uimgbalibrary\ncom.qualcomm.qti.uimGbaManager.uimgbamanagerlibrary\ncom.qualcomm.uimremoteclientlibrary\ncom.qualcomm.uimremoteserverlibrary\ncom.wapi.wapicertstore\ncom.xiaomi.sensor\neventbus.jar\nglobal-miui11-empty.jar\nglobal-miui12-empty.jar\ngson.jar\nims-ext-common\nizat.xt.srv\njavax.obex\nmicloud-lib-shared.jar\nmicloud-sdk\nmicloud_sdk\nmicrolog4android.jar\nmiui-push.jar\nmiui-stat-v3.jar\nmiui-stat.jar\nmiui-update.jar\norg.apache.http.legacy\npicasso.jar\nprotobuf.jar\nqti-telephony-hidl-wrapper\nqti-telephony-utils\nsecurity-device-credential-sdk.jar\nsecurity_device_credential_sdk.jar\nvendor.qti.hardware.data.connection-V1.0-java\nvendor.qti.hardware.data.connection-V1.1-java\nvendor.qti.hardware.sensorscalibrate-V1.0\nvendor.xiaomi.hardware.citsensorservice-V1.1\nvendor.xiaomi.hardware.misys-V1.0-java\nvendor.xiaomi.hardware.misys-V2.0-java\nvendor.xiaomi.hardware.mtdservice-V1.0-java\nvendor.xiaomi.hardware.mtdservice-V1.1-java\nvendor.xiaomi.hardware.vsimapp-V1.0-java\nversion-seperation-dev\nvolley.jar\nyellowpage-common.jar\nzxing.jar",
+          "source": "PackageManager.systemSharedLibraryNames",
+          "status": "AVAILABLE",
+          "note": "系统向应用公开的共享库名称。"
+        },
+        {
+          "key": "locale",
+          "label": "应用当前区域",
+          "value": "zh-CN",
+          "source": "Locale.getDefault",
+          "status": "AVAILABLE",
+          "note": null
+        },
+        {
+          "key": "systemLocales",
+          "label": "系统首选语言",
+          "value": "zh-CN",
+          "source": "Resources.getSystem().configuration.locales",
+          "status": "AVAILABLE",
+          "note": null
+        },
+        {
+          "key": "timeZone",
+          "label": "时区与当前偏移",
+          "value": "Asia\/Shanghai · UTC+08:00",
+          "source": "ZoneId.systemDefault",
+          "status": "AVAILABLE",
+          "note": "UTC 偏移按采集时刻计算，随夏令时变化。"
+        },
+        {
+          "key": "virtualMachine",
+          "label": "虚拟机名称与版本",
+          "value": "Dalvik · 2.1.0",
+          "source": "System.getProperty(java.vm.name \/ java.vm.version)",
+          "status": "AVAILABLE",
+          "note": null
+        },
+        {
+          "key": "heapMax",
+          "label": "应用堆上限",
+          "value": "256.0 MiB",
+          "source": "Runtime.maxMemory",
+          "status": "AVAILABLE",
+          "note": null
+        },
+        {
+          "key": "heapAllocated",
+          "label": "应用堆已分配",
+          "value": "27.2 MiB",
+          "source": "Runtime.totalMemory",
+          "status": "AVAILABLE",
+          "note": null
+        },
+        {
+          "key": "heapFree",
+          "label": "已分配堆内空闲",
+          "value": "23.6 MiB",
+          "source": "Runtime.freeMemory",
+          "status": "AVAILABLE",
+          "note": null
+        },
+        {
+          "key": "standbyBucket",
+          "label": "应用待机分组",
+          "value": "活跃",
+          "source": "UsageStatsManager.appStandbyBucket",
+          "status": "AVAILABLE",
+          "note": "当前应用的分组，无需查询其他应用的使用记录。"
+        },
+        {
+          "key": "backgroundRestricted",
+          "label": "应用后台活动受限",
+          "value": "否",
+          "source": "ActivityManager.isBackgroundRestricted",
+          "status": "AVAILABLE",
+          "note": null
+        }
+      ]
+    },
+    {
+      "key": "media",
+      "title": "相机、音频与外设",
+      "items": [
+        {
+          "key": "cameraCount",
+          "label": "应用可见摄像头数",
+          "value": "2",
+          "source": "CameraManager.cameraIdList",
+          "status": "AVAILABLE",
+          "note": "数量按 Android 暴露的逻辑摄像头统计。"
+        },
+        {
+          "key": "camera_0",
+          "label": "摄像头 1",
+          "value": "后置 · 有闪光灯 · JPEG 4032×3024 px",
+          "source": "CameraManager.getCameraCharacteristics",
+          "status": "AVAILABLE",
+          "note": "只读取静态特性，分辨率为公开 JPEG 输出上限。"
+        },
+        {
+          "key": "camera_1",
+          "label": "摄像头 2",
+          "value": "前置 · 无闪光灯 · JPEG 2592×1940 px",
+          "source": "CameraManager.getCameraCharacteristics",
+          "status": "AVAILABLE",
+          "note": "只读取静态特性，分辨率为公开 JPEG 输出上限。"
+        },
+        {
+          "key": "cameraCapabilitySummary",
+          "label": "Camera2 镜头能力",
+          "value": "前置\/FULL ×1 · 后置\/FULL ×1",
+          "source": "CameraManager.getCameraCharacteristics \/ Camera2",
+          "status": "AVAILABLE",
+          "note": "按镜头朝向与硬件等级分组，单位为应用可见逻辑摄像头数。"
+        },
+        {
+          "key": "cameraModes",
+          "label": "Camera2 高级能力",
+          "value": "raw \/ high_speed_video",
+          "source": "CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES",
+          "status": "AVAILABLE",
+          "note": "汇总应用已读到的摄像头声明，不拍照；无权限的摄像头能力未计入。"
+        },
+        {
+          "key": "bluetoothCapabilities",
+          "label": "蓝牙能力",
+          "value": "经典蓝牙 是 · BLE 是",
+          "source": "PackageManager.hasSystemFeature",
+          "status": "AVAILABLE",
+          "note": null
+        },
+        {
+          "key": "audioCapabilities",
+          "label": "音频能力",
+          "value": "低延迟 是 · 专业音频 是",
+          "source": "PackageManager.hasSystemFeature",
+          "status": "AVAILABLE",
+          "note": null
+        },
+        {
+          "key": "audioSampleRate",
+          "label": "输出采样率",
+          "value": "48000 Hz",
+          "source": "AudioManager.PROPERTY_OUTPUT_SAMPLE_RATE",
+          "status": "AVAILABLE",
+          "note": null
+        },
+        {
+          "key": "audioBuffer",
+          "label": "输出缓冲帧数",
+          "value": "144 帧",
+          "source": "AudioManager.PROPERTY_OUTPUT_FRAMES_PER_BUFFER",
+          "status": "AVAILABLE",
+          "note": null
+        },
+        {
+          "key": "codecs",
+          "label": "常见媒体编解码",
+          "value": "H.264 · 解码 是 · 编码 是\nHEVC · 解码 是 · 编码 是\nAV1 · 解码 是 · 编码 否\nVP9 · 解码 是 · 编码 是\nAAC · 解码 是 · 编码 是\nFLAC · 解码 是 · 编码 是\nOpus · 解码 是 · 编码 是",
+          "source": "MediaCodecList(REGULAR_CODECS)",
+          "status": "AVAILABLE",
+          "note": "仅表示框架声明的常规编解码器。容器、分辨率、DRM 和实际播放另行验证。"
+        }
+      ]
+    },
+    {
+      "key": "environment",
+      "title": "安全与环境线索",
+      "items": [
+        {
+          "key": "selinuxDomain",
+          "label": "SELinux 应用进程域",
+          "value": "untrusted_app",
+          "source": "\/proc\/self\/attr\/current",
+          "status": "AVAILABLE",
+          "note": "仅提取类型字段。全局模式需由 enforce 节点确认。"
+        },
+        {
+          "key": "configurationDigest",
+          "label": "本地设备配置摘要",
+          "value": "v1:1b20cad4d3f49bd18cb082db74ba62c7f12388cfd1ffbe322b221c1365d5100a",
+          "source": "Build.BRAND \/ MODEL \/ DEVICE \/ PRODUCT \/ BOARD \/ HARDWARE \/ SUPPORTED_ABIS",
+          "status": "AVAILABLE",
+          "note": "同配置可能有相同摘要。ROM 改写字段可改变摘要。用于本地对照，随本地 JSON 导出。"
+        },
+        {
+          "key": "buildSignals",
+          "label": "ROM 构建线索",
+          "value": "user · release-keys",
+          "source": "Build.TYPE \/ Build.TAGS",
+          "status": "AVAILABLE",
+          "note": "构建类型和密钥标签只能说明 ROM 构建线索。"
+        },
+        {
+          "key": "virtualDeviceHints",
+          "label": "虚拟设备标记",
+          "value": "未见常见标记",
+          "source": "Build.HARDWARE \/ PRODUCT \/ DEVICE",
+          "status": "AVAILABLE",
+          "note": "仅匹配常见模拟器标记。自定义 ROM 可使用相同名称，结果仅供排查。"
+        },
+        {
+          "key": "systemDebuggable",
+          "label": "系统调试构建线索",
+          "value": "user \/ release-keys（标准量产构建类型）",
+          "source": "Build.TYPE \/ Build.TAGS",
+          "status": "AVAILABLE",
+          "note": "应用视角的公开构建信息，仅用于识别构建类型；不代表 ro.debuggable、USB 调试或当前 APK 的调试状态。"
+        },
+        {
+          "key": "verifiedBoot",
+          "label": "Verified Boot 颜色线索",
+          "value": "green",
+          "source": "getprop ro.boot.verifiedbootstate",
+          "status": "AVAILABLE",
+          "note": "启动属性可作为刷机或调试线索。属性缺失和系统改写均可能发生。"
+        },
+        {
+          "key": "vbmetaState",
+          "label": "VBMeta 设备状态线索",
+          "value": null,
+          "source": "getprop ro.boot.vbmeta.device_state",
+          "status": "UNAVAILABLE",
+          "note": "该启动属性未向当前应用提供。 启动属性可作为刷机或调试线索。属性缺失和系统改写均可能发生。",
+          "reason": "OPTIONAL_UNSET"
+        },
+        {
+          "key": "flashLock",
+          "label": "Bootloader 锁定线索",
+          "value": "1",
+          "source": "getprop ro.boot.flash.locked",
+          "status": "AVAILABLE",
+          "note": "启动属性可作为刷机或调试线索。属性缺失和系统改写均可能发生。"
+        },
+        {
+          "key": "suFileHint",
+          "label": "可见的 su 路径",
+          "value": null,
+          "source": "\/sbin\/su",
+          "status": "RESTRICTED",
+          "note": "EACCES \/ errno=13 · Android 文件权限或系统策略拒绝普通应用访问。 其他候选：\/system\/bin\/su: NODE_MISSING errno=2；\/system\/xbin\/su: NODE_MISSING errno=2 只检查固定路径的元数据。可见条目和路径缺失都只作环境线索。",
+          "reason": "ACCESS_DENIED",
+          "errno": 13
+        },
+        {
+          "key": "adbSetting",
+          "label": "USB 调试公开设置值",
+          "value": "开启",
+          "source": "Settings.Global.ADB_ENABLED",
+          "status": "AVAILABLE",
+          "note": "Android 可能向普通应用固定返回关闭。"
+        },
+        {
+          "key": "developerSetting",
+          "label": "开发者选项公开设置值",
+          "value": "开启",
+          "source": "Settings.Global.DEVELOPMENT_SETTINGS_ENABLED",
+          "status": "AVAILABLE",
+          "note": "系统可能过滤普通应用的读数。"
+        },
+        {
+          "key": "keyguardSecure",
+          "label": "已配置锁屏凭证",
+          "value": "否",
+          "source": "KeyguardManager.isDeviceSecure",
+          "status": "AVAILABLE",
+          "note": null
+        },
+        {
+          "key": "storageEncryption",
+          "label": "存储加密状态",
+          "value": "已启用（按用户加密）",
+          "source": "DevicePolicyManager.getStorageEncryptionStatus",
+          "status": "AVAILABLE",
+          "note": null
+        },
+        {
+          "key": "hookSignals",
+          "label": "Hook \/ 注入映射线索",
+          "value": "none",
+          "source": "\/proc\/self\/maps",
+          "status": "AVAILABLE",
+          "note": "只扫描本应用进程 \/proc\/self\/maps 的路径段，并排除 ART\/JIT、图形栈等运行时创建的 memfd；只代表本进程映射，不等于设备被注入。"
+        },
+        {
+          "key": "overlayDeviceCodename",
+          "label": "系统 overlay 记录的产品代号",
+          "value": null,
+          "source": "\/proc\/self\/maps",
+          "status": "UNAVAILABLE",
+          "note": "maps 与四个 overlay 目录里都没有 AOSP 命名的 RRO 产品名。 取自已映射的 framework RRO overlay 文件名（AOSP 按镜像构建的产品名生成），是构建产物而不是属性声明。与 system.device 不一致时先核对改机工具、移植 ROM 或虚拟化环境；它同样不能单独证明硬件。",
+          "reason": "NOT_REPORTED"
+        },
+        {
+          "key": "overlayEvidence",
+          "label": "系统 overlay 多路径证据",
+          "value": null,
+          "source": "\/proc\/self\/maps + \/vendor|product|system_ext|odm\/overlay",
+          "status": "UNAVAILABLE",
+          "note": "maps 与四个 overlay 目录都没有 AOSP 命名的 RRO 记录。 依次尝试 maps 中的 framework RRO、其它 RRO idmap、vendor\/product\/system_ext\/odm overlay 目录；任一路径命中即给出代号，冲突时以 maps 为准。sku\/soc 只作旁证，不参与代号。",
+          "reason": "NOT_REPORTED"
+        },
+        {
+          "key": "tracerPid",
+          "label": "内核跟踪进程 PID",
+          "value": "0",
+          "source": "\/proc\/self\/status",
+          "status": "AVAILABLE",
+          "note": "0 表示无跟踪方；非零表示内核记录了跟踪进程（调试器、Profiler 或注入框架都可能）。这是内核记录，不是攻击结论。"
+        },
+        {
+          "key": "rootMountHints",
+          "label": "系统分区挂载线索",
+          "value": "none",
+          "source": "\/proc\/self\/mountinfo",
+          "status": "AVAILABLE",
+          "note": "只识别 overlay 挂载到系统分区、\/sbin 或 \/debug_ramdisk 的 tmpfs、路径含 .magisk 的挂载；自定义 ROM 也可能出现 overlay。"
+        },
+        {
+          "key": "rootManagerVisible",
+          "label": "可见的 Root 管理应用",
+          "value": "none",
+          "source": "PackageManager.queryIntentActivities(MAIN \/ LAUNCHER)",
+          "status": "AVAILABLE",
+          "note": "只比对固定包名列表；受包可见性限制，none 不等于未安装。"
+        },
+        {
+          "key": "userProfile",
+          "label": "应用运行用户环境",
+          "value": "owner",
+          "source": "Process.myUid \/ ApplicationInfo.dataDir",
+          "status": "AVAILABLE",
+          "note": "uid=10201 · 数据目录前缀 \/data\/user\/0。owner = 用户 0；secondary = 双开、分身或多用户；managed = 工作资料。三者都不是恶意结论。"
+        },
+        {
+          "key": "drmSecurityLevel",
+          "label": "系统 DRM 密钥保护级别",
+          "value": "L3",
+          "source": "MediaDrm(Widevine).getProperty(SECURITY_LEVEL)",
+          "status": "AVAILABLE",
+          "note": "Widevine vendor=Google · version=15.0.0。 系统 DRM 声明，不是硬件证明；L3 只表示软件级密钥保护，不等于模拟器。"
+        },
+        {
+          "key": "verityMode",
+          "label": "dm-verity 启动模式",
+          "value": "enforcing",
+          "source": "getprop ro.boot.veritymode",
+          "status": "AVAILABLE",
+          "note": "来自一次属性快照；未设置时为系统未上报，不能写成已关闭。"
+        },
+        {
+          "key": "buildDebuggable",
+          "label": "系统可调试构建声明",
+          "value": "关闭",
+          "source": "getprop ro.debuggable",
+          "status": "AVAILABLE",
+          "note": "来自 ro.debuggable 属性快照；与当前 APK 的可调试标志不是同一件事。"
+        },
+        {
+          "key": "androidIdSha256",
+          "label": "ANDROID_ID 摘要（仅本机）",
+          "value": "sha256:13dc6a1e741808ce80cedee52ad6248758e16aa7820505bbda0226d2e55d6128",
+          "source": "Settings.Secure.ANDROID_ID \/ SHA-256",
+          "status": "AVAILABLE",
+          "note": "保存摘要而非原值；不上传；用于同机多次采样比对。"
+        },
+        {
+          "key": "capturePhoneAccess",
+          "label": "采集时电话状态权限",
+          "value": "granted",
+          "source": "Context.checkSelfPermission",
+          "status": "AVAILABLE",
+          "note": "采集开始时的快照，不反映此后的授权变化。"
+        },
+        {
+          "key": "captureLocationAccess",
+          "label": "采集时位置权限",
+          "value": "precise",
+          "source": "Context.checkSelfPermission",
+          "status": "AVAILABLE",
+          "note": "采集开始时的快照，不反映此后的授权变化。"
+        },
+        {
+          "key": "captureLocationSwitch",
+          "label": "采集时系统位置开关",
+          "value": "enabled",
+          "source": "LocationManagerCompat.isLocationEnabled",
+          "status": "AVAILABLE",
+          "note": "采集开始时的快照，不反映此后的授权变化。"
+        }
+      ]
+    },
+    {
+      "key": "app",
+      "title": "应用与权限",
+      "items": [
+        {
+          "key": "package",
+          "label": "应用包名",
+          "value": "com.sigmark.app",
+          "source": "Context.packageName",
+          "status": "AVAILABLE",
+          "note": null
+        },
+        {
+          "key": "channel",
+          "label": "采集器渠道",
+          "value": "lan-debug",
+          "source": "BuildConfig.BUILD_TYPE",
+          "status": "AVAILABLE",
+          "note": null
+        },
+        {
+          "key": "visibleLauncherApps",
+          "label": "可见的桌面应用数",
+          "value": "44",
+          "source": "PackageManager.queryIntentActivities(MAIN \/ LAUNCHER)",
+          "status": "AVAILABLE",
+          "note": "按当前资料和包可见性去重计数，不是全设备安装总量。不保留其他应用名称或包名。"
+        },
+        {
+          "key": "version",
+          "label": "应用版本",
+          "value": "1.21.0 (48)",
+          "source": "PackageManager.getPackageInfo(GET_PERMISSIONS)",
+          "status": "AVAILABLE",
+          "note": null
+        },
+        {
+          "key": "installedAt",
+          "label": "首次安装时间",
+          "value": "2026-11-20T09:21:42.842Z",
+          "source": "PackageManager.getPackageInfo(GET_PERMISSIONS)",
+          "status": "AVAILABLE",
+          "note": null
+        },
+        {
+          "key": "updatedAt",
+          "label": "最近更新时间",
+          "value": "2026-11-25T12:34:52.112Z",
+          "source": "PackageManager.getPackageInfo(GET_PERMISSIONS)",
+          "status": "AVAILABLE",
+          "note": null
+        },
+        {
+          "key": "installer",
+          "label": "安装来源",
+          "value": null,
+          "source": "PackageManager.getInstallSourceInfo \/ getInstallerPackageName",
+          "status": "UNAVAILABLE",
+          "note": "供本地核对，侧载或安装器不可见时可能留空。",
+          "reason": "NOT_REPORTED"
+        },
+        {
+          "key": "certSha256",
+          "label": "当前签名证书 SHA-256",
+          "value": "e424900e635efe79ab05f904d6436394e980e26246085ac39f5ec9cc50463904",
+          "source": "PackageManager.SigningInfo",
+          "status": "AVAILABLE",
+          "note": "显示当前 APK 的证书摘要，可与预期签名对照。"
+        },
+        {
+          "key": "appDebuggable",
+          "label": "当前 APK 可调试",
+          "value": "是",
+          "source": "ApplicationInfo.FLAG_DEBUGGABLE",
+          "status": "AVAILABLE",
+          "note": null
+        },
+        {
+          "key": "debuggerConnected",
+          "label": "当前进程已连接调试器",
+          "value": "否",
+          "source": "Debug.isDebuggerConnected",
+          "status": "AVAILABLE",
+          "note": null
+        },
+        {
+          "key": "permissions",
+          "label": "已声明权限及授权状态",
+          "value": "android.permission.ACCESS_COARSE_LOCATION · 已授予\nandroid.permission.ACCESS_FINE_LOCATION · 已授予\nandroid.permission.ACCESS_NETWORK_STATE · 已授予\nandroid.permission.ACCESS_WIFI_STATE · 已授予\nandroid.permission.INTERNET · 已授予\nandroid.permission.READ_BASIC_PHONE_STATE · 未授予\nandroid.permission.READ_PHONE_STATE · 已授予\nandroid.permission.REQUEST_INSTALL_PACKAGES · 未授予\nandroid.permission.USE_BIOMETRIC · 已授予\ncom.sigmark.app.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION · 已授予",
+          "source": "PackageManager.getPackageInfo(GET_PERMISSIONS)",
+          "status": "AVAILABLE",
+          "note": null
+        }
+      ]
+    }
+  ]
+}

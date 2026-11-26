@@ -21,6 +21,10 @@ CREATE TABLE IF NOT EXISTS asset_installations (
 );
 ALTER TABLE reports ADD COLUMN IF NOT EXISTS asset_id uuid REFERENCES device_assets(id);
 CREATE INDEX IF NOT EXISTS reports_active_asset ON reports (asset_id,received_at DESC) WHERE trashed_at IS NULL AND asset_id IS NOT NULL;
+CREATE TABLE IF NOT EXISTS report_identity_reviews (
+  report_id uuid PRIMARY KEY REFERENCES reports(id) ON DELETE CASCADE,
+  evidence jsonb NOT NULL
+);
 CREATE TABLE IF NOT EXISTS admin_sessions (
   digest text PRIMARY KEY,
   credential_version text NOT NULL,

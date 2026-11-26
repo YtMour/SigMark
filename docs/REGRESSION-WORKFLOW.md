@@ -12,6 +12,12 @@
 
 USB 仅比较手动记录的两个枚举数量。请在手机选择「更多工具 → USB 插拔实验」，准备 USB Host、OTG 转接器和外设，两分钟内保存两点。数量增加或减少为观察到变化，数量相同并不证明端口有故障。报告不含外设名称、标识、连接句柄或内容。
 
+### 自定义 ROM 样本复测
+
+1. 在实验记录中登记设备化名、ROM 构建版本和预期变更，记下 SigMark 版本、字段集、采集方案与授权状态。保持采样条件相近，由操作者在手机做两轮「整体获取」并确认上传；另选一台普通设备验证通用规则。App 验收无需 ADB 或导入。
+2. 在验收工作台比较同一资产、同一观察视角的早期基线和新报告。身份声明差异、保护状态和主动实验结果分别记录；受限、未上报与旧版未归档保留各自状态。若有历史外部对照，仅在单独的「辅助对照 · 外部记录」查看，不补写任何 App 结果。
+3. 交给 ROM 项目复核的记录包含实验编号、ROM 构建版本、可复现步骤与能力回归结论。下一版回到同一组验收用例，重点检查公开 API 可用性、读数稳定性、启动与保护状态以及 AVC/GLES 实测。完整设备报告默认留在测试机或本地归档。
+
 ### 离线校准
 
 先独立人工登记设备类别和预期处置，再从工作台导出证据包，准备本地清单：
@@ -58,7 +64,7 @@ USB 仅比较手动记录的两个枚举数量。请在手机选择「更多工�
 
 对比导出格式为 `kind=sigmark.regression`、`schemaVersion=1`，含 `baseline` / `current`（报告 ID、批次、采样时间、App 采集器和字段集）、`savedBaseline`（可空的 ID、名称）、`context`、`counts`、`verdicts` 和 `checks`。不附原报告正文、任意测试反馈、资产 UUID 或安装标记。
 
-- `checks[]` 以 `group.key` 标识，含 `verdict`（`review/expected/context/insufficient/changed/unchanged/not_archived/restricted`）、说明、两侧 `{value,status,source,reason,errno}`；未归档侧为 null。页面上的对照行另带 `category`（`boot/rom/runtime/protection/identity`），导出 JSON 保持原字段。`not_archived` 表示一侧字段集没有该键，`restricted` 表示一侧被系统拒绝读取，两者都不判定变化，优先级高于 `insufficient`。规则版本为 `rom-evidence/4`；SELinux 的「直接读取」与「推断」视为同一模式，只在结论里说明读取依据变化。自动流程不靠中文措辞判断。
+- `checks[]` 通过 `group.key` 标识字段，包含 `verdict`、说明及两侧 `{value,status,source,reason,errno}`。未归档侧为 null。`not_archived` 表示报告未保存该字段，`restricted` 表示系统拒读，两者优先于 `insufficient`。当前规则 `rom-evidence/6` 对照字段集 21 的两条新身份声明，延续 v5 对 SELinux 两侧直接读数的要求。自动化使用字段键与判定代码。
 - `counts` 包含 `bothArchived/baselineOnly/currentOnly/lostValue/gainedValue`。`lostValue` 指双方都归档且由有值变为无值，不等同 ROM 故障。历史没保存的字段不回填。
 - `context.sameAsset=false` 时不对单一设备下回归结论；`baselineEarlier=false` 时先核对顺序。普通客户端证据标注 `attestation:not_verified`。通过两个报告 ID 回溯原始证据。
 - `expectedNetwork` 为空或省略表示不要求。可选 `wifi/cellular/ethernet/vpn/none`，仅比较报告记录的默认传输，并不证明蜂窝已注册或互联网联通。导出附加 `context.network`：三侧值（未确认或不要求为 null）与 `not_required/matched/mismatch/insufficient`，不改变安全字段的判定。Android「复测准备」显示即时授权，不回填旧报告权限。

@@ -15,9 +15,22 @@ const labels=[
   {code:'multi_open',state:'not_observed',evidence:[{key:'environment.userProfile',value:'owner',source:'Process.myUid',status:'AVAILABLE'}],historyHits:0,historyEvaluable:1,historyRestricted:0},
   {code:'rom_verification',state:'insufficient',evidence:[{key:'environment.verityMode',status:'NOT_ARCHIVED'}],historyHits:0,historyEvaluable:0,historyRestricted:0},
   {code:'software_drm',state:'insufficient',evidence:[{key:'environment.drmSecurityLevel',status:'UNAVAILABLE',source:'MediaDrm(Widevine)',reason:'NOT_REPORTED'}],historyHits:0,historyEvaluable:0,historyRestricted:0},
-  {code:'identity_conflict',state:'hit',evidence:[{key:'system.board',value:'rk3588',source:'Build.BOARD',status:'AVAILABLE'},{key:'system.boardPlatform',value:'rk3588s',source:'ro.board.platform',status:'AVAILABLE'}],historyHits:0,historyEvaluable:0,historyRestricted:1},
+  {code:'identity_conflict',state:'hit',evidence:[{key:'system.model',value:'Model A',source:'Build.MODEL',status:'AVAILABLE'},{key:'system.propertyModel',value:'Model B',source:'getprop ro.product.model',status:'AVAILABLE'}],historyHits:0,historyEvaluable:0,historyRestricted:1},
+  // Field set 24: the kernel-side rows come last in wire order; all ten are real readings.
+  {code:'hardware_declaration_conflict',state:'hit',evidence:[
+    {key:'memory.totalRam',value:'7.5 GiB',source:'ActivityManager.MemoryInfo',status:'AVAILABLE'},
+    {key:'memory.physicalRam',value:'7.5 GiB',source:'/proc/meminfo MemTotal',status:'AVAILABLE'},
+    {key:'memory.kernelMemTotal',value:'7.4 GiB',source:'/proc/meminfo MemTotal',status:'AVAILABLE'},
+    {key:'cpu.cpuParts',value:'0x41:0xd05×4 / 0x41:0xd0b×2',source:'/proc/cpuinfo',status:'AVAILABLE'},
+    {key:'system.socModel',value:'gs101',source:'ro.soc.model',status:'AVAILABLE'},
+    {key:'runtime.glesRenderer',value:'Mali-G715',source:'GLES GL_RENDERER',status:'AVAILABLE'},
+    {key:'system.device',value:'corot',source:'Build.DEVICE',status:'AVAILABLE'},
+    {key:'environment.overlayDeviceCodename',value:'corot',source:'/product/overlay 文件名',status:'AVAILABLE'},
+    {key:'cpu.cpuCapacity',value:'160/498/1024',source:'/sys/devices/system/cpu/cpu*/cpu_capacity',status:'AVAILABLE'},
+    {key:'memory.cmaTotal',value:'652 MiB',source:'/proc/meminfo CmaTotal',status:'AVAILABLE'},
+  ],historyHits:0,historyEvaluable:0,historyRestricted:0},
 ];
-const fixture={reportId:id,ruleVersion:'sigmark-profile/3',linked:true,capturedAtEpochMs:5000,historyDays:30,historyLimit:50,historySamples:3,historyLimited:false,labels};
+const fixture={reportId:id,ruleVersion:'sigmark-profile/5',linked:true,capturedAtEpochMs:5000,historyDays:30,historyLimit:50,historySamples:3,historyLimited:false,labels};
 const states={hit:'本次观察到',not_observed:'本次未见',insufficient:'本次证据不足'};
 async function main(){
   if(archive&&(!process.env.SIGMARK_QA_TOKEN||!id))throw Error('Set QA URL/token and provide an archived report UUID');
@@ -50,8 +63,8 @@ async function main(){
     if(!archive){await panel.getByRole('alert').waitFor();await panel.getByRole('button',{name:'重试读取画像'}).click();}
     const actual=await (await ready).json();
     assert.equal(actual.reportId,id);
-    if(archive)assert(actual.labels.length==9,'archived profile returned fewer labels than the known rule set');
-    else assert.equal(actual.labels.length,9);
+    if(archive)assert(actual.labels.length>=10,'archived profile returned fewer labels than the known rule set');
+    else assert.equal(actual.labels.length,10);
     for(const l of actual.labels){
       const d=panel.locator('[data-profile="'+l.code+'"]');
       await d.locator('summary').getByText(states[l.state],{exact:true}).waitFor();
@@ -59,9 +72,15 @@ async function main(){
       assert.equal(await d.getAttribute('open'),'');
       for(const e of l.evidence){await d.getByText(e.key,{exact:true}).waitFor();}
     }
-    assert.equal(await panel.locator('details[open]').count(),actual.labels.length);
+    // Only the rule disclosures are opened above. A report with history also renders the
+    // "历史身份声明" disclosure, which is open by default, so counting every open
+    // details would depend on whether that unrelated block happens to be present.
+    const openRules=(await panel.locator('details[data-profile][open]').evaluateAll(
+      els=>els.map(el=>el.dataset.profile))).filter(code=>code!=='identity-history').sort();
+    assert.deepEqual(openRules,actual.labels.map(l=>l.code).sort());
     assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'horizontal overflow');
     if(process.env.SIGMARK_QA_ADB_FILE){
+      await page.locator('[data-section="external-observations"] > summary').click();
       const comparison=page.getByRole('region',{name:'证据来源对照'});
       const input=comparison.getByLabel('打开 ADB 观察 JSON');
       let mutationRequests=0;
@@ -72,6 +91,7 @@ async function main(){
       const selinux=comparison.getByRole('row').filter({hasText:'SELinux 实时模式'});
       await selinux.getByRole('cell',{name:/^Enforcing/}).waitFor();
       await selinux.getByRole('cell').getByText(/受限 · errno=13/).waitFor();
+      await comparison.getByRole('checkbox',{name:'已核对，这是同一台设备'}).check();
       await selinux.getByRole('cell',{name:'缺少一方读数'}).waitFor();
       const scroller=comparison.getByRole('region',{name:/可横向滚动/});
       await scroller.focus();await page.keyboard.press('ArrowRight');
@@ -90,9 +110,17 @@ async function main(){
       await panel.getByText('另有 1 份证据不足，未计入分母。').waitFor();
       await panel.getByText('历史受限 2 份（系统拒绝读取，不计入命中）。').waitFor();
       assert.equal(await panel.getByText('历史受限 1 份（系统拒绝读取，不计入命中）。').count(),2);
-      await panel.getByText('身份字段冲突',{exact:true}).waitFor();
-      await panel.getByText('App 归档里 Build 声明与只读属性声明不一致',{exact:true}).waitFor();
-      await panel.getByText('核对 ROM 是否改写 ro.* 属性；不据此判定真伪。',{exact:true}).waitFor();
+      await panel.getByText('App 身份声明核对',{exact:true}).waitFor();
+      await panel.getByText('只比较同义读数；一致不等于身份已验证。',{exact:true}).waitFor();
+      await panel.getByText('在同一测试条件下用 App 复采，并比对两次报告。',{exact:true}).waitFor();
+      const hardware=panel.locator('[data-profile="hardware_declaration_conflict"]');
+      await hardware.getByText('实测硬件与声明核对',{exact:true}).waitFor();
+      await hardware.getByText(/算力权重、连续内存池/).waitFor();
+      await hardware.getByText('先核对改机工具、虚拟化或实验 ROM，再判断是否需要继续比对。',{exact:true}).waitFor();
+      assert.equal(await hardware.locator('dl > div').count(),10,'hardware evidence keeps all ten archived rows');
+      await hardware.getByText('160/498/1024').waitFor();
+      await hardware.getByText('652 MiB').waitFor();
+      await hardware.getByText('/proc/meminfo CmaTotal',{exact:false}).waitFor();
       const download=page.waitForEvent('download');await panel.getByRole('button',{name:'导出画像 JSON'}).click();
       const file=await download;assert.equal(file.suggestedFilename(),'SigMark-profile-'+id+'.json');
       assert.deepEqual(JSON.parse(await readFile(await file.path(),'utf8')),fixture);
@@ -102,7 +130,7 @@ async function main(){
       await page.goBack();await panel.getByText('历史观察到 1 / 2 份可判断报告').waitFor();
       profile={...fixture,linked:false,historySamples:0,labels:labels.map(l=>({...l,historyHits:0,historyEvaluable:0,historyRestricted:0,lastHistoricalHit:undefined}))};
       await page.reload();await panel.getByText(/仅分析本次/).waitFor();
-      assert.equal(await panel.getByText('未作历史关联').count(),9);
+      assert.equal(await panel.getByText('未作历史关联').count(),10);
     }
     assert.deepEqual(errors,[]);
     console.log(archive?'PASS archive (GET only): '+actual.labels.length+' labels match API, '+actual.historySamples+' prior sample(s), linked='+actual.linked+', keyboard disclosure and 390px layout.':'PASS browser: retry, 390px, keyboard, evidence, denominator, JSON contents, history link/back, unassigned.');

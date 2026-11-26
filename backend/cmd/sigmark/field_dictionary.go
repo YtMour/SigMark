@@ -5,8 +5,8 @@ import (
 	"strings"
 )
 
-const latestFieldSet = 20
-const dictionaryVersion = "sigmark-lan-fields/11"
+const latestFieldSet = 25
+const dictionaryVersion = "sigmark-lan-fields/16"
 
 type dictionaryField struct {
 	Key           string   `json:"key"`
@@ -93,6 +93,16 @@ func describeField(f *dictionaryField, requirements map[string]dossierRule) {
 		f.ValueKind, f.Unit = "enum_text", "platform_code"
 	case "system.hardwareSku":
 		f.ValueKind, f.Unit = "enum_text", "sku_code"
+	case "system.propertyModel", "system.propertyDevice":
+		f.ValueKind, f.Observer = "declaration_text", "APP_GETPROP"
+	case "environment.overlayDeviceCodename":
+		f.ValueKind, f.Unit, f.Observer = "enum_text", "device_codename", "APP_PROC_MAPS"
+	case "environment.overlayEvidence":
+		f.ValueKind, f.Unit, f.Observer = "enum_text", "overlay_evidence", "APP_PROC_MAPS+APP_DIR_LIST"
+	case "cpu.cpuCapacity":
+		f.ValueKind, f.Unit, f.Observer = "enum_text", "capacity_profile", "APP_SYSFS"
+	case "memory.cmaTotal":
+		f.ValueKind, f.Unit, f.Observer = "display_text", "MiB", "APP_PROC"
 	}
 	if f.Unit == "epoch_ms" {
 		f.ValueKind = "integer_text"
@@ -119,6 +129,10 @@ var fieldUnits = map[string]string{
 	"network.checkStartAt":     "epoch_ms", "network.checkEndAt": "epoch_ms", "media.avcStartAt": "epoch_ms", "media.avcEndAt": "epoch_ms",
 	"runtime.glesStartAt": "epoch_ms", "runtime.glesEndAt": "epoch_ms", "runtime.usbStartAt": "epoch_ms", "runtime.usbEndAt": "epoch_ms",
 	"runtime.usbElapsed": "ms", "runtime.usbStartCount": "device_count", "runtime.usbEndCount": "device_count", "runtime.usbOutcome": "outcome_code",
+	"cpu.cpuParts": "core_part_counts", "memory.physicalRam": "GiB", "memory.kernelMemTotal": "GiB",
+	"environment.overlayDeviceCodename": "device_codename",
+	"environment.overlayEvidence":       "overlay_evidence",
+	"cpu.cpuCapacity":                   "capacity_profile", "memory.cmaTotal": "MiB",
 }
 
 func dictionary() []dictionaryField {

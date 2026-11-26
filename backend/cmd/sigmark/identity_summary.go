@@ -16,7 +16,7 @@ import (
 // appear under several assets, and which reports disagree with themselves.
 // Everything here is a declaration in an archive, never a physical attestation.
 const (
-	identitySummaryVersion = "sigmark-identity/1"
+	identitySummaryVersion = "sigmark-identity/2"
 	identitySummaryLimit   = 20
 )
 
@@ -99,22 +99,9 @@ var identityValueKeys = [][2]string{
 // identityConflicts returns only pairs where both sides are usable. A restricted
 // or absent side is not a disagreement, exactly like the per-report rule.
 func identityConflicts(values map[string]string) []identityPair {
-	out := []identityPair{}
-	for _, pair := range [][2]string{
-		{"system.board", "system.boardPlatform"},
-		{"cpu.hardware", "system.bootHardware"},
-		{"system.sku", "system.hardwareSku"},
-	} {
-		left := strings.TrimSpace(values[pair[0]])
-		right := strings.TrimSpace(values[pair[1]])
-		if left == "" || right == "" || strings.EqualFold(left, "unknown") || strings.EqualFold(right, "unknown") {
-			continue
-		}
-		if !strings.EqualFold(left, right) {
-			out = append(out, identityPair{LeftKey: pair[0], RightKey: pair[1], Left: left, Right: right})
-		}
-	}
-	return out
+	read := func(key string) string { return values[key] }
+	_, conflicts := compareAppIdentity(applicableIdentityPairs(read), read)
+	return conflicts
 }
 
 func identityValuesFrom(values map[string]string) identityValues {

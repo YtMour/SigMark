@@ -5,6 +5,8 @@ import android.app.Instrumentation
 import android.os.Bundle
 import android.os.SystemClock
 import com.sigmark.app.collector.DeviceRepository
+import com.sigmark.app.collector.SafeReaderInstrumentedTest
+import com.sigmark.app.collector.SecurityObservations
 import com.sigmark.app.collector.DecodeStage
 import com.sigmark.app.collector.CapturePlan
 import com.sigmark.app.collector.captureLocalExperiments
@@ -23,12 +25,15 @@ import com.sigmark.app.collector.clockEvidence
 import com.sigmark.app.collector.withExperimentFields
 import com.sigmark.app.collector.gnssEvidence
 import com.sigmark.app.collector.gnssCheckKeys
+import com.sigmark.app.collector.measuredHardwareKeys
 import com.sigmark.app.collector.runGnssCheck
 import com.sigmark.app.collector.machineCode
 import com.sigmark.app.collector.SysfsField
 import com.sigmark.app.collector.graphicsHardwareKeys
 import com.sigmark.app.collector.probeGraphics
 import com.sigmark.app.lan.LanReport
+import com.sigmark.app.lan.LanFieldSetVersion
+import com.sigmark.app.lan.AssetIdentity
 import com.sigmark.app.lan.ReportShelf
 import com.sigmark.app.lan.SampleUpload
 import com.sigmark.app.lan.lanReport
@@ -36,6 +41,7 @@ import com.sigmark.app.lan.lanEndpoint
 import com.sigmark.app.lan.sendLanReport
 import com.sigmark.app.model.ValueStatus
 import com.sigmark.app.security.devicePosture
+import com.sigmark.app.security.appIdentityJson
 import kotlinx.coroutines.runBlocking
 import org.json.JSONObject
 import java.util.UUID
@@ -46,7 +52,11 @@ class CapabilitySmoke : Instrumentation() {
     private var gnssSmoke = false
     private var configurationSmoke = false
     private var evidenceDump = false
+    private var selinuxSmoke = false
+    private var keystoreSmoke = false
     private var isolatedPort: Int? = null
+    private var liveUpload = false
+    private var safeReaderProbe = false
     // Field-set-17 keys that must reach the LAN projection on every device.
     private val processEvidenceKeys = setOf(
         "environment.hookSignals", "environment.tracerPid", "environment.rootMountHints",
@@ -61,12 +71,27 @@ class CapabilitySmoke : Instrumentation() {
         gnssSmoke = arguments?.getString("gnss") == "check"
         configurationSmoke = arguments?.getString("configuration") == "check"
         evidenceDump = arguments?.getString("evidence") == "dump"
+        selinuxSmoke = arguments?.getString("evidence") == "selinux"
+        keystoreSmoke = arguments?.getString("evidence") == "keystore"
         isolatedPort = arguments?.getString("isolatedUploadPort")?.toIntOrNull()?.takeIf { it in 1024..65535 }
+        liveUpload = arguments?.getString("lanUpload") == "live"
+        safeReaderProbe = arguments?.getString("probe") == "safereader"
         start()
     }
 
     override fun onStart() {
+        if (safeReaderProbe) { runSafeReaderProbe(); return }
+        if (liveUpload) { runLiveUpload(); return }
         isolatedPort?.let { runIsolatedUpload(it); return }
+        if (selinuxSmoke) { runSelinuxSmoke(); return }
+        if (keystoreSmoke) {
+            val probe = SecurityObservations.probeKey(targetContext)
+            val completed = probe.status == ValueStatus.AVAILABLE && probe.note.orEmpty().contains("加解密通过")
+            finish(if (completed) Activity.RESULT_OK else Activity.RESULT_CANCELED, Bundle().apply {
+                putString("keyProtection", "${probe.status} | ${probe.value} | ${probe.note}")
+            })
+            return
+        }
         if (evidenceDump) { runEvidenceDump(); return }
         if (gnssSmoke) { runGnssSmoke(); return }
         if (configurationSmoke) { runConfigurationSmoke(); return }
@@ -94,7 +119,7 @@ class CapabilitySmoke : Instrumentation() {
             val fields = report.parameters.associateBy { "${it.group}.${it.key}" }
             check(keys.all(fields::containsKey)) { "Capability summaries missing from LAN projection" }
             val body = JSONObject(report.json().toString(Charsets.UTF_8))
-            check(body.getInt("fieldSetVersion") == 20)
+            check(body.getInt("fieldSetVersion") == LanFieldSetVersion)
             check(fields.getValue("runtime.glesProbeResult").value == "pass") {
                 "Fixed EGL readback did not pass: ${fields["runtime.glesProbeStage"]?.value}"
             }
@@ -162,6 +187,61 @@ class CapabilitySmoke : Instrumentation() {
         finish(code, result)
     }
 
+    // SafeReader paths that the JVM stub cannot reach (Os.open throws "Stub!" there).
+    // Every assertion is emitted with sendStatus, so `am instrument -w` prints one
+    // INSTRUMENTATION_STATUS block per case.
+    private fun runSafeReaderProbe() {
+        val result = Bundle()
+        var index = 0
+        val outcome = SafeReaderInstrumentedTest { case, ok, detail ->
+            index += 1
+            result.putString(case, detail)
+            sendStatus(Activity.RESULT_OK, Bundle().apply {
+                putInt("id", index)
+                putString("class", case)
+                putString("sigmarkAssertion", if (ok) "PASS" else "FAIL")
+                putString("sigmarkDetail", detail)
+            })
+        }.runAll()
+        result.putInt("passed", outcome.passed.size)
+        result.putInt("failed", outcome.failed.size)
+        result.putString("passList", outcome.passed.joinToString(" | "))
+        result.putString("failList", outcome.failed.joinToString(" | "))
+        result.putString("observations", outcome.observations.joinToString(" ; "))
+        result.putString("stream",
+            "SafeReader instrumented: ${outcome.passed.size} passed, ${outcome.failed.size} failed")
+        finish(if (outcome.ok) Activity.RESULT_OK else Activity.RESULT_CANCELED, result)
+    }
+
+    private fun runSelinuxSmoke() {
+        val result = Bundle()
+        val code = try {
+            val snapshot = runBlocking { DeviceRepository(targetContext).collect() }
+            val report = lanReport(snapshot, BuildConfig.VERSION_NAME, "")
+            val local = snapshot.sections.single { it.key == "system" }.items.associateBy { it.key }
+            val projected = report.parameters.filter { it.group == "system" }.associateBy { it.key }
+            val mode = local.getValue("selinux")
+            val basis = local.getValue("selinuxEvidence")
+            check((mode.status == ValueStatus.AVAILABLE) == (basis.value == "exact"))
+            val posture = devicePosture(local.mapKeys { "system.${it.key}" }, snapshot.collectedAt)
+                .single { it.id == "system.selinux" }
+            for (key in listOf("selinux", "selinuxEvidence", "selinuxPolicy")) {
+                val field = local.getValue(key)
+                val exported = projected.getValue(key)
+                check(exported.status == field.status.name && exported.value == field.value && exported.errno == field.errno)
+                result.putString(key, listOfNotNull(field.status.name, field.reason?.name, field.value,
+                    field.errno?.let { "errno=$it" }, field.source).joinToString(" · "))
+            }
+            result.putString("posture", posture.state.name)
+            result.putString("stream", "SELinux App observation and LAN projection agree.")
+            Activity.RESULT_OK
+        } catch (error: Exception) {
+            result.putString("stream", error.stackTraceToString())
+            Activity.RESULT_CANCELED
+        }
+        finish(code, result)
+    }
+
     // On-device evidence dump for a real handset. Writes the full local snapshot and
     // the LAN projection into the app-specific external directory so they can be
     // pulled with adb without reading any user data.
@@ -177,6 +257,7 @@ class CapabilitySmoke : Instrumentation() {
             localFile.writeBytes(snapshot.toJson().toByteArray(Charsets.UTF_8))
             val wireFile = dir.resolve("sigmark-lan-report.json")
             wireFile.writeBytes(wire.json())
+            dir.resolve("sigmark-app-identity.json").writeText(appIdentityJson(snapshot), Charsets.UTF_8)
             val fields = snapshot.sections.flatMap { section ->
                 section.items.map { "${section.key}.${it.key}" to it }
             }.toMap()
@@ -196,6 +277,20 @@ class CapabilitySmoke : Instrumentation() {
             }
             val counts = snapshot.sections.flatMap { it.items }.groupingBy { it.status }.eachCount()
             result.putString("counts", counts.entries.joinToString(", ") { "${it.key}=${it.value}" })
+            val posture = devicePosture(snapshot.sections.flatMap { s -> s.items.map { "${s.key}.${it.key}" to it } }.toMap(),
+                snapshot.collectedAt)
+            for (row in posture.filter { it.id in setOf("hardware_facts", "app_identity", "overlay_codename") }) {
+                result.putString(row.id, "${row.state.name} · ${row.message}")
+            }
+            // The raw reading too, so a reader can tell "no overlay mapped" from "pattern miss".
+            snapshot.sections.firstOrNull { it.key == "environment" }
+                ?.items?.firstOrNull { it.key == "overlayDeviceCodename" }
+                ?.let { result.putString("overlayReading", "${it.status} · ${it.value} · ${it.source}") }
+            // Field set 25. The full multi-path evidence string is what a reviewer reads
+            // when the codename looks right but the image disagrees elsewhere.
+            snapshot.sections.firstOrNull { it.key == "environment" }
+                ?.items?.firstOrNull { it.key == "overlayEvidence" }
+                ?.let { result.putString("overlayEvidence", "${it.status} · ${it.value} · ${it.source}") }
             result.putString("snapshotFields", snapshot.sections.sumOf { it.items.size }.toString())
             result.putString("archivedFields", wire.parameters.size.toString())
             result.putString("fieldSet", wire.fieldSetVersion.toString())
@@ -218,7 +313,7 @@ class CapabilitySmoke : Instrumentation() {
             val parts = machineCode(first)
             check(parts.map { it.code } == machineCode(second).map { it.code })
             val wire = lanReport(acceptanceEvidence(second,CapturePlan.STANDARD,null),BuildConfig.VERSION_NAME,"")
-            check(wire.fieldSetVersion == 20)
+            check(wire.fieldSetVersion == LanFieldSetVersion)
             for (spec in SysfsField.entries) {
                 val field=wire.parameters.single { it.group==spec.group && it.key==spec.key }
                 check(field.source==spec.node.path)
@@ -247,7 +342,7 @@ class CapabilitySmoke : Instrumentation() {
             val frozen = gnssEvidence(acceptanceEvidence(snapshot, CapturePlan.GNSS, null), check)
             val report = lanReport(frozen,BuildConfig.VERSION_NAME,"")
             val fields = report.parameters.filter { it.group == "system" }.associateBy { it.key }
-            check(report.fieldSetVersion == 20 && gnssCheckKeys.all { it in fields })
+            check(report.fieldSetVersion == LanFieldSetVersion && gnssCheckKeys.all { it in fields })
             check("gnssHardwareModel" !in fields)
             check(fields["gnssCheckPrerequisite"]?.value == check.prerequisite.code)
             check((check.end.mono-check.start.mono) in 0..30_000)
@@ -266,6 +361,48 @@ class CapabilitySmoke : Instrumentation() {
             Activity.RESULT_CANCELED
         } finally { activity?.finish() }
         finish(code,result)
+    }
+
+    // One real sample through the same shelf and client the UI uses, so an acceptance run
+    // produces exactly what a manual "整体获取 → 上传报告" would produce.
+    private fun runLiveUpload() {
+        val result = Bundle()
+        val code = try {
+            val endpoint = checkNotNull(lanEndpoint(BuildConfig.LAN_ORIGIN)) {
+                "This build has no LAN origin; rebuild with -PSIGMARK_LAN_URL"
+            }
+            val complete = runBlocking {
+                val snapshot = DeviceRepository(targetContext).collect()
+                captureLocalExperiments(snapshot, CapturePlan.FULL,
+                    decode = { probeMediaDecode(targetContext) }, graphics = { probeGraphics() })
+            }
+            val report = lanReport(complete, BuildConfig.VERSION_NAME, "")
+            val linked = AssetIdentity.optedIn(targetContext, endpoint)
+            val receipt = ReportShelf(targetContext, endpoint.toString()).use { shelf ->
+                shelf.add(SampleUpload(report, associate = linked))
+                val sent = sendLanReport(endpoint, shelf.freeze(shelf.get(report.requestId)),
+                    if (linked) AssetIdentity.key(targetContext, endpoint) else null)
+                shelf.finish(report.requestId, sent)
+                sent
+            }
+            val fields = report.parameters.associateBy { "${it.group}.${it.key}" }
+            result.putString("reportId", receipt.id)
+            result.putString("requestId", report.requestId)
+            result.putString("assetLinked", receipt.assetLinked.toString())
+            result.putInt("fieldSet", report.fieldSetVersion)
+            result.putInt("archived", report.parameters.size)
+            for (key in measuredHardwareKeys + setOf("environment.capturePlan", "media.avcFirstFrame", "runtime.glesProbeResult")) {
+                fields[key]?.let { field ->
+                    result.putString(key, listOfNotNull(field.status, field.value, field.reason, field.source).joinToString(" · "))
+                }
+            }
+            result.putString("stream", "Real v${report.fieldSetVersion} sample uploaded from ${report.model}")
+            Activity.RESULT_OK
+        } catch (error: Exception) {
+            result.putString("stream", error.stackTraceToString())
+            Activity.RESULT_CANCELED
+        }
+        finish(code, result)
     }
 
     private fun runIsolatedUpload(port: Int) {
@@ -373,7 +510,7 @@ class CapabilitySmoke : Instrumentation() {
                 check(retry.attempted && retry.associate)
                 check(shelf.freeze(retry).contentEquals(first))
                 val current = shelf.get(report.requestId).report
-                check(current.fieldSetVersion == 20 && current.parameters.any { it.key == "avcFirstFrame" && it.value == "pass" })
+                check(current.fieldSetVersion == LanFieldSetVersion && current.parameters.any { it.key == "avcFirstFrame" && it.value == "pass" })
             }
         } finally {
             targetContext.deleteDatabase(database)

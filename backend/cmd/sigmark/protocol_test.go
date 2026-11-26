@@ -414,9 +414,9 @@ func TestFieldSet17To18DictionaryMetadata(t *testing.T) {
 	for _, entry := range dictionary() {
 		meta[entry.Key] = entry
 	}
-	// maxFields for field set 20 is 248: these 224 static keys plus 24 partition rows.
-	if len(meta) != 224 {
-		t.Fatalf("static registry = %d keys, want 224", len(meta))
+	// maxFields for field set 25 is 259: these 235 static keys plus 24 partition rows.
+	if len(meta) != 235 {
+		t.Fatalf("static registry = %d keys, want 235", len(meta))
 	}
 	if got := meta["system.initialSdk"]; got.SinceFieldSet != 18 || got.ValueKind != "integer_text" ||
 		got.Unit != "api_level" || got.MinSchema != 4 || got.Scope != "lan_projection" {
@@ -464,6 +464,37 @@ func TestFieldSet17To18DictionaryMetadata(t *testing.T) {
 	}
 	if meta["environment.hookSignals"].Sensitivity != "operational_context" {
 		t.Fatal("environment sensitivity must stay operational_context")
+	}
+}
+
+func TestAppPropertyIdentityArchive(t *testing.T) {
+	for _, c := range []struct{ key, source, good, bad string }{
+		{"propertyModel", "getprop ro.product.model", "手机 A (全球版)", "bad/path"},
+		{"propertyDevice", "getprop ro.product.device", "device_A.1", "bad path"},
+	} {
+		field := Parameter{Group: "system", Key: c.key, Label: c.key, Value: &c.good, Source: c.source, Status: "AVAILABLE"}
+		if !field.valid(4, 21) || field.valid(4, 20) {
+			t.Fatalf("field set gating: %s", c.key)
+		}
+		external := field
+		external.Source = "ADB shell"
+		if external.valid(4, 21) {
+			t.Fatalf("external provenance accepted for %s", c.key)
+		}
+		field.Value = &c.bad
+		if field.valid(4, 21) {
+			t.Fatalf("malformed value accepted for %s", c.key)
+		}
+		placeholder := "unknown"
+		field.Value = &placeholder
+		if field.valid(4, 21) {
+			t.Fatalf("placeholder accepted for %s", c.key)
+		}
+		errno := 13
+		field.Value, field.Status, field.Reason, field.Errno = nil, "RESTRICTED", "ACCESS_DENIED", &errno
+		if !field.valid(4, 21) {
+			t.Fatalf("restricted evidence rejected for %s", c.key)
+		}
 	}
 }
 
@@ -614,5 +645,154 @@ func TestLanSeparation(t *testing.T) {
 		if w.Header().Get("WWW-Authenticate") != "" {
 			t.Fatal("native login challenge must not appear")
 		}
+	}
+}
+
+func TestFieldSet22SecondChannelReadings(t *testing.T) {
+	meta := map[string]dictionaryField{}
+	for _, entry := range dictionary() {
+		meta[entry.Key] = entry
+	}
+	for _, want := range []struct{ group, key, kind, unit string }{
+		{"cpu", "cpuParts", "display_text", "core_part_counts"},
+		{"memory", "physicalRam", "display_text", "GiB"},
+		{"memory", "kernelMemTotal", "display_text", "GiB"},
+		{"runtime", "glesRenderer", "display_text", ""},
+		{"runtime", "glesVendor", "display_text", ""},
+	} {
+		got, ok := meta[want.group+"."+want.key]
+		if !ok {
+			t.Fatalf("missing dictionary entry %s.%s", want.group, want.key)
+		}
+		if got.SinceFieldSet != 22 || got.MinSchema != 4 || got.Scope != "lan_projection" ||
+			got.ValueKind != want.kind || got.Unit != want.unit {
+			t.Errorf("%s.%s metadata = %+v", want.group, want.key, got)
+		}
+		value := "sample"
+		field := Parameter{Group: want.group, Key: want.key, Label: want.key, Source: "test", Status: "AVAILABLE", Value: &value}
+		if !field.valid(4, 22) || field.valid(4, 21) {
+			t.Fatalf("field set gating: %s.%s", want.group, want.key)
+		}
+	}
+	// The second RAM channel is the only new key that carries a unit in GiB, and the
+	// kernel list signature must never be archived as a bare number.
+	value := "0x41:0xd05x4"
+	bad := Parameter{Group: "cpu", Key: "cpuParts", Label: "x", Source: "s", Status: "AVAILABLE", Value: &value}
+	if !bad.valid(4, 22) {
+		t.Fatal("cpuParts text form must be accepted")
+	}
+}
+
+// Field set 23 archives one build artifact instead of a declaration: the product
+// codename AOSP bakes into the framework RRO file name.
+func TestFieldSet23OverlayCodename(t *testing.T) {
+	meta := map[string]dictionaryField{}
+	for _, entry := range dictionary() {
+		meta[entry.Key] = entry
+	}
+	got, ok := meta["environment.overlayDeviceCodename"]
+	if !ok {
+		t.Fatal("missing dictionary entry environment.overlayDeviceCodename")
+	}
+	if got.SinceFieldSet != 23 || got.MinSchema != 4 || got.Scope != "lan_projection" ||
+		got.ValueKind != "enum_text" || got.Unit != "device_codename" || got.Observer != "APP_PROC_MAPS" {
+		t.Errorf("overlayDeviceCodename metadata = %+v", got)
+	}
+	value := "oriole"
+	field := Parameter{Group: "environment", Key: "overlayDeviceCodename", Label: "x", Source: "s",
+		Status: "AVAILABLE", Value: &value}
+	if !field.valid(4, 23) || field.valid(4, 22) {
+		t.Fatal("overlayDeviceCodename must be gated at field set 23")
+	}
+}
+
+// Field set 24 adds two more kernel-side facts: the capacity profile the kernel writes
+// per core, and the contiguous pool it reserves at boot.
+func TestFieldSet24KernelCapacityAndCma(t *testing.T) {
+	meta := map[string]dictionaryField{}
+	for _, entry := range dictionary() {
+		meta[entry.Key] = entry
+	}
+	for _, want := range []struct{ key, kind, unit, observer string }{
+		{"cpu.cpuCapacity", "enum_text", "capacity_profile", "APP_SYSFS"},
+		{"memory.cmaTotal", "display_text", "MiB", "APP_PROC"},
+	} {
+		got, ok := meta[want.key]
+		if !ok {
+			t.Fatalf("missing dictionary entry %s", want.key)
+		}
+		if got.SinceFieldSet != 24 || got.MinSchema != 4 || got.Scope != "lan_projection" ||
+			got.ValueKind != want.kind || got.Unit != want.unit || got.Observer != want.observer {
+			t.Errorf("%s metadata = %+v", want.key, got)
+		}
+		group, key, _ := strings.Cut(want.key, ".")
+		value := "160/498/1024"
+		field := Parameter{Group: group, Key: key, Label: key, Source: "test", Status: "AVAILABLE", Value: &value}
+		if !field.valid(4, 24) || field.valid(4, 23) {
+			t.Fatalf("field set gating: %s", want.key)
+		}
+	}
+}
+
+// Field set 25 adds the multi-path evidence behind environment.overlayDeviceCodename:
+// which of several redundant overlay paths answered, and which disagreed.
+func TestFieldSet25OverlayEvidence(t *testing.T) {
+	meta := map[string]dictionaryField{}
+	for _, entry := range dictionary() {
+		meta[entry.Key] = entry
+	}
+	got, ok := meta["environment.overlayEvidence"]
+	if !ok {
+		t.Fatal("missing dictionary entry environment.overlayEvidence")
+	}
+	if got.SinceFieldSet != 25 || got.MinSchema != 4 || got.Scope != "lan_projection" ||
+		got.ValueKind != "enum_text" || got.Unit != "overlay_evidence" ||
+		got.Observer != "APP_PROC_MAPS+APP_DIR_LIST" {
+		t.Errorf("overlayEvidence metadata = %+v", got)
+	}
+	if latestFieldSet != 25 || dictionaryVersion != "sigmark-lan-fields/16" {
+		t.Errorf("dictionary header = %d %q", latestFieldSet, dictionaryVersion)
+	}
+
+	// The accepted shape is the one a Pixel 6 produces; a field set 24 report must not
+	// be able to carry it.
+	for _, value := range []string{
+		"rro:oriole / vendor_dir:oriole / product_dir:oriole / sku:gr1yh / soc:gs101",
+		"rro:oriole / vendor_dir:corot",
+		"vendor_dir:unknown",
+		"vendor_dir:denied",
+		"rro:oriole / conflict:rro:oriole!=vendor_dir:corot",
+		"sku:g9s9b,gb7n6,gr1yh",
+	} {
+		field := Parameter{Group: "environment", Key: "overlayEvidence", Label: "x", Source: "s",
+			Status: "AVAILABLE", Value: &value}
+		if !field.valid(4, 25) {
+			t.Errorf("field set 25 rejected %q", value)
+		}
+		if field.valid(4, 24) {
+			t.Errorf("field set 24 accepted %q", value)
+		}
+	}
+	for _, value := range []string{
+		"foo:bar",
+		"rro:",
+		"rro:OrioLe",
+		"vendor_dir:oriole / rro:oriole", // fixed channel order
+		"rro:oriole / rro:oriole",        // repeated channel
+		"conflict:rro:oriole!=vendor_dir:corot / rro:oriole", // conflict rows come last
+		"conflict:rro:oriole=vendor_dir:corot",
+		strings.Repeat("rro:oriole / ", 20) + "soc:gs101", // over the 200 character cap
+	} {
+		field := Parameter{Group: "environment", Key: "overlayEvidence", Label: "x", Source: "s",
+			Status: "AVAILABLE", Value: &value}
+		if field.valid(4, 25) {
+			t.Errorf("accepted malformed overlay evidence %q", value)
+		}
+	}
+	// A denied channel is a RESTRICTED row with no value, and it must stay legal.
+	denied := Parameter{Group: "environment", Key: "overlayEvidence", Label: "x", Source: "s",
+		Status: "RESTRICTED", Reason: "ACCESS_DENIED"}
+	if !denied.valid(4, 25) || denied.valid(4, 24) {
+		t.Error("restricted overlay evidence must stay version gated")
 	}
 }

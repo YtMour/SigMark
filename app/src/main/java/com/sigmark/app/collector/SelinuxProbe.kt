@@ -26,8 +26,7 @@ internal object SelinuxProbe {
             verdict.evidence.item("selinuxEvidence", "SELinux 读取依据"),
             policy.copy(detail = listOfNotNull(policy.detail,
                 "仅探测节点可打开性。读取二进制策略内容还需要独立的 security:read_policy 授权。",
-                "AOSP 对普通应用固定拒绝 selinuxfs 的打开与读取（neverallow），印迹内没有可授予的权限；" +
-                    "要精确读取或读取策略内容只能用 root 或 Shizuku（shell 域）。")
+                "普通应用通常受系统策略限制。打开检查与读取策略正文使用不同权限。")
                 .joinToString(" ")).item("selinuxPolicy", "SELinux 策略节点"),
             property("selinuxBootHint", "SELinux 启动属性（参考）", SafeReader.Property.SELINUX_BOOT),
             property("selinuxBuildHint", "SELinux 构建属性（参考）", SafeReader.Property.SELINUX_BUILD),
@@ -37,7 +36,7 @@ internal object SelinuxProbe {
     internal fun probe(): SelinuxVerdict {
         val enforce = SafeReader.node(SafeReader.Node.SELINUX_ENFORCE)
         if (enforce.value != null) return selinuxVerdict(enforce, null, null)
-        // EACCES only proves a MAC denial when DAC would have allowed the read.
+        // DAC mode bits provide context for EACCES, but cannot establish its cause.
         if (enforce.errno == eaccesErrno) {
             val directory = SafeReader.statMode(directoryPath).value
             val file = SafeReader.statMode(enforcePath).value
@@ -83,8 +82,8 @@ internal object SelinuxProbe {
     }
 }
 
-// Pure DAC decision: a directory needs other search (x) and enforce needs
-// other read (r) for an EACCES to be attributable to MAC rather than DAC.
+// These two mode bits are partial DAC evidence. Other ancestors and access
+// controls may also influence the open, so this cannot verify enforcement.
 internal fun dacAllowsOtherRead(directoryMode: Int?, fileMode: Int?): Boolean =
     directoryMode != null && fileMode != null &&
         (directoryMode and otherExecute) != 0 && (fileMode and otherRead) != 0
@@ -105,10 +104,8 @@ internal fun selinuxVerdict(open: ReadResult<String>, directoryMode: Int?, fileM
     }
     if (open.errno == eaccesErrno) {
         if (dacAllowsOtherRead(directoryMode, fileMode)) return SelinuxVerdict(
-            ReadResult("Enforcing（强制模式，推断）", ValueStatus.AVAILABLE, open.source,
-                "EACCES 但 DAC 允许读取，permissive 下本应可读，因此只可能被 SELinux 策略拒绝。" +
-                    "selinuxfs 目录与 enforce 的 stat 显示 other 有搜索／读权限；这是推断，不是直接读数。"),
-            evidence("inferred_mac", "未直接读到 enforce；EACCES 与 DAC 元数据共同指向 SELinux 策略拒绝，属推断值。"),
+            open.withNote("系统拒绝读取，实时模式未确认。"),
+            evidence("inferred_mac", "目录与节点的权限位允许其他用户搜索和读取。系统策略是可能原因之一。"),
         )
         return SelinuxVerdict(
             open.copy(detail = listOfNotNull(open.detail,
@@ -117,14 +114,13 @@ internal fun selinuxVerdict(open: ReadResult<String>, directoryMode: Int?, fileM
         )
     }
     if (open.errno == enoentErrno) return SelinuxVerdict(
-        ReadResult("未启用（推断）", ValueStatus.AVAILABLE, open.source,
-            "enforce 节点返回 ENOENT（节点不存在），推断内核未启用 SELinux 或未挂载 selinuxfs。这是推断，不是直接读数。"),
-        evidence("inferred_disabled", "enforce 节点不存在，推断为未启用；这是推断值。"),
+        open.withNote("当前应用未看到 enforce 节点，实时模式未确认。"),
+        SafeReader.missing(open.source, ReadReason.NODE_MISSING, "未看到 enforce 节点。"),
     )
     return SelinuxVerdict(
         open.copy(detail = listOfNotNull(open.detail,
-            "只有 EACCES 且 DAC 允许读取、或 ENOENT 才支持推断。本机实时模式未确认。").joinToString(" ")),
-        unconfirmedEvidence("当前 errno 或状态不足以推断 SELinux 模式，读取依据未确认。"),
+            "本机实时模式未确认。").joinToString(" ")),
+        unconfirmedEvidence("本次没有取得直接读数。"),
     )
 }
 

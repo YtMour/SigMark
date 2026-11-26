@@ -1,5 +1,29 @@
 # SigMark / 印迹
 
+**交给后续智能体**：先看 [当前版本交接](docs/HANDOFF.md)，再看 [路线与验收优先级](docs/ROADMAP.md)。**1.21.2（50）已发布到构建中心**，下载渠道不再是 1.16.0/43；后台代码与部署均为字段集 25（`latestFieldSet=25`、词典 `sigmark-lan-fields/16`、235 键），画像规则 `sigmark-profile/8`。真机验收覆盖 Pixel 6（改装机）与 Xiaomi MI 8（未改装，API 29）两台。机型改写的可覆盖面与盲区单独记录在 [机型伪装可覆盖面与盲区](docs/DEVICE-DISGUISE-SURFACE.md)。
+
+**日常采集** · 在手机 App 点击「整体获取」，需要后台查看时再从 App 上传报告。后台打开报告即执行安全检查，无需电脑或导入文件。历史 App 与 ADB 对照仅在「辅助对照 · 外部记录」中查看，不计入 App 安全结果。
+
+**1.21.2** · 收口上一轮三项遗留，并修掉一个真实缺陷。① **仪器测试**：新增 `SafeReaderInstrumentedTest.kt`，22 条断言全 PASS。② **浏览器 QA**：接入 Playwright（用系统 Chrome，不下载自带 Chromium），`npm run qa` 对着真实部署跑通两个脚本。③ **SKU per-UID 跨机型**：用未改装的 MI 8 反证——`ro.boot.hardware.sku` 在这台机器上根本不存在（两个 UID 都读空），`model`／`device` 两 UID 一致，说明 per-UID 改写是**改机层行为而非 Android 行为**。④ **真实缺陷**：`SafeReader.listNames` 原来把「无权限」和「不存在」都报成 `UNAVAILABLE/NOT_REPORTED`，等于把「读不到」当成「没有」；改为先 `Os.stat` 再列举，被拒目录现在正确报 `RESTRICTED/ACCESS_DENIED errno=13`。⑤ **新增 SoC 登记 `sdm845`**（Snapdragon 845），画像规则升到 `sigmark-profile/8`；其 capacities 与 cmaMiB 故意留空（内核 4.9 不暴露 `cpu_capacity`，`CmaTotal` 是设备树值不是 SoC 常量）。APK 12 006 913 字节，SHA-256 `85ec158f…`。[设备验证记录](docs/DEVICE-VALIDATION.md) · [overlay 多路径抽取](docs/OVERLAY-ROBUSTNESS.md)
+
+**1.21.0** · 新增 `environment.overlayEvidence`：把 overlay 设备代号的**多路径抽取结果**收进单条字段，形如 `rro:oriole / vendor_dir:oriole / product_dir:oriole / sku:g9s9b,gb7n6,gr1yh / soc:gs101`。抽取按「本进程实际加载的 maps → idmap 转义名 → 四个分区 overlay 目录」三级冗余，多级冲突时以 maps 为准并写 `conflict:` 段。实测还推翻了一个假设：`ro.boot.hardware.sku` 在改装机上与 `device`／`model` 一样被按 UID 改写（shell 读 `GR1YH`，App 进程内读 `23078PND5G`），所以 `sku:` 只作旁证、不参与代号判定，与候选都不匹配时退回并列形态。字段集 25，词典 `sigmark-lan-fields/16`（235 键），`maxFields` 分档 `>=25 → 259`。Pixel 6 真机上传报告 `7c786f17…`，归档 207 项。[overlay 多路径抽取](docs/OVERLAY-ROBUSTNESS.md) · [字段集 24](docs/FRAMEWORK-DIAGNOSTICS.md#字段集-24内核算力权重与预留连续内存)
+
+**1.20.0** · 新增两个「内核口径」通道：`cpu.cpuCapacity`（`/sys/devices/system/cpu/cpu{N}/cpu_capacity`，内核按实际核心类型写入的算力权重，按核心顺序去重，形如 `160/498/1024`）与 `memory.cmaTotal`（`/proc/meminfo` 的 `CmaTotal`，内核启动时预留的连续内存池，`652 MiB`）。判定改用「登记表反查」：实测值命中**另一个已登记 SoC** 的 profile 判冲突，命中声明 SoC 自己的登记值判一致，声明 SoC 未登记或实测值不在表内判未确认、不猜。后台资产画像升到 `sigmark-profile/7`，`hardware_declaration_conflict` 证据行 8 → 10 条。字段集 24，词典 `sigmark-lan-fields/15`（234 键）。Pixel 6 实测两条通道均与声明 `mt6985` 冲突，真机上传报告 `c0f517f1…`。[字段集 24](docs/FRAMEWORK-DIAGNOSTICS.md#字段集-24内核算力权重与预留连续内存) · [伪装面与盲区](docs/DEVICE-DISGUISE-SURFACE.md)
+
+**1.19.0** · 新增第四条不依赖声明链的通道：`/proc/self/maps` 里 framework RRO overlay 文件名携带的镜像产品代号。改机层改写属性和 `Build`，但不会重建构建时生成的 overlay 文件，因此同一台 Pixel 6 上属性报 `corot`、overlay 报 `oriole`。本机判断新增「镜像 overlay 代号核对」行，后台 `sigmark-profile/6` 把 `system.device` 与 `environment.overlayDeviceCodename` 作为第四条独立通道并入 `hardware_declaration_conflict`，8 条证据全部为真实归档读数。字段集 23，词典 `sigmark-lan-fields/14`（232 键）。[伪装面与盲区](docs/DEVICE-DISGUISE-SURFACE.md) · [字段集 22](docs/FRAMEWORK-DIAGNOSTICS.md#字段集-22第二观察通道实测硬件)
+
+**1.18.0** · 新增第二观察通道：`/proc/cpuinfo` 全分块 CPU 微架构签名、`/proc/meminfo` 与 `sysconf` 的内存口径、EGL 报告的 GPU 驱动字符串。同义核对全一致时仍可能不一致的是这些通道；Pixel 6 改写机上实测暴露内存与 CPU 两处冲突，GPU 一致。字段集 22，SoC 不在登记表内记未确认，不判定真伪。[字段集 22](docs/FRAMEWORK-DIAGNOSTICS.md#字段集-22第二观察通道实测硬件)
+
+**1.17.0** · App 内逐对比较型号、设备代号和适用的硬件 SKU 的同义读数，共两至三对。主板与平台、硬件与启动硬件是不同声明，不再计为身份冲突。后台直接从归档复算，新字段集 21 保留来源与状态。[检查口径](docs/SECURITY-EVIDENCE.md#app-身份声明核对)
+
+**1.16.0** · 上传确认页精简为采样、目的地、传输提示和设备关联。备注和实际发送的参数可按需展开。密钥自测增加本机加解密检验。
+
+**1.15.0** · 后台新增保存跨来源身份对照的功能。手机首页保留采集、上传和安全结论，验收实验和原始读数移入工具菜单及诊断详情。
+
+**1.14.0** · 点击「整体获取」后，首页自动显示本次安全检查结果和检查依据。后台打开已上传的 App 报告即执行检查，ADB 与 JSON 导入位于「辅助对照」。
+
+**1.13.0** · 手机「指纹安全」展示并保存六项 App 身份声明。后台「指纹安全 → 本地身份对照」可以直接打开 App 和 ADB 的 JSON，确认同机后显示差异数。文件仅用于当前浏览器页面。[操作与验证](docs/SECURITY-EVIDENCE.md#本地身份对照)
+
 **1.12.0** · 「整体获取」同时执行密钥保护、AVC 首帧和 GLES 离屏回读。实验结果随采样保存，可在后台验收工作台展开查看。网络切换、USB 插拔和 GNSS 保留单独入口。[操作与验证](docs/ACCEPTANCE-1.0.md)
 
 **1.11.0** · 字段集 20 采集系统冷启动次数（`Settings.Global.BOOT_COUNT`）与媒体性能等级（API 31+），两者都只作世代/生命周期对照。外部观察新增 opt-in 的 `sigmark-adb-evidence/5`（`observer=ROOT`）：在 v4 字段之外给出 SELinux 策略摘要，需已 root 的测试机；面板把 App、ADB shell、root 三个来源分列，互不填充。浏览器 QA 新增身份分布页用例，报告详情对身份声明不一致的样本置顶提示。详见 [字段集 20](docs/FRAMEWORK-DIAGNOSTICS.md#字段集-20开机次数与媒体性能等级)、[syscall 边界](docs/SYSCALL-BOUNDARIES.md) 与 [设备验证记录](docs/DEVICE-VALIDATION.md)。
@@ -61,6 +85,8 @@ Android 设备采集与 ROM 验收工具。**1.1.0** 新增独立「验收工作
 采集在设备本地完成。完整报告包含构建信息及可用的运营商和无线参数，仅在用户确认导出并选定位置后保存。试验后台使用 Go + PostgreSQL + React + Docker Compose，只接收用户预览确认后的独立最小化载荷；权限授权和上传互不触发。见 [内网试验手册](docs/LAN-PILOT.md) 与 [后台设计](docs/BACKEND-DESIGN.md)。
 
 本地 JSON 还含语言时区、应用自身的安装及签名信息、环境与配置摘要。可见应用面板的其他应用清单及权限详情、传感器实时值只在面板内显示。上传预览显示归档字段和仅本机项目数量。字段来源和兼容行为见 [采集字段说明](docs/FRAMEWORK-DIAGNOSTICS.md)。
+
+字段集 22 在「查看上传参数」列出实测 CPU 核心标识、内存口径与 GPU 驱动字符串；它们都是机型级读数，不含序列号或账号。字段集 24 另列内核写入的算力权重序列（`cpu.cpuCapacity`）与预留连续内存池（`memory.cmaTotal`），同样是机型级读数。字段集 25 列出 overlay 证据串（`environment.overlayEvidence`），内容是镜像构建产物里的分区 overlay 文件名、SoC 与 SKU 候选，同样是机型级读数、不含序列号或账号。字段集 21 在「查看上传参数」列出 App 读到的产品型号和设备代号属性。这些是机型声明，不是序列号或账号，不增加设备或用户唯一标识；仍由用户手动确认发送。
 
 开发者可阅读 [架构与数据契约](docs/ARCHITECTURE.md)；自动化协作约定见 [AGENTS.md](AGENTS.md)。
 

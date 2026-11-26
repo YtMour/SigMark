@@ -1,0 +1,376 @@
+{
+  "capturedAtEpochMs": 1795616443910,
+  "historyDays": 30,
+  "historyLimit": 50,
+  "historyLimited": false,
+  "historySamples": 0,
+  "identityHistory": [
+    {
+      "board": "goldfish_x86_64",
+      "bootHardware": "ranchu",
+      "device": "emu64xa",
+      "lastCapturedAtEpochMs": 1795616443910,
+      "lastReportId": "ff32a085-bc4a-42b0-88d0-ed13ce21f23b",
+      "model": "sdk_gphone64_x86_64",
+      "samples": 1
+    }
+  ],
+  "labels": [
+    {
+      "code": "virtual_build_markers",
+      "evidence": [
+        {
+          "key": "cpu.hardware",
+          "source": "Build.HARDWARE",
+          "status": "AVAILABLE",
+          "value": "ranchu"
+        },
+        {
+          "key": "system.product",
+          "source": "Build.PRODUCT",
+          "status": "AVAILABLE",
+          "value": "sdk_gphone64_x86_64"
+        },
+        {
+          "key": "system.device",
+          "source": "Build.DEVICE",
+          "status": "AVAILABLE",
+          "value": "emu64xa"
+        }
+      ],
+      "historyEvaluable": 0,
+      "historyHits": 0,
+      "historyRestricted": 0,
+      "state": "hit"
+    },
+    {
+      "code": "selinux_permissive",
+      "evidence": [
+        {
+          "errno": 13,
+          "key": "system.selinux",
+          "reason": "ACCESS_DENIED",
+          "source": "/sys/fs/selinux/enforce",
+          "status": "RESTRICTED"
+        },
+        {
+          "key": "system.selinuxEvidence",
+          "source": "/sys/fs/selinux/enforce",
+          "status": "AVAILABLE",
+          "value": "inferred_mac"
+        }
+      ],
+      "historyEvaluable": 0,
+      "historyHits": 0,
+      "historyRestricted": 0,
+      "state": "insufficient"
+    },
+    {
+      "code": "debugger_attached",
+      "evidence": [
+        {
+          "key": "app.debuggerConnected",
+          "source": "Debug.isDebuggerConnected",
+          "status": "AVAILABLE",
+          "value": "否"
+        },
+        {
+          "key": "environment.tracerPid",
+          "source": "/proc/self/status",
+          "status": "AVAILABLE",
+          "value": "0"
+        }
+      ],
+      "historyEvaluable": 0,
+      "historyHits": 0,
+      "historyRestricted": 0,
+      "state": "not_observed"
+    },
+    {
+      "code": "hook_injection",
+      "evidence": [
+        {
+          "key": "environment.hookSignals",
+          "source": "/proc/self/maps",
+          "status": "AVAILABLE",
+          "value": "none"
+        },
+        {
+          "key": "environment.rootMountHints",
+          "source": "/proc/self/mountinfo",
+          "status": "AVAILABLE",
+          "value": "none"
+        }
+      ],
+      "historyEvaluable": 0,
+      "historyHits": 0,
+      "historyRestricted": 0,
+      "state": "not_observed"
+    },
+    {
+      "code": "root_manager_visible",
+      "evidence": [
+        {
+          "key": "environment.rootManagerVisible",
+          "source": "PackageManager.queryIntentActivities(MAIN / LAUNCHER)",
+          "status": "AVAILABLE",
+          "value": "none"
+        }
+      ],
+      "historyEvaluable": 0,
+      "historyHits": 0,
+      "historyRestricted": 0,
+      "state": "not_observed"
+    },
+    {
+      "code": "multi_open",
+      "evidence": [
+        {
+          "key": "environment.userProfile",
+          "source": "Process.myUid / ApplicationInfo.dataDir",
+          "status": "AVAILABLE",
+          "value": "owner"
+        }
+      ],
+      "historyEvaluable": 0,
+      "historyHits": 0,
+      "historyRestricted": 0,
+      "state": "not_observed"
+    },
+    {
+      "code": "rom_verification",
+      "evidence": [
+        {
+          "key": "environment.verityMode",
+          "source": "getprop ro.boot.veritymode",
+          "status": "AVAILABLE",
+          "value": "enforcing"
+        },
+        {
+          "key": "environment.buildDebuggable",
+          "reason": "NOT_REPORTED",
+          "source": "getprop ro.debuggable",
+          "status": "UNAVAILABLE"
+        }
+      ],
+      "historyEvaluable": 0,
+      "historyHits": 0,
+      "historyRestricted": 0,
+      "state": "insufficient"
+    },
+    {
+      "code": "software_drm",
+      "evidence": [
+        {
+          "key": "environment.drmSecurityLevel",
+          "source": "MediaDrm(Widevine).getProperty(SECURITY_LEVEL)",
+          "status": "AVAILABLE",
+          "value": "L3"
+        }
+      ],
+      "historyEvaluable": 0,
+      "historyHits": 0,
+      "historyRestricted": 0,
+      "state": "hit"
+    },
+    {
+      "code": "identity_conflict",
+      "evidence": [
+        {
+          "key": "system.model",
+          "source": "Build.MODEL",
+          "status": "AVAILABLE",
+          "value": "sdk_gphone64_x86_64"
+        },
+        {
+          "key": "system.propertyModel",
+          "source": "getprop ro.product.model",
+          "status": "AVAILABLE",
+          "value": "sdk_gphone64_x86_64"
+        },
+        {
+          "key": "system.device",
+          "source": "Build.DEVICE",
+          "status": "AVAILABLE",
+          "value": "emu64xa"
+        },
+        {
+          "key": "system.propertyDevice",
+          "source": "getprop ro.product.device",
+          "status": "AVAILABLE",
+          "value": "emu64xa"
+        },
+        {
+          "key": "system.sku",
+          "reason": "NOT_REPORTED",
+          "source": "Build.SKU",
+          "status": "UNAVAILABLE"
+        },
+        {
+          "key": "system.hardwareSku",
+          "reason": "NOT_REPORTED",
+          "source": "getprop ro.boot.hardware.sku",
+          "status": "UNAVAILABLE"
+        }
+      ],
+      "historyEvaluable": 0,
+      "historyHits": 0,
+      "historyRestricted": 0,
+      "state": "insufficient"
+    },
+    {
+      "basis": [
+        "ram_dispersion"
+      ],
+      "code": "hardware_declaration_conflict",
+      "evidence": [
+        {
+          "key": "memory.totalRam",
+          "source": "ActivityManager.MemoryInfo.totalMem",
+          "status": "AVAILABLE",
+          "value": "2.42 GiB"
+        },
+        {
+          "key": "memory.physicalRam",
+          "source": "Os.sysconf(_SC_PHYS_PAGES) × _SC_PAGESIZE",
+          "status": "AVAILABLE",
+          "value": "2.42 GiB"
+        },
+        {
+          "key": "memory.kernelMemTotal",
+          "source": "/proc/meminfo",
+          "status": "AVAILABLE",
+          "value": "2.42 GiB"
+        },
+        {
+          "key": "cpu.cpuParts",
+          "reason": "NOT_REPORTED",
+          "source": "/proc/cpuinfo",
+          "status": "UNAVAILABLE"
+        },
+        {
+          "key": "system.socModel",
+          "source": "Build.SOC_MODEL",
+          "status": "AVAILABLE",
+          "value": "ranchu"
+        },
+        {
+          "key": "runtime.glesRenderer",
+          "source": "EGL14 / GLES20.glGetString(GL_RENDERER)",
+          "status": "AVAILABLE",
+          "value": "Android Emulator OpenGL ES Translator (Google SwiftShader)"
+        },
+        {
+          "key": "system.device",
+          "source": "Build.DEVICE",
+          "status": "AVAILABLE",
+          "value": "emu64xa"
+        },
+        {
+          "key": "environment.overlayDeviceCodename",
+          "reason": "NOT_REPORTED",
+          "source": "/proc/self/maps",
+          "status": "UNAVAILABLE"
+        },
+        {
+          "key": "cpu.cpuCapacity",
+          "reason": "NOT_REPORTED",
+          "source": "/sys/devices/system/cpu/cpu{N}/cpu_capacity",
+          "status": "UNAVAILABLE"
+        },
+        {
+          "key": "memory.cmaTotal",
+          "reason": "NOT_REPORTED",
+          "source": "/proc/meminfo",
+          "status": "UNAVAILABLE"
+        }
+      ],
+      "historyEvaluable": 0,
+      "historyHits": 0,
+      "historyRestricted": 0,
+      "state": "not_observed"
+    }
+  ],
+  "linked": true,
+  "reportId": "ff32a085-bc4a-42b0-88d0-ed13ce21f23b",
+  "ruleVersion": "sigmark-profile/8",
+  "score": {
+    "axes": [
+      {
+        "code": "declaration",
+        "coverage": 0.33,
+        "deductions": [],
+        "label": "声明一致性",
+        "score": null,
+        "weight": 40
+      },
+      {
+        "code": "behavior",
+        "coverage": 0.83,
+        "deductions": [
+          {
+            "axis": "behavior",
+            "code": "VIRTUAL_BUILD_MARKERS",
+            "detail": "构建标记指向模拟器或虚拟设备：cpu.hardware=ranchu；system.product=sdk_gphone64_x86_64；system.device=emu64xa",
+            "keys": [
+              "cpu.hardware",
+              "system.product",
+              "system.device"
+            ],
+            "label": "virtual_build_markers",
+            "points": 35
+          }
+        ],
+        "label": "行为风险",
+        "score": null,
+        "weight": 35
+      },
+      {
+        "code": "usage",
+        "coverage": 1,
+        "deductions": [],
+        "label": "使用真实性",
+        "score": null,
+        "weight": 25
+      }
+    ],
+    "band": "D",
+    "bandLabel": "高度可疑",
+    "caps": [
+      {
+        "band": "D",
+        "code": "DECISIVE_VIRTUAL_BUILD",
+        "reason": "构建标记指向模拟器或虚拟设备：cpu.hardware=ranchu；system.product=sdk_gphone64_x86_64；system.device=emu64xa"
+      }
+    ],
+    "coverage": 0.67,
+    "coverageLabel": "部分可判",
+    "decisive": true,
+    "undetermined": [
+      {
+        "axis": "declaration",
+        "keys": [
+          "system.sku",
+          "system.hardwareSku"
+        ],
+        "reason": "UNAVAILABLE"
+      },
+      {
+        "axis": "declaration",
+        "keys": [
+          "environment.overlayDeviceCodename"
+        ],
+        "reason": "UNAVAILABLE"
+      },
+      {
+        "axis": "behavior",
+        "keys": [
+          "system.selinux"
+        ],
+        "reason": "RESTRICTED"
+      }
+    ],
+    "value": null,
+    "version": "sigmark-score/4"
+  }
+}

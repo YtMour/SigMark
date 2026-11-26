@@ -3,7 +3,7 @@ import {RiskPanel} from './risk-panel';
 import {assessRisk,registeredUnlock} from './risk-assessment';
 import {ReportFlow} from './report-flow';
 import {AcceptanceComparison,AcceptancePanel} from './acceptance-panel';
-import {ObservationPanel} from './observation-panel';
+import {LocalIdentityComparison,ObservationPanel,SavedIdentityReview} from './observation-panel';
 import {useEffect,useState} from 'react';
 import {errorMessage,request} from './console';
 import {compareSecurity,compareSummary,evaluateSecurity,releaseQuery,type ReleaseReference,type Evidence} from './security-rules';
@@ -143,7 +143,7 @@ export function SecurityPage(){
   return <main className="workspace security-workspace">
     {inspected?<ReportFlow report={inspected} view="security"/>:
       <PageHead section="security" title={retest?'安全复测':undefined}
-        description="选择报告，查看启动链、保护状态和调试证据。">
+        description="选择已上传的 App 报告，自动检查启动链、保护状态和调试读数。">
         <a className="button-link" href={reportWorkspaceLink('reports',selection.filters)}>浏览报告档案</a>
       </PageHead>}
     <div className="analysis-actions actions">
@@ -162,6 +162,10 @@ export function SecurityPage(){
       {libraryOpen&&<div id="baseline-library"><BaselineLibrary {...library} use={useSaved}/></div>}
       {!id&&<ReportPicker label="分析样本" value="" select={chooseCurrent} exclude={baseline} asset={profile?.assetId??undefined}/>}
     </section>}
+    {!id&&<details className="panel"><summary>辅助对照 · 导入外部记录</summary>
+      <p className="muted">App 采集和安全检查无需导入文件。</p>
+      <LocalIdentityComparison/>
+    </details>}
     {id&&(error?<p className="panel inset error" role="alert">{error} <a className="subtle-link" href="#security">选择其他报告</a></p>:!inspected?
       <p className="panel empty" role="status">正在读取归档证据…</p>:<>
         {showCurrentPicker&&<section className="panel inset">
@@ -227,8 +231,14 @@ export function SecurityPage(){
         </section>}
         <DeviceProfilePanel key={'profile-'+inspected.id} reportId={inspected.id} />
         <AcceptancePanel row={inspected}/>
-        <ObservationPanel key={'observation-'+inspected.id} report={inspected} />
         {evidencePanel}
+        <details className="panel" key={'observation-'+inspected.id} data-section="external-observations">
+          <summary>辅助对照 · 外部记录</summary>
+          <p className="muted">此处是独立的外部对照；App 采集和安全检查无需 ADB 或导入文件。</p>
+          {inspected.identityReview&&<SavedIdentityReview reportId={inspected.id} review={inspected.identityReview}/>}
+          <ObservationPanel report={inspected} onSaveIdentityReview={identityReview=>
+            setReport(current=>current?.id===inspected.id?{...current,identityReview}:current)}/>
+        </details>
         <div className="actions security-secondary"><button className="secondary" type="button" onClick={()=>setSaveOpen(true)}>保存当前为回归基线</button>
           <button className="text-button" type="button" onClick={()=>{setLibraryOpen(true);library.reload();window.scrollTo(0,0);}}>管理已保存的基线</button></div>
         {saveOpen&&<BaselineDialog reportId={inspected.id} model={inspected.report.model} expectUnlock={false}

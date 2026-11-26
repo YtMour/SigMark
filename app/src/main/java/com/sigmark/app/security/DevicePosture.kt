@@ -2,6 +2,7 @@ package com.sigmark.app.security
 
 import com.sigmark.app.collector.bootEvidence
 import com.sigmark.app.model.DeviceInfoItem
+import com.sigmark.app.model.DeviceSnapshot
 import com.sigmark.app.model.ValueStatus
 import java.time.Instant
 import java.time.LocalDate
@@ -10,6 +11,11 @@ import java.time.temporal.ChronoUnit
 
 internal enum class Finding(val label: String) { PRIORITY("优先处理"), REVIEW("请核对"), OBSERVED("已观察"), UNKNOWN("未确认") }
 internal data class PostureRow(val id: String, val name: String, val state: Finding, val message: String, val source: String)
+
+internal fun devicePosture(snapshot: DeviceSnapshot): List<PostureRow> =
+    devicePosture(snapshot.sections.flatMap { section ->
+        section.items.map { item -> "${section.key}.${item.key}" to item }
+    }.toMap(), snapshot.collectedAt)
 
 internal fun devicePosture(fields: Map<String, DeviceInfoItem>, capturedAt: Long): List<PostureRow> {
     fun value(k: String) = fields[k]?.takeIf { it.status == ValueStatus.AVAILABLE }?.value
@@ -34,16 +40,14 @@ internal fun devicePosture(fields: Map<String, DeviceInfoItem>, capturedAt: Long
         ArchitectureState.INSUFFICIENT -> Finding.UNKNOWN to "归档缺少足够的可比较读数，或读数不在已知 ABI 范围。"
     }
     val selMode = value(sel)
+    val selBasis = value("system.selinuxEvidence")
     val selinuxRow = when {
-        selMode == null -> row(sel, "SELinux", Finding.UNKNOWN, "未取得实时模式；普通应用读节点受限很常见，不按关闭处理。")
+        selMode == null || selMode.contains("推断") || selBasis in setOf("inferred_mac", "inferred_disabled") ->
+            row(sel, "SELinux", Finding.UNKNOWN, "本机读数不足，实时模式未确认。")
         selMode.startsWith("Permissive") -> row(sel, "SELinux", Finding.PRIORITY,
-            if (selMode.contains("推断")) "推断为宽容模式：策略违规只记录不拦截。依据是节点被拒读但文件权限允许读取；请核对 ROM。"
-            else "直接读到宽容模式：策略违规会记录但不强制拦截。若非预期测试系统，先检查 ROM。")
+            "本次读到宽容模式。若非预期测试系统，请核对 ROM。")
         selMode.startsWith("Enforcing") -> row(sel, "SELinux", Finding.OBSERVED,
-            if (selMode.contains("推断")) "推断为强制模式：节点被策略拒绝读取，而文件权限允许读取；permissive 下本应可读。这不是直接读数。"
-            else "直接读到强制模式。此项不证明其他保护均生效。")
-        selMode.startsWith("未启用") -> row(sel, "SELinux", Finding.REVIEW,
-            "推断 SELinux 未启用：selinuxfs 未挂载或 enforce 节点不存在。若非定制试验系统，先核对 ROM 与内核配置。")
+            "本次读到强制模式。")
         else -> row(sel, "SELinux", Finding.UNKNOWN, "节点内容不是标准 0/1，实时模式未确认。")
     }
     val hookKeys = listOf("environment.hookSignals", "environment.rootMountHints", "environment.rootManagerVisible")
@@ -78,29 +82,60 @@ internal fun devicePosture(fields: Map<String, DeviceInfoItem>, capturedAt: Long
         romFacts.isNotEmpty() -> row("environment.verityMode", "ROM 验证启动", Finding.OBSERVED, "$romFacts。")
         else -> row("environment.verityMode", "ROM 验证启动", Finding.UNKNOWN, "未取得 dm-verity 或系统可调试声明。")
     }
-    val identityPairs = listOf(
-        Triple("system.board", "system.boardPlatform", "主板 Build.BOARD / ro.board.platform"),
-        Triple("cpu.hardware", "system.bootHardware", "硬件 Build.HARDWARE / ro.boot.hardware"),
-        Triple("system.sku", "system.hardwareSku", "SKU Build.SKU / ro.boot.hardware.sku"),
-    )
-    val identityComparable = identityPairs.mapNotNull { (left, right, label) ->
-        val declared = value(left)
-        val property = value(right)
-        if (declared != null && property != null) Triple(label, declared, property) else null
+    val identity = identityConsistency(::value)
+    val identityState = when {
+        identity.differences.isNotEmpty() -> Finding.REVIEW
+        identity.complete -> Finding.OBSERVED
+        else -> Finding.UNKNOWN
     }
-    val identityConflicts = identityComparable.filter { (_, declared, property) ->
-        !declared.equals(property, ignoreCase = true)
+    val identityRow = PostureRow("app_identity", "App 身份声明核对", identityState, when (identityState) {
+        Finding.REVIEW -> "${identity.differences.joinToString("、")}读数不一致。建议重新采集核对。"
+        Finding.OBSERVED -> "已比较的 ${identity.compared} 对读数一致。"
+        else -> "可比较 ${identity.compared} / ${identity.total} 对；未取得完整读数。"
+    }, "本次 App 的 Build 读数与同义只读属性；不是独立身份验证。")
+    // The overlay product name is baked into the image at build time; the codename
+    // property can be rewritten per app, so the two disagreeing is the interesting case.
+    val declaredDevice = value("system.device")
+    val overlayDevice = value("environment.overlayDeviceCodename")
+    // Field set 25. The multi-path evidence string records whether the channels that did
+    // answer disagree with each other. That is a stronger signal than a single codename,
+    // so it is surfaced before the declared-versus-overlay comparison.
+    val overlayConflicts = value("environment.overlayEvidence")
+        ?.split(" / ")?.filter { it.startsWith("conflict:") }.orEmpty()
+    val overlayRow = when {
+        overlayConflicts.isNotEmpty() -> PostureRow("overlay_codename", "镜像 overlay 代号核对",
+            Finding.REVIEW,
+            "镜像内多条 overlay 路径给出的代号不一致：${overlayConflicts.joinToString("；")}。" +
+                "同一个镜像的构建产物通常一致，先核对改机、移植 ROM 或虚拟化环境。",
+            "environment.overlayEvidence")
+        declaredDevice == null || overlayDevice == null -> PostureRow("overlay_codename", "镜像 overlay 代号核对",
+            Finding.UNKNOWN, "缺少 system.device 或 overlay 代号读数，未比对。",
+            "environment.overlayDeviceCodename / system.device")
+        identityComparableForm(declaredDevice.trim()) == identityComparableForm(overlayDevice.trim()) ->
+            PostureRow("overlay_codename", "镜像 overlay 代号核对", Finding.OBSERVED,
+                "设备代号与镜像 overlay 记录一致（${overlayDevice.trim()}）。",
+                "environment.overlayDeviceCodename / system.device")
+        else -> PostureRow("overlay_codename", "镜像 overlay 代号核对", Finding.REVIEW,
+            "属性报告的设备代号为 ${declaredDevice.trim()}，镜像 overlay 记录的却是 ${overlayDevice.trim()}。" +
+                "overlay 文件名来自构建镜像，通常不受改机工具影响；先核对改机、移植 ROM 或虚拟化环境。",
+            "environment.overlayDeviceCodename / system.device")
     }
-    val identityRow = when {
-        identityConflicts.isNotEmpty() -> row("system.board", "设备身份字段", Finding.REVIEW,
-            "同一观察者内部两组声明不一致：" + identityConflicts.joinToString("；") { (label, declared, property) ->
-                "$label（$declared / $property）"
-            } + "。先核对 ROM 属性改写，不据此判定真伪。")
-        identityComparable.isNotEmpty() -> row("system.board", "设备身份字段", Finding.OBSERVED,
-            "已比较 ${identityComparable.size} 对身份声明，读数一致；一致只说明当前观察者内部自洽，不代表原厂。")
-        else -> row("system.board", "设备身份字段", Finding.UNKNOWN, "缺少可比的 Build 与属性身份读数。")
+    val hardware = hardwareFacts(::value)
+    val hardwareRow = when {
+        hardware.conflicts.isNotEmpty() -> PostureRow("hardware_facts", "实测硬件与声明", Finding.REVIEW,
+            hardware.conflicts.joinToString("；") { it.message } + " 若是刷机、虚拟化或实验用机型改写，请核对测试条件。",
+            "cpu.cpuParts / memory.physicalRam / runtime.glesRenderer / cpu.cpuCapacity / memory.cmaTotal")
+        hardware.confirmed > 0 -> PostureRow("hardware_facts", "实测硬件与声明", Finding.OBSERVED,
+            "已核对 ${hardware.confirmed} 项独立通道读数，未发现与声明冲突。这不等于原厂证明。",
+            "cpu.cpuParts / memory.physicalRam / runtime.glesRenderer / cpu.cpuCapacity / memory.cmaTotal")
+        else -> PostureRow("hardware_facts", "实测硬件与声明", Finding.UNKNOWN,
+            "缺少可比对的实测读数或 SoC 不在对照表内。", "cpu.cpuParts / memory.physicalRam / runtime.glesRenderer / cpu.cpuCapacity / memory.cmaTotal")
     }
-    return listOf(
+    val keyProbe = fields["environment.keyProtection"]
+    val keyIssue = if (keyProbe?.status == ValueStatus.ERROR) {
+        row("environment.keyProtection", "密钥自测", Finding.REVIEW, "临时密钥自测未完成，建议重试。")
+    } else null
+    return (listOf(
         PostureRow("boot", "启动完整性", boot.first, boot.second, "ro.boot.verifiedbootstate / vbmeta.device_state / flash.locked"),
         selinuxRow,
         when(value(lock)) {
@@ -120,6 +155,6 @@ internal fun devicePosture(fields: Map<String, DeviceInfoItem>, capturedAt: Long
         },
         PostureRow("runtime_architecture", "运行架构一致性", architecture.first, architecture.second,
             "Process.is64Bit / Build.SUPPORTED_ABIS / Os.uname"),
-        romRow, hookRow, tracerRow, profileRow, identityRow,
-    ).sortedBy { it.state.ordinal }
+        romRow, hookRow, tracerRow, profileRow, identityRow, hardwareRow, overlayRow,
+    ) + listOfNotNull(keyIssue)).sortedBy { it.state.ordinal }
 }

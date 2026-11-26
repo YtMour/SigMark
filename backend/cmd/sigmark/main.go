@@ -159,6 +159,7 @@ func (s server) routes() http.Handler {
 				admin.Post("/device-assets/merges/{id}/undo", s.undoAssetMerge)
 				admin.Post("/reports/export", s.exportReports)
 				admin.Post("/reports/manage", s.manageReports)
+				admin.Put("/reports/{id}/identity-review", s.saveIdentityReview)
 			})
 		})
 	})
@@ -232,12 +233,13 @@ func (s server) submit(w http.ResponseWriter, r *http.Request) {
 }
 
 type storedReport struct {
-	ID        string     `json:"id"`
-	Batch     string     `json:"batch"`
-	Received  time.Time  `json:"receivedAt"`
-	Report    Report     `json:"report"`
-	TrashedAt *time.Time `json:"trashedAt,omitempty"`
-	AssetID   *string    `json:"assetId,omitempty"`
+	ID             string          `json:"id"`
+	Batch          string          `json:"batch"`
+	Received       time.Time       `json:"receivedAt"`
+	Report         Report          `json:"report"`
+	TrashedAt      *time.Time      `json:"trashedAt,omitempty"`
+	AssetID        *string         `json:"assetId,omitempty"`
+	IdentityReview json.RawMessage `json:"identityReview,omitempty"`
 }
 
 type reportIndexRow struct {
@@ -266,6 +268,16 @@ func (s server) reportDetail(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		fail(w, 503, "storage_unavailable")
 		return
+	}
+	if r.URL.Query().Get("include") == "asset" && p.TrashedAt == nil {
+		evidence, err := s.getIdentityReview(ctx, id)
+		if err != nil {
+			fail(w, 503, "storage_unavailable")
+			return
+		}
+		if string(evidence) != "null" {
+			p.IdentityReview = evidence
+		}
 	}
 	send(w, 200, p)
 }

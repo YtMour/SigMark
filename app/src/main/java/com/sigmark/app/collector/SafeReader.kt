@@ -11,6 +11,7 @@ import com.sigmark.app.model.ReadReason
 import com.sigmark.app.model.ValueStatus
 import com.sigmark.app.model.normalizeValue
 import java.io.ByteArrayOutputStream
+import java.io.File
 import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.Callable
 import java.util.concurrent.ExecutionException
@@ -53,6 +54,8 @@ internal object SafeReader {
     private const val propertyTimeoutMs = 350L
     internal const val propertySnapshotMaxBytes = 96 * 1024
     private const val propertySnapshotTimeoutMs = 800L
+    // Fixed prefix plus a bounded core index; never taken from a caller-supplied path.
+    private const val cpuCapacityBase = "/sys/devices/system/cpu"
     private val workers = ThreadPoolExecutor(2, 2, 20, TimeUnit.SECONDS, ArrayBlockingQueue(2)) { work ->
         Thread(work, "sigmark-reader").apply { isDaemon = true }
     }.apply { allowCoreThreadTimeOut(true) }
@@ -78,6 +81,7 @@ internal object SafeReader {
     enum class Property(val key: String) {
         SELINUX_BOOT("ro.boot.selinux"), SELINUX_BUILD("ro.build.selinux"),
         FIRST_API_LEVEL("ro.product.first_api_level"),
+        PRODUCT_MODEL("ro.product.model"), PRODUCT_DEVICE("ro.product.device"),
         VENDOR_PATCH("ro.vendor.build.security_patch"),
         HYPEROS("ro.mi.os.version.name"), MIUI("ro.miui.ui.version.name"),
         COLOR_OS("ro.build.version.opporom"), ONE_UI("ro.build.version.oneui"),
@@ -193,6 +197,61 @@ internal object SafeReader {
         }
     }
 
+    // cpu_capacity is one file per core, so it cannot be a single fixed Node path. The
+    // loop is bounded to the first eight cores, which covers every shipping big.LITTLE
+    // layout. A core that does not exist (ENOENT) is skipped; a core that exists but is
+    // denied fails the whole signature, because a partial profile would look like a
+    // different SoC instead of a visible gap.
+    fun cpuCapacitySignature(maxCores: Int = 8): ReadResult<String> = bounded(
+        "$cpuCapacityBase/cpu{N}/cpu_capacity", fileTimeoutMs) {
+        read("$cpuCapacityBase/cpu{N}/cpu_capacity",
+            "逐个读取 cpu0–cpu${maxCores - 1} 的 cpu_capacity，按首次出现顺序去重；缺少任一存在的核心即整项记受限。") {
+            val seen = LinkedHashSet<Int>()
+            for (index in 0 until maxCores) {
+                val path = "$cpuCapacityBase/cpu$index/cpu_capacity"
+                val fd = try { Os.open(path, openFlags(), 0) }
+                catch (e: ErrnoException) {
+                    if (e.errno == OsConstants.ENOENT) continue
+                    throw e
+                }
+                val capacity = try {
+                    val buffer = ByteArray(32)
+                    val n = Os.read(fd, buffer, 0, buffer.size)
+                    if (n <= 0) null else String(buffer, 0, n, Charsets.UTF_8).trim().toIntOrNull()
+                } finally { Os.close(fd) }
+                if (capacity != null && capacity > 0) seen += capacity
+            }
+            if (seen.isEmpty()) null else seen.joinToString("/")
+        }
+    }
+
+    // A directory listing needs the same time bound as a file read: a stuck FUSE mount
+    // or an oversized overlay directory must not stall the whole capture. Entries are
+    // sorted so a report is reproducible, then truncated to a fixed ceiling.
+    // java.io.File.list() answers null for both "missing" and "denied" without raising
+    // an errno, so the stat call runs first. A directory that stats fine but lists null
+    // is denied, not absent: reporting it as "nothing there" would be a false clean
+    // result, which is exactly the mistake a disguise check must not make.
+    fun listNames(path: String, maxEntries: Int = 64): ReadResult<List<String>> =
+        bounded(path, fileTimeoutMs) {
+            val stat = try {
+                Os.stat(path)
+            } catch (e: ErrnoException) {
+                return@bounded errnoResult<List<String>>(path, e.errno, OsConstants.EACCES,
+                    OsConstants.EPERM, OsConstants.ENOENT, OsConstants.ENOTDIR)
+            }
+            if (!OsConstants.S_ISDIR(stat.st_mode)) {
+                return@bounded missing(path, ReadReason.NODE_MISSING, "该路径存在但不是目录。")
+            }
+            val names = File(path).list()
+                ?: return@bounded ReadResult(null, ValueStatus.RESTRICTED, path,
+                    "目录存在（stat 可见）但列出条目被拒绝，不能据此断言其中没有文件。",
+                    ReadReason.ACCESS_DENIED, OsConstants.EACCES)
+            read(path, "只列出目录条目名，不读取文件内容；按名称排序后截断到 $maxEntries 项。") {
+                names.sorted().take(maxEntries)
+            }
+        }
+
     fun suFileHint(): ReadResult<String> = firstAvailable(
         { statSu("/system/bin/su") }, { statSu("/system/xbin/su") }, { statSu("/sbin/su") },
     ).let { reading ->
@@ -228,9 +287,17 @@ internal object SafeReader {
             if (!p.waitFor(propertyTimeoutMs, TimeUnit.MILLISECONDS)) throw TimeoutException()
             check(p.exitValue() == 0)
             return p.inputStream.use {
-                val bytes = ByteArray(128)
-                val count = it.read(bytes)
-                String(bytes, 0, count.coerceAtLeast(0), Charsets.UTF_8).trim()
+                // Reject an oversized read rather than compare a truncated prefix,
+                // including multi-byte model names when the snapshot path failed.
+                val bytes = ByteArray(1025)
+                var count = 0
+                while (count < bytes.size) {
+                    val read = it.read(bytes, count, bytes.size - count)
+                    if (read <= 0) break
+                    count += read
+                }
+                check(count < bytes.size)
+                String(bytes, 0, count, Charsets.UTF_8).trim()
             }
         } finally { p.destroyForcibly() }
     }
@@ -262,6 +329,12 @@ internal object SafeReader {
     // stat only, without opening the node. Used to separate DAC from MAC denial.
     fun statMode(path: String): ReadResult<Int> = bounded(path, fileTimeoutMs) {
         read(path) { Os.stat(path).st_mode }
+    }
+
+    // O_CLOEXEC only exists from API 27; asking for it earlier fails the open itself.
+    private fun openFlags(): Int {
+        val base = OsConstants.O_RDONLY or OsConstants.O_NONBLOCK
+        return if (Build.VERSION.SDK_INT >= 27) base or OsConstants.O_CLOEXEC else base
     }
 
     internal fun readPropertyValue(source: String, block: () -> String): ReadResult<String> =

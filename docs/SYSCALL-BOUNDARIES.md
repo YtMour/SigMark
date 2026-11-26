@@ -6,7 +6,7 @@ SigMark 可以使用 `android.system.Os` 或 NDK/libc 读取某些底层信息�
 
 `syscall` 是进入内核的调用路径，不是额外权限。Java `File`、`android.system.Os`、Native libc 最终受同一应用 UID、文件权限和 SELinux 域约束。把 `/sys/fs/selinux/enforce` 从 Java 文件读取改为 `Os.open()` 后，在连接设备上仍返回 `errno=13`（`EACCES`）。
 
-1.8.0 起，EACCES 会先用 `Os.stat` 检查 selinuxfs 目录与 `enforce` 的 DAC 位：只有节点存在且 DAC 允许其他用户读取时，才把结果标为 `Enforcing（强制模式，推断）` 并写 `system.selinuxEvidence=inferred_mac`。真机 logcat 同时出现 `avc: denied { read } name="enforce" ... scontext=u:r:untrusted_app tcontext=u:object_r:selinuxfs tclass=file permissive=0`，ADB `getenforce` 返回 `Enforcing`：三个来源一致，但这个值仍是推断而不是直接读数。文件权限本身不允许、或 `stat` 失败时，结果保持 `RESTRICTED`。
+当前采集只接受节点直接返回的 `1` 或 `0` 作为实时模式。EACCES 保留为 `RESTRICTED`，ENOENT 保留为 `UNAVAILABLE`。拒读时，目录与节点权限位可提供辅助线索，归入 `system.selinuxEvidence=inferred_mac`。旧报告保留原始推断文案，当前评估和回归将其视作未确认。
 
 可用的底层补充信息包括 `uname` 的内核 release/编译版本、`sysconf` 的页大小与配置核数、当前应用可读的 `/proc/cpuinfo`、部分 CPU 频率节点，以及本进程的 `/proc/self/maps`、`mountinfo`、`status`。它们是应用进程观察值，不一定与 ADB shell 或物理硬件规格相同。
 
@@ -21,10 +21,10 @@ SigMark 可以使用 `android.system.Os` 或 NDK/libc 读取某些底层信息�
 | --- | --- | --- |
 | App（`untrusted_app`） | 公开 API、本进程 `/proc/self/*`、DAC 可见的只读节点、被过滤后的属性 | `selinuxfs` 的 enforce/policy、电池 `power_supply` 节点、被隐藏的 `ro.*`（如 `ro.debuggable`）、其他进程与应用的私有数据 |
 | ADB shell（`shell`，无 root） | `getenforce`、大部分 `ro.*`、部分 `sysfs`、`dumpsys`（含 telephony registry）、`pm`/`am` 的只读查询 | `security:read_policy`（策略正文）、其他 UID 的应用数据、`/proc/<其他应用>/maps` |
-| root（解锁 Bootloader + Magisk/KernelSU） | 上述全部，另加策略正文、任意 `sysfs`/`/proc`、其他应用数据库、隐藏属性 | 无法在不解锁的情况下获得；解锁会清除数据、改变启动校验与 Play Integrity 结论 |
+| 已具备特权的独立观察者 | 策略允许时可获取策略摘要 | 读取范围由观察进程的 SELinux 域及设备策略决定 |
 | 自定义 ROM / 系统组件版 | 可在自有 sepolicy 中给专用域授权，让**系统组件**读到更多 | 需要自己构建与签名系统镜像；已不是“普通应用视角” |
 
-结论：**普通 APK 内没有绕过路径**。能提升的只有观察身份，而且必须与 App 读数分列。可行且已实现的路线是 shell 视图的「证据来源对照」；需要策略正文或其他应用数据时，只能 root，并且在报告里必须标成另一身份。
+设备侧补充结果通过「证据来源对照」与 App 读数并列。系统侧采集取决于系统组件所在的域及设备策略。
 
 ### 同一属性的按上下文视图（真机记录，2026-11-24）
 
@@ -68,6 +68,8 @@ Android 运行时授权适用于定位等声明权限。系统文件访问还由
 ```powershell
 python -B tools/coverage_observation.py --serial ADB_SERIAL --output D:/SigMark/app/build/coverage-test.json
 ```
+
+只复核 SELinux 时可加 `--selinux-only`。文件保存机型、观测时间和模式。生成后在「指纹安全 → 证据来源对照」选择本地 JSON。
 
 ### root 观察通道（opt-in，需 root）
 

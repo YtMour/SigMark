@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"sort"
 	"strconv"
@@ -13,7 +14,15 @@ import (
 
 const profileLimit = 50
 const profileDays = 30
-const profileVersion = "sigmark-profile/3"
+
+// profileVersion history — bumped whenever the same archived report would produce a
+// different label set or a different label state.
+//
+//	/8  ten labels, identity_conflict compares two usable reads.
+//	/9  identity_conflict also fires on a one-sided pair: both sides read successfully, one
+//	    produced a value and the other did not. The state vocabulary is unchanged, so this is
+//	    a mapping change, not a shape change — but it moves bands, so it gets a version.
+const profileVersion = "sigmark-profile/9"
 
 type profileEvidence struct {
 	Key    string `json:"key"`
@@ -28,8 +37,15 @@ type profileHit struct {
 	CapturedAt int64  `json:"capturedAtEpochMs"`
 }
 type profileLabel struct {
-	Code              string            `json:"code"`
-	State             string            `json:"state"`
+	Code  string `json:"code"`
+	State string `json:"state"`
+	// Basis lists every channel branch that produced State, in evaluation order. It is a
+	// list, not one string, because a label can reach the same state through several
+	// independent channels at once: the Pixel 6 disguise trips the overlay codename and
+	// both foreign-profile channels together, and a consumer that only saw the first one
+	// would attribute the conflict to the wrong branch. It is omitted when empty so an
+	// existing shape never changes.
+	Basis             []string          `json:"basis,omitempty"`
 	Evidence          []profileEvidence `json:"evidence"`
 	HistoryHits       int               `json:"historyHits"`
 	HistoryRestricted int               `json:"historyRestricted"`
@@ -64,6 +80,9 @@ type deviceProfile struct {
 	Identity        []profileIdentity `json:"identityHistory"`
 	IdentityLimited bool              `json:"identityTruncated,omitempty"`
 	Labels          []profileLabel    `json:"labels"`
+	// Score is a projection of Labels (plus the two usage fields). It is computed
+	// after the target labels so the two can never disagree.
+	Score deviceScore `json:"score"`
 }
 
 const identityComboLimit = 5
@@ -174,18 +193,23 @@ func profileSignals(parameters []Parameter) []profileLabel {
 		}
 		return out
 	}
-	// Direct reads keep the parenthetical suffix; an inferred value only appends
-	// 「推断」 to the same mode word, so the mode is identified by prefix.
-	prefixed := func(hit, no string) func(string) string {
-		return func(s string) string {
-			switch {
-			case strings.HasPrefix(s, hit):
-				return "hit"
-			case strings.HasPrefix(s, no):
-				return "not_observed"
-			}
+	basis, hasBasis := fields["system.selinuxEvidence"]
+	selinux := eval("selinux_permissive", []string{"system.selinux"}, func(s string) string {
+		if strings.Contains(s, "推断") || (basis.Status == "AVAILABLE" &&
+			(basis.Value == "inferred_mac" || basis.Value == "inferred_disabled")) {
 			return "insufficient"
 		}
+		switch {
+		case strings.HasPrefix(s, "Permissive"):
+			return "hit"
+		case strings.HasPrefix(s, "Enforcing"):
+			return "not_observed"
+		default:
+			return "insufficient"
+		}
+	})
+	if hasBasis {
+		selinux.Evidence = append(selinux.Evidence, basis)
 	}
 	// Debug.isDebuggerConnected reports 是/否; TracerPid is a bare decimal where
 	// 0 means no tracer. An unparsable value is insufficient evidence, not a hit.
@@ -213,38 +237,39 @@ func profileSignals(parameters []Parameter) []profileLabel {
 		}
 		return "hit"
 	}
-	// identity_conflict is not a per-field classification: it compares two
-	// independent declarations of the same identity inside one observation, so it
-	// must be built here instead of by eval. A pair only counts when both sides
-	// carry a usable value; a difference in any comparable pair beats agreement in
-	// the others, and a restricted side is neither a hit nor a negative.
+	// Only two usable reads of the same declaration can disagree. They may share
+	// a backing source. Partial agreement does not complete a negative.
 	value := func(k string) profileEvidence {
 		if v, ok := fields[k]; ok {
 			return v
 		}
 		return profileEvidence{Key: k, Status: "NOT_ARCHIVED"}
 	}
-	usable := func(e profileEvidence) bool {
-		return e.Status == "AVAILABLE" && e.Value != "" && !strings.EqualFold(e.Value, "unknown")
-	}
 	identity := profileLabel{Code: "identity_conflict", State: "insufficient", Evidence: []profileEvidence{}}
-	compared := 0
-	for _, pair := range [][2]string{
-		{"system.board", "system.boardPlatform"},
-		{"cpu.hardware", "system.bootHardware"},
-		{"system.sku", "system.hardwareSku"},
-	} {
-		left, right := value(pair[0]), value(pair[1])
-		identity.Evidence = append(identity.Evidence, left, right)
-		if !usable(left) || !usable(right) {
-			continue
-		}
-		compared++
-		if !strings.EqualFold(left.Value, right.Value) {
-			identity.State = "hit"
-		}
+	readIdentity := func(key string) string { return value(key).Value }
+	pairs := applicableIdentityPairs(readIdentity)
+	for _, pair := range pairs {
+		identity.Evidence = append(identity.Evidence, value(pair[0]), value(pair[1]))
 	}
-	if identity.State != "hit" && compared > 0 {
+	compared, conflicts := compareAppIdentity(pairs, readIdentity)
+	// A pair with one side readable and the other blank — where the field set *does* define
+	// both keys — is itself a finding. Without this, deleting one property made the pair look
+	// unreadable, the label fell to insufficient, and the report became indistinguishable from
+	// a clean one (measured: a confirmed 90/D disguise washed back to 100/A).
+	oneSided, pairsPresent := oneSidedIdentity(pairs, func(key string) (string, string) {
+		evidence := value(key)
+		return evidence.Value, evidence.Status
+	})
+	if len(oneSided) > 0 {
+		identity.State = "hit"
+		identity.Evidence = append(identity.Evidence, profileEvidence{
+			Key:    "identity_asymmetry",
+			Status: "AVAILABLE",
+			Value:  fmt.Sprintf("%d 对身份读数只有一侧可读（共 %d 对在档）", len(oneSided), pairsPresent),
+		})
+	} else if len(conflicts) > 0 {
+		identity.State = "hit"
+	} else if compared == len(pairs) {
 		identity.State = "not_observed"
 	}
 	return append([]profileLabel{
@@ -255,7 +280,7 @@ func profileSignals(parameters []Parameter) []profileLabel {
 			}
 			return "not_observed"
 		}),
-		eval("selinux_permissive", []string{"system.selinux"}, prefixed("Permissive", "Enforcing")),
+		selinux,
 		eval("debugger_attached", []string{"app.debuggerConnected", "environment.tracerPid"}, attached),
 		eval("hook_injection", []string{"environment.hookSignals", "environment.rootMountHints"}, notNone),
 		eval("root_manager_visible", []string{"environment.rootManagerVisible"}, notNone),
@@ -286,7 +311,7 @@ func profileSignals(parameters []Parameter) []profileLabel {
 			}
 			return "insufficient"
 		}),
-	}, identity)
+	}, identity, hardwareFactsLabel(value))
 }
 
 func (p *deviceProfile) addHistory(id string, r Report) {
@@ -365,6 +390,7 @@ func (s server) deviceProfile(w http.ResponseWriter, r *http.Request) {
 			out.Linked = linked
 			out.CapturedAt = doc.CapturedAt
 			out.Labels = profileSignals(doc.Parameters)
+			out.Score = buildDeviceScore(doc.Parameters, out.Labels, doc.CapturedAt)
 			out.recordIdentity(rid, doc)
 		} else {
 			out.recordHistory(rid, doc)

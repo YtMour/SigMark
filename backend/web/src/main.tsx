@@ -262,10 +262,10 @@ function IdentityNotice({fields}:{fields:Parameter[]}){
   if(!conflicts.length)return null;
   return <section className="panel identity-notice" role="status" aria-label="身份声明不一致">
     <h2>身份声明不一致</h2>
-    <p>同一份报告里 Build 字段与只读属性给出不同声明。先核对 ROM 是否改写 <code>ro.*</code> 属性或打包来源；它只说明归档内部不自洽，不判定真伪。</p>
-    <ul>{conflicts.map(pair=><li key={pair.leftKey+pair.rightKey}>
+    <p>本次 App 采集的{conflicts.map(pair=>pair.title).join('、')}读数不一致；建议复采，不据此判定设备真伪。</p>
+    <details><summary>查看读数</summary><ul>{conflicts.map(pair=><li key={pair.leftKey+pair.rightKey}>
       {pair.title}：<code>{pair.leftKey}</code> = <strong>{pair.left}</strong>{' ≠ '}<code>{pair.rightKey}</code> = <strong>{pair.right}</strong>
-    </li>)}</ul>
+    </li>)}</ul></details>
     <a className="subtle-link" href="#assets?tab=identity">查看全库身份分布 →</a>
   </section>;
 }

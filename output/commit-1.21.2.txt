@@ -1,0 +1,60 @@
+字段集 25：内核口径硬通道、overlay 多路径证据与设备画像 /8
+
+采集（Android）
+- 字段集 22：补第二观察通道 —— /proc/cpuinfo MIDR、sysconf、/proc/meminfo MemTotal、
+  EGL 字符串。同一事实至少两条独立来源，任一被改写即可对照出来。
+- 字段集 23：environment.overlayDeviceCodename 从 /proc/self/maps 里的框架 RRO 文件名
+  取设备代号。RRO 文件名由构建期生成，改属性改不掉它。
+- 字段集 24：cpu.cpuCapacity（内核每核算力权重，如 160/498/1024）与 memory.cmaTotal
+  （内核预留连续内存池，如 652 MiB）。两条都是内核口径，不经 Build.* 也不经属性。
+- 字段集 25：environment.overlayEvidence 把多路径证据串成一条
+  rro:… / vendor_dir:… / product_dir:… / sku:… / soc:…；任一通道互相矛盾时追加
+  conflict:<胜出通道>:<值>!=<通道>:<值>，让冲突本身成为可读证据而不是沉默。
+- SafeReader 修一个真错：listNames 原先用 File.list()，它对「不存在」和「无权限」都
+  返回 null，于是被拒的目录被报成「目录不存在」—— 把「读不到」当成「没有」正是伪装
+  检测最不能犯的错。改为先 Os.stat：ENOENT/ENOTDIR → UNAVAILABLE/NODE_MISSING；
+  stat 成功但 list() 为 null → RESTRICTED/ACCESS_DENIED（errno=13）；非目录单独记。
+- 采集仍只用普通应用权限，AVAILABLE / UNAVAILABLE / RESTRICTED / ERROR 四态分开，
+  不以 ADB shell 或特权读数冒充 App 可获得的值。
+
+后台与前端
+- LAN 契约升到字段集 25：单帧上限 259，词典 sigmark-lan-fields/16（235 条）。
+- 设备风险画像 sigmark-profile/8：10 个标签，新增 hardware_declaration_conflict。
+  判定用独立通道交叉：RAM 三源离散度、CPU 微架构是否落在声明 SoC 的核集合里、GPU
+  家族别名、system.device 与 overlay 代号是否一致、以及「实测值恰好等于另一颗已登记
+  SoC 的画像」这种反向识别。等于别的 SoC → 命中冲突；等于自己 → 确认；未登记 → 未知，
+  绝不猜。
+- SoC 登记表新增 sdm845（Snapdragon 845）：核 0x802/0x803、GPU adreno，按
+  ro.board.platform 解析。capacity 与 cma 故意留空 —— 内核 4.9 不暴露 cpu_capacity，
+  CmaTotal 是设备树值不是 SoC 常量，宁可空着也不填。
+- Web 控制台新增 overlay-evidence 模块与冲突样式，档案页把 overlay 串与冲突原因渲染出来。
+
+测试与验收
+- Android 27 类 / 139 项单测 0 失败；新增 SafeReader 仪器测试 22 条断言全 PASS
+  （cpuCapacitySignature 9 条、listNames 13 条）。
+- Go 全绿、go vet 干净；Web 85/85；浏览器 QA 两个脚本对着真实部署全 PASS。
+- backend/scripts/qa_device_profile.py 从字段集 12 补到 25：新增第二通道 / overlay 代号 /
+  算力画像 / overlay 证据四组 fixture，串起 21→22→23→24→25 的「上一版拒绝、本版接受」
+  四步，字典、画像规则与标签列表同步；在一次性容器里完整跑通、退出码 0。
+- 真机双机验证：
+  Pixel 6（oriole 伪装 23078PND5G，API 34，内核 5.10）报告 745264e0…，
+  fieldSet 25、archived 207、画像 state=hit，10 条证据全 AVAILABLE。
+  MI 8（dipper，API 29，内核 4.9，未改装）报告 77e577c1…，archived 204、
+  画像 state=not_observed —— 同一套规则在正常设备上不误报。
+- 旧内核 / 非 AOSP ROM 上是诚实降级而非崩溃：MI 8 无 cpu_capacity → cpuCapacity
+  记 UNAVAILABLE/NOT_REPORTED；MIUI 无 AOSP 命名 RRO → overlayEvidence 记
+  UNAVAILABLE。
+- per-UID 改写结论收窄：未改装的 MI 8 在 shell 与 run-as 下读到完全相同的属性，说明
+  按 UID 改写是改机层行为，不是 Android 行为。
+- APK 1.21.2 / 50，12006913 字节，SHA-256 85ec158f…；已发布到构建中心，
+  /api/downloads/current 返回 1.21.2 / 50。
+
+剩余限制
+- cpuCapacitySignature 的 ENOENT 跳过分支、bounded 超时分支、非 ENOENT errno 分支
+  需要可注入路径或卡死挂载点，当前测不了。
+- qa_device_profile.py 的 --browser 分支与 --mobile-payload 真机 fixture 未在本轮跑。
+- MI 8 的降级路径只在一台旧内核机上验证过，API 26–28 与其它非 AOSP ROM 未测。
+- 回滚风险：回滚到字段集 22 会让 v23+ 客户端整份 400，而客户端提示是「请检查设备
+  时间」，与实际原因不符。
+
+Co-Authored-By: 沐星 <92254553+YtMour@users.noreply.github.com>

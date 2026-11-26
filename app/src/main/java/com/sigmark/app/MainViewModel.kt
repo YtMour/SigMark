@@ -34,6 +34,7 @@ data class MainUiState(
     val error: String? = null,
     val fullStage: Int = 0,
     val saving: Boolean = false,
+    val captureSecurityReady: Boolean = false,
 )
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
@@ -160,8 +161,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     else -> result
                 })
                 mutableState.value = mutableState.value.copy(fullStage = 5)
-                saveSample(complete)
-                mutableState.value = MainUiState(snapshot = complete)
+                val saveError = try {
+                    saveSample(complete)
+                    null
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    if (plan != CapturePlan.FULL) throw e
+                    currentId = null
+                    "安全检查已完成，本机报告保存失败。可在首页导出当前采样。"
+                }
+                mutableState.value = MainUiState(snapshot = complete, error = saveError,
+                    captureSecurityReady = plan == CapturePlan.FULL)
             } catch (e: CancellationException) { throw e }
             catch (e: Exception) { mutableState.value = mutableState.value.copy(refreshing = false, fullStage = 0,
                 error = "本次整体获取未完成，未上传：" + e.javaClass.simpleName) }

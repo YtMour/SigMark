@@ -61,7 +61,7 @@ async function run(){
     assert.equal(packet.policy.id,named);
     assert.equal(packet.source.baseline.reportId,baseline);
     assert.equal(packet.source.current.reportId,current);
-    assert.equal(packet.catalogVersion,'sigmark-lan-fields/11');
+    assert.equal(packet.catalogVersion,'sigmark-lan-fields/12');
     assert.equal(packet.objective,'network');
     assert.equal(packet.experiments[0].current.state,'incomplete');
     assert.equal(packet.strength.independentVerification,'not_performed');

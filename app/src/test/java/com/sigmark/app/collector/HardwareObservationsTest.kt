@@ -24,4 +24,16 @@ class HardwareObservationsTest {
         assertEquals("timeout", result[2].value)
         assertTrue(original.sections.single().items.isEmpty())
     }
+
+    // Field set 24 adds two kernel-side channels. They belong to the measured set because
+    // neither value comes from a property the device description can rewrite.
+    @Test fun measuredHardwareKeysIncludeTheFieldSet24KernelChannels() {
+        assertTrue("cpu.cpuCapacity" in measuredHardwareKeys)
+        assertTrue("memory.cmaTotal" in measuredHardwareKeys)
+        // They are independent readings, not device declarations, so they must stay out of
+        // the declaration-only set.
+        assertFalse("cpu.cpuCapacity" in coreHardwareKeys)
+        assertFalse("memory.cmaTotal" in coreHardwareKeys)
+        assertTrue(expandedHardwareKeys.containsAll(measuredHardwareKeys))
+    }
 }

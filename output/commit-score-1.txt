@@ -1,0 +1,376 @@
+﻿Summary
+feat(score): 设备安全打分体系 sigmark-score/1，三分轴 + 扣分账本 + 覆盖率闸门 + 仿真器校准
+
+Description
+## 为什么做
+
+现有画像只有 10 个布尔标签（hit / not_observed / insufficient），只能回答「哪一条命中」，
+回答不了「这台设备整体有多可信」。布尔标签没有轻重：一条 overlay 代号不一致和一条
+foreign-profile 决定性冲突，在界面上的重量完全一样。
+
+这次把布尔标签投影成一套可审计的打分：三条轴、十一条硬规则、逐条扣分账本。
+**不改客户端契约**——纯后台投影，字段集仍是 25，App 不用升级。
+
+## 三条轴与权重
+
+| 轴 | 权重 | 回答什么 |
+| --- | --- | --- |
+| declaration 声明一致性 | 40 | 这台设备有没有如实描述自己 |
+| behavior 行为风险 | 35 | 有没有 root / hook / 调试 / 多开 / 虚拟环境 |
+| usage 使用真实性 | 25 | 使用痕迹与 ROM 年龄有没有矛盾 |
+
+## 十一条硬规则
+
+R1–R9 是规格原文；**R10、R11 与 R7 的薄轴例外是回算 22 份真实报告之后补的**，
+每一条都有真实反例支撑（见 docs/SECURITY-SCORE.md §9.1.1、§13 F4）。
+
+- R1 每分扣分可追溯：label + key + detail 三者缺一不可
+- R2 同一 label 内多条命中取 max，不求和
+- R3 `not_observed` 贡献 0 扣分，但计入 coverage 分子
+- R4 `insufficient` / `NOT_ARCHIVED` 不计扣分，计入分母，并出现在 `undetermined`
+- R5 决定性命中直接把等级压到 D，不参与平均
+- R6 轴分 = clamp(100 − 扣分合计, 0, 100)；权重是加权系数，不是扣分预算
+- R7 只对 coverage ≥ 0.5 的轴做加权平均 —— **例外：带扣分的薄轴仍然计入**
+- R8 总体 coverage < 0.5 → value = null、band = "?"
+- R9 value 只用于排序，band 才是结论；A≥85 / B≥70 / C≥50 / D<50
+- R10 声明轴全盲（读不到且没找到）→ value = null、band = "?"
+- R11 band = A 要求零扣分，否则降 B（value 不动）
+
+### R6 的量纲：权重是加权系数，不是扣分预算
+
+轴权重（40/35/25）只决定这条轴在跨轴平均里的份额；标称分（hook 25、foreign 30…）是
+**轴内百分制扣分**。两者不能互相换算。两种错误写法都用真实数据验过：
+
+| 写法 | hook 单条命中后的 behavior 轴分 | 结论 |
+| --- | --- | --- |
+| 按权重归一化 `100×(35−25)/35` | 29 | 太严厉，一条发现压过九条干净通道 |
+| 扣分截断到权重 35 | 65（下限 65） | 太宽松，全面不符也走不到 D |
+| 截断到 100（采用） | 75 | ✅ |
+
+**D 档不依赖决定性 cap**：声明轴理论下限是 `100−70 = 30`（不是 `100−40 = 60`），
+所以「全面不符」的设备能靠分数自己走进 D。
+
+## 回算 22 份历史报告，抓出五个真实缺陷
+
+这一步是整轮最硬的证据。**先跑数据、再定规则**，不是设计时想到的。
+
+| # | 缺陷 | 症状 | 根因 | 修法 |
+| --- | --- | --- | --- | --- |
+| 1 | A 档漏洞 | 字段集 20 的 4 份伪装报告 = 100 / A | declaration 轴 coverage = 0，被 R7 整条排除，另两轴满分顶上 | R10 |
+| 2 | A 档漏洞 | 字段集 22 的伪装报告 = 88 / A | 30 分实证冲突被另两轴满分稀释 | R11 |
+| 3 | 负面发现被丢弃 | 薄轴带 25 分 identity 冲突时整条被排除 | R7 只看 coverage，不看有没有找到东西 | R7 薄轴例外 |
+| 4 | 一个事实扣两次 | 代号不一致同时进 30 分通道冲突和 15 分 overlay，keys 完全相同，共 45 分 | 未把 overlay 通道从 hardware 的 30 分里摘出 | `nonOverlayBasis` |
+| 5 | 分支被埋掉 | `Basis` 只记第一条命中分支，Pixel 6 的 foreign-profile 被 overlay 抢先，等级 D→B | 单值字段装不下多分支 | `Basis []string` |
+
+修后回归：**零份伪装报告落 A，零份干净报告落 C/D。**
+
+## 第二轮：静态审查又抓出八条组合缺陷
+
+第一轮靠「回算已有报告」。第二轮换方法：**只读代码 + 手算**，专找「每条规则单独看是对的、
+叠在一起给出错误结论」的路径。又抓到 8 条，全部已修、全部有测试锁住。
+
+| # | 严重度 | 缺陷 | 触发条件 |
+| --- | --- | --- | --- |
+| 1 | **致命** | R5 被 R8/R10 的早退跳过，同一份文档同时输出 `decisive=true`、`caps` 非空、`band="?"` | 决定性命中 + coverage < 0.5 |
+| 2 | **高** | SKU-only 身份冲突被当成 app-uid 分支：15 分非决定性做成 25 分 + 决定性 D | API≥31 且只有 SKU 对不一致（Pixel 6 真实行为） |
+| 3 | **高** | usage coverage 按字段数算，只读一个字段就是 0.5，恰好过 R7 闭区间闸门 | `bootCount` 可读但日期 RESTRICTED |
+| 4 | 中 | 前端 `counted` 与后端 R7 薄轴例外矛盾：后端计入、界面说「未计入总分」 | coverage<0.5 且带扣分的轴 |
+| 5 | 中低 | behavior 轴静默丢掉 `rom_verification` / `software_drm` | DRM=L3 或 verity off（**MI 8 锚点本身就中**） |
+| 6 | 低 | usage 硬编码 `2021`，判定不看采样时间 | 2023 分区 + 2026 采样 |
+| 7 | 低 | `hit` 标签的不可用 key 不进 `undetermined` | hook 命中但 `rootMountHints=RESTRICTED` |
+| 8 | 低 | coverage 两位小数 vs 文档三位 | 全库 |
+
+**为什么第一轮没抓到 1、2**：22 份历史报告里**没有一份**是「决定性命中 + 低覆盖」，
+也**没有一份**是「SKU-only 冲突」。它们不是理论隐患——模拟器报告必然走第 1 条的路径，
+而 Pixel 6 的 SKU 按 UID 分裂是已记录的真实行为。这正说明「只用现有数据验证」不够。
+
+修完重跑全库 22 份，**落点与修前完全一致**，黄金文件也未变：这 8 条修的是尚未被现有数据
+触发的路径，没有引入任何回归。
+
+## 第三轮：文档审计 + 补上整表断言
+
+前两轮修的是**代码**（规则错了，改实现）。第三轮做的是只读审计：逐行核对
+`docs/SECURITY-SCORE.md` 与 `score.go`，结论是**算得对、叫得不对**——
+关键数值全部一致（§5.2 分母、§8.1 的 77/B/0.750、§9.1.1 的 0.54 与 0.06、
+两个锚点的 82/D 与 100/A），但命名与残留旧口径大面积对不上：
+
+- 四个分支 code 文档与代码**一个都不一致**（`VIRTUAL_BUILD` vs `VIRTUAL_BUILD_MARKERS` 等）
+- behavior 标称分合计文档写 125、代码是 115；usage 文档写 15、代码是 12
+- band 表一处写 `A 90–100`、另一处写 `A 85–100`，代码是 85
+- `min(Σ, weight)` 是被 §13 F3 明文否掉的读法，却还留在 §5.6
+- §7.1/§9.4 的 `0.375 / 0.381` 是 8 分母时代的化石（`0.375 = 3/8`，6 分母下不可能出现）
+- 19 处 `文件:行号` 引用整列漂移，三处指向空行
+
+**根因不是算错，是文档没有测试保护。** 所以这一轮补了代码：
+
+1. **`TestScoreDeductionTableMatchesTheDocumentedContract`** —— 表驱动断言 §2.3 整张契约表
+   的 `(code, label, axis, points, decisive)` 五元组，并反向断言「实现产出的每个 code
+   都必须在表里」。上线当天就抓到两个真缺陷：
+   - `OVERLAY_CODENAME_MISMATCH` 的 `label` 写成了 `overlay_codename`，
+     凭空发明了一个画像从不产出、文档从不列出的标签名。已改回复用
+     `hardware_declaration_conflict`（overlay 是那条标签的一条通道，不是第 11 个标签）。
+   - 该测试自己的 FOREIGN_PROFILE fixture 用 `cpu.hardware=qcom`，而 `qcom` 不在
+     `socProfiles` 里，`declaredSoc()` 解析不出已登记 SoC，分支**根本不会触发**。
+     这暴露一个真实脆弱点：声明一个表外厂商名时，`FOREIGN_PROFILE` 这条通道静默失效。
+
+2. **输出顺序确定性**（`orderScoreAxes` / `orderScoreUndetermined` / caps 按 code 排序）——
+   `deductions` 按 points 降序、同分按 code 升序，`undetermined` 按轴/reason/keys 排序去重。
+   不做这一步，黄金文件的 diff 分不清「设备变了」和「map 遍历顺序变了」，导出也不可复现。
+   **只改输出形状、不改判定，所以没有升版。**
+
+3. **前端账本主标题改为分支 code** —— 三条声明轴分支共用同一个 label，
+   只写 label 会让 Pixel 6 的两条扣分（30 与 15）长得一模一样。
+
+## 三个真机锚点
+
+| 设备 | value | band | coverage | decisive |
+| --- | --- | --- | --- | --- |
+| Pixel 6 改装（`745264e0`） | 82 | **D 高度可疑** | 0.94 充分可判 | `DECISIVE_FOREIGN_PROFILE` |
+| MI 8 未改装（`77e577c1`） | 100 | **A 一致** | 0.81 部分可判 | — |
+| Android 34 仿真器（`ff32a085`） | `null` | **D 高度可疑** | 0.67 部分可判 | `DECISIVE_VIRTUAL_BUILD` |
+
+Pixel 6 的 declaration 轴扣 `FOREIGN_PROFILE 30 + OVERLAY_CODENAME_MISMATCH 15 = 45`
+→ 轴分 55；加权 `(40×55 + 35×100 + 25×100)/100 = 82` 落 B，再被 R5 压到 D。
+**R6 和 R5 都在真实数据上跑出了效果，不是靠断言凑的。**
+
+Pixel 6 的 `hardware_declaration_conflict.basis` 实测五条并存：
+`ram_dispersion, cpu_core_set, overlay_codename, foreign_profile:cpu.cpuCapacity,
+foreign_profile:memory.cmaTotal`。
+
+**第三个锚点是仿真器，而且它是最有信息量的一个。** 它同时踩中两个条件：
+决定性命中 + 覆盖不足 0.5 —— 这个组合 Pixel 6（0.94）和 MI 8（0.81）都到不了，
+却正是第二轮红队 P0 缺陷（`decisive=true` 却 `band="?"`）的触发形态。
+现在实测输出 `value=null / band=D / decisive=true / caps=[DECISIVE_VIRTUAL_BUILD]`
+四者并存且互不矛盾，已冻成第三份黄金文件。
+
+仿真器不是「更好的测试环境」，是**另一类被测对象**：一个天生带
+`ro.hardware=ranchu` / `ro.product.device=emu64xa` 的确定性正向样本。
+它验证「规则会响」，不验证「响得对」——阴性对照仍然只能靠 MI 8。
+建库全过程与实测数据见 `docs/EMULATOR-LAB.md` §7。
+
+## 第四轮：补上行为轴的真实阳性样本，并做权重敏感性分析
+
+前三轮之后，行为轴有五个权重是**纯先验假设**：`hook_injection` 25、`debugger_attached` 20、
+`selinux_permissive` 15、`root_manager_visible` 12、`multi_open` 8。三个锚点里这五个分支的
+阳性样本数是 **0** —— 也就是说这些数字从来没被任何数据检验过，而文档一直在用它们。
+
+这一轮在仿真器上真的造出了其中三个，每个都上传、读回、核对：
+
+| 变体 | 怎么造 | 报告 | behavior 扣分 | coverage |
+| --- | --- | --- | --- | --- |
+| 基准 | 原样 | `ff32a085` | 35 | 0.67 |
+| 第二用户 | `pm create-user` + `--user 10` 跑仪器测试 | `556ac263` | 35 + 8 = 43 | 0.67 |
+| 非原生挂载 | `mount -t tmpfs` 到含 `.magisk` 的路径 | `fe2f4ef5` | 35 + 25 = 60 | 0.67 |
+| 两者叠加 | 上面两个同时 | `d0cf5b15` | 35 + 25 + 8 = 68 | 0.67 |
+| 宽容 SELinux | 再 `setenforce 0` | `c3ad4750` / `86705d8a` | 35+25+15+8 = **83** | **0.73** |
+
+最后一行是**全库唯一一份 behavior coverage = 1.0** 的报告，它证明「六个计分标签的分母」是
+可达的，不只是一个公式。同一变体重复采集结果逐字一致，确定性成立。
+
+### 敏感性分析：结论是「权重分成两簇」，不是「权重都验证了」
+
+这一步是文档 §9.3 第 4 步承诺过、一直没跑的。跑完的结论比预想的更不好看：
+
+1. **band 对权重完全不敏感**。六个标称分逐个 ±5，五个锚点的 band 一次都没翻转。
+   但这几乎没有信息量——band 由 R5（决定性压 D）和 R11（A 档零扣分）决定，算术没发言权。
+   **用 band 验权重，验的是 R5/R11。**
+2. **value 次序只在簇内稳定，而第一次写「严格全序稳定」的断言时它失败了。**
+   那个失败是真实结论，不是测试 bug：`SELINUX_PERMISSIVE 15`、`ROOT_MANAGER_VISIBLE 12`、
+   `MULTI_OPEN 8` 两两相差 3 和 4，小于 ±5 的扰动幅度，必然交换位置。
+
+**所以「15 > 12 > 8」没有任何证据支撑，它只是三个看起来合理的数字。** 有支撑的只有
+「hook(25)/debugger(20) 重簇 > 其余轻簇」。测试改成断言分簇，并在注释里写明这是
+**把标准降到数据真正支撑的高度**——写一个测不过的严格全序，只会逼后来人删掉测试。
+
+要真正标定 15/12/8，每个信号需要 ≥30 份**独立**样本；同一台 AVD 重复采集是同一个数据点，
+跑一百次也还是 1 份。**这是本次最实质的未完成项**，比「文档写了代码没做」那三项更影响
+结论可信度，已写进 `docs/SECURITY-SCORE.md` §13 F13 与 §9.5。
+
+### 顺带实测出的四条环境事实
+
+- `adb remount` 在这台 AVD 上不可用（`Device must be bootloader unlocked`），手动
+  `mount -t overlay` 也报 `Invalid argument` —— §5.4 设想的「改 `/system`」这条路走不通。
+- `.magisk` 路径只要出现在 `/proc/self/mountinfo` 就够，不需要真装 Magisk。
+  **检出成本极低，误报面也很宽**，这一点必须写下来。
+- `setenforce 0` 之后 `system.selinux` 从 `RESTRICTED` 变成 `AVAILABLE/exact` ——
+  **「读得到 SELinux 状态」本身暗示它是 permissive**。这个相关性目前没有被任何规则利用。
+- 仿真器的阳性样本代表「已 root 的设备」，不代表「普通用户误入」。用它验「规则会响」对，
+  用它推误报率错。
+
+## 第五轮：把 §13 F12 剩下三项里能做的两项做掉
+
+F12 记录的是「文档用『已经如此』的语气写了、代码其实不存在」的四处。第一项（输出排序）
+第三轮已落地，这一轮补掉另外两项。
+
+**1. `PROFILE_UNSET` 第五个 `undetermined` 原因**
+
+原来「SoC 在登记表里、但该字段期望值留空」表现为**通道被整条跳过**——既不进
+`undetermined` 也不降 coverage。管理员看到 `not_observed` 会以为查过了，实际那一格
+从来没比对过任何东西。真机可见的例子：MI 8 的 `memory.cmaTotal` 读得到 `652 MiB`，
+但 `sdm845` 的登记项里没写该是多少。
+
+现在通道以 `profile_unset:<key>` 前缀进 `basis`，score 层映射成第五个 reason。它和另外
+四个**不是同一类**：那四个是字段状态（App 为什么没读到），这一个说的是「App 读到了，
+但**我们**没写应该是什么」。
+
+落地过程里自己造出两个真实缺陷，都值得记：
+
+- **`unset` 分支抢在 `foreignProfile` 前面**，导致所有 `FOREIGN_PROFILE` 静默失效。
+  因为 `gs101` 以外每颗 SoC 的登记项都缺 `capacities`/`cmaMiB`——等于把**唯一能触发
+  决定性声明分支的设备全部打瞎**。Pixel 6 从 D 掉到 B，四个测试同时失败。正确顺序是
+  confirmed → foreign → unset：**正向识别永远优先于「没有可比的值」**。
+- **标签在 `confirmed` 分支提前 `return`**，`out.Basis = unset` 永远执行不到。后果是
+  「`ram_dispersion` 确认了」就把「capacity 通道根本没比对过」吞掉了。现在两条并存：
+  状态回答「有没有矛盾」，unset 回答「每个已登记通道是不是真的查过」，这是两个问题。
+
+**不改判定、不降 coverage、不升版**：`not_observed` 该保持还是保持，只是缺口从「静默」
+变成「有名有姓」。MI 8 重算后 `band` 仍是 A / 100，只在 `undetermined` 里多一行。
+
+**2. 前端 `version` 降级**
+
+`scoreView()` 之前完全不读 `version`（只在类型里声明）。`sigmark-score/2` 上线后，
+还停在 `/1` 的前端会照旧拿 A≥85 去染色，把 `/2` 判成 C 的设备染成 B——**颜色是给人看的
+结论，染错比不染更糟**。
+
+现在的降级是「认不出就不下结论」：
+
+- 认识的版本 → 正常渲染；
+- 不认识的版本 → `band` 和 `value` 原样透出（那是后端算的，前端不许改写），但 `tone`
+  强制为 `unknown`（不上色），`versionWarning` 置顶显示；
+- **缺 `version` 字段同样按未知处理**——旧后端不写这个字段，默认它和当前前端用同一套
+  阈值是错误假设。
+
+三个动作缺一不可：**保留数据、撤掉判断、明说原因**。
+
+**顺带补齐两个「零样本」分支**
+
+`root_manager_visible`（12）与 `debugger_attached`（20）此前**一份阳性样本都没有**。
+这一轮在仿真器上都造出来了，六个计分行为标签至此全部有真实阳性：
+
+- 装一个带 `MAIN`/`LAUNCHER` 的 `com.topjohnwu.magisk` 空壳包 → `root_manager_visible`。
+  第一版忘了写 intent-filter，`pm list packages` 看得到但 `queryIntentActivities` 返回空，
+  **报告和干净设备一模一样、没有任何报错**——这类假阴性只能靠「已知阳性必须命中」兜住。
+- `strace -f -p <pid>` 真实 ptrace → `tracerPid=9072`。此前用 `am instrument -e debug true`
+  试过，只让进程停在那里等调试器，`Debug.isDebuggerConnected()` 仍是「否」、`TracerPid`
+  仍是 0。**「用 debug 参数跑一遍」看起来完全像正确做法，实际什么都不会发生。**
+- 六条全开时扣分 35+25+20+15+12+8 = 115，超预算 → 轴分 clamp 到 **0**。这是 R6 的下界
+  第一次被真实数据命中，把 `max(0, …)` 从防御性写法变成有测试的行为。
+
+**但要讲清楚「有样本」不等于「数字对」**：这六份样本证明的是判定链路通、方向对，不证明
+25 / 20 / 15 / 12 / 8 这些数字对。§9.3.1 的敏感性实测已经证明 15 / 12 / 8 互相在 ±5
+噪声内无法区分，「15 > 12 > 8」没有证据支撑，只有「重簇 > 轻簇」成立。
+
+## 交付物
+
+**后台**（Go）
+- `backend/cmd/sigmark/score.go`（新建）：`sigmark-score/1` 全投影逻辑
+- `backend/cmd/sigmark/score_test.go`（新建）：32 个测试，含 3 个真实锚点、8 条缺陷回归、
+  以及 §2.3 整张契约表的表驱动断言
+- `backend/cmd/sigmark/score_golden_test.go`（新建）：整份文档的黄金文件，
+  带 `-update-score-golden` 显式更新开关
+- `backend/cmd/sigmark/score_variants_test.go`（新建）：9 个测试，八个仿真器变体的真实阳性样本
+  + 权重敏感性分析（band 不敏感 + 分簇稳定）
+- `backend/cmd/sigmark/score_profile_unset_test.go`（新建）：5 个测试，`PROFILE_UNSET`
+  第五个 reason，含「不得遮蔽 foreign-profile」「不得替代字段状态」两条反向断言
+- `backend/cmd/sigmark/score_contract_test.go`（新建）：3 个测试，补掉验收清单里三处
+  「靠黄金文件间接验证」的缺口——declaration 轴分母为 3、相邻分数同 band、
+  空档案不得渲染成 A
+- `backend/cmd/sigmark/testdata/score-{pixel6,mi8,emulator,emulator-user10,emulator-permissive}.golden.json`（新建，5 份）
+- `backend/cmd/sigmark/hardware_facts.go`（本轮加 `channel.unset` 与 `profile_unset:` basis）：新增 `basis []string`，公布判定分支
+- `backend/cmd/sigmark/hardware_facts_test.go`：新增 `TestHardwareFactsPublishTheirBasis`
+- `backend/cmd/sigmark/device_profile.go`：最小接线（`Score` 字段 + 一处赋值）
+
+**前端**（React/TS）
+- `backend/web/src/score-view.ts`（新建，本轮加版本协商）：纯函数视图层，无 React/DOM
+- `backend/web/src/score-panel.tsx`（新建）：只画 `scoreView()` 的结果，不二次推导
+- `backend/web/src/score-view.css`（新建）：全部复用现有 CSS 变量
+- `backend/web/test/score-view.test.mjs`（新建，本轮加 4 个版本降级 case）：12 个测试，含一份真机仿真器 payload
+- `backend/web/test/fixtures-emulator-score.json`（新建）：仿真器报告的 score 原文
+- `backend/web/src/device-profile.tsx`：最小挂载（3 行）
+
+**文档**
+- `docs/SECURITY-SCORE.md`（新建）：设计 + 契约 + 校准 + 全库回算 + 缺陷记录
+- `docs/EMULATOR-LAB.md`（新建，580 行）：模拟器可行性实测与建库方案
+- `docs/USAGE-TRACE-CHANNELS.md`（新建，491 行）：usage 轴采集缺口与字段集 26 规划
+
+## 界面上的三条硬约束
+
+1. **band 是主产物，分数是次产物**：大字显示 `bandLabel`，分数小字且标「仅用于排序」
+2. **`band == "?"` 时任何位置都不出现 0 或 100**：显示「数据不足，未给分」并列出缺了哪些通道。
+   把「读不到」渲染成「满分」是致命错误
+3. **扣分账本必须逐条可展开**：每条显示 `-30`、label code、字段 key、detail 一句话。
+   账本里**没有合计字段**——合计会让审计退化成看一个数字
+
+## 端到端验证（重新构建镜像后，对真实部署的 API 实测）
+
+不是单元测试，是真的打到 `http://192.168.1.114:48272` 上取 `device-profile`：
+
+| 报告 | 设备 | band | value | coverage | PROFILE_UNSET |
+| --- | --- | --- | --- | --- | --- |
+| `745264e0` | Pixel 6（改装） | **D** | 82 | 0.94 | 0（gs101 有登记值） |
+| `77e577c1` | MI 8（未改装） | **A** | 100 | 0.81 | **1**（`memory.cmaTotal`） |
+| `4bb7ae4a` / `99c3c23b` / `25308981` | MI 8 同型 | **A** | 100 | 0.81 | 各 **1** |
+| `ddb2b82e` | 字段集 22 旧报告 | **B** | 88 | 0.81 | **0** —— 见下 |
+
+**全库 22 份回算，落点与改动前完全一致**（A:4 / D:7 / B:4 / ?:7），没有一台因为本轮改动变档。这是「纯投影」这个前提最直接的证据。
+
+最后一行值得单独说：字段集 22 的旧报告**没有** `PROFILE_UNSET`，因为那两份报告里 `memory.cmaTotal` 根本没归档——它报的是 `NOT_ARCHIVED`。这正是两个原因该有的分工：
+
+- `NOT_ARCHIVED` = 这份报告没存这个字段（旧版本）；
+- `PROFILE_UNSET` = 字段存了、读得到，但**我们**的登记表没写该是多少。
+
+把它们混成一个会让管理员分不清「去重采一份」还是「去补登记表」。
+
+同一份报告的算术也逐项核对过：declaration `70 = 100 − 30`（一条 `HARDWARE_CHANNEL_CONFLICT`，非决定性），behavior / usage 满分，加权后 88 → B。扣分账本能对上总分。
+
+## 测试
+
+- Go：`go build ./...` 通过、`go vet ./...` 干净、`gofmt -l` 干净、`go test -count=1 ./...` 全绿（**50 项打分测试**：32 + 9 变体/敏感性 + 5 PROFILE_UNSET + 3 契约 + 1 黄金）
+- 黄金文件已反向验证：把 `declarationHardwarePoints` 从 30 改成 31，测试立即失败并打印 diff
+- 权重敏感性实测：六个行为轴标称分逐个 ±5，band 零翻转；value 次序按簇稳定（§9.3.1）
+- Web：`npm test` **103/103/0**（基线 85 + 新增 18，含 4 个版本降级 case 与 1 个 PROFILE_UNSET 渲染 case）、`npm run build` 产物正常（chunk 大小警告为既有）
+- `python scripts/qa_device_profile.py` 11 项全 PASS
+- `npm run qa` 浏览器回归 PASS（retry / 390px / 键盘 / 证据 / 分母 / JSON / 历史回退）
+- 部署后对 22 份历史报告实测 `/device-profile`，全部返回 `score` 且落点符合预期
+
+## 不改什么
+
+- 字段集仍是 25，`LanFieldSetVersion` 不动，`protocol.go` / `field_dictionary.go` 不动
+- App 端一行代码都没改，旧 APK 继续可用
+- `sigmark-profile/8` 不动；`basis` 是新增可选成员，旧响应照常解析
+- 已有的 `sigmark-observation-risk/5`（red/yellow/gray/blue 四档）不动：
+  它是**单条观测的风险分级**，`sigmark-score/1` 是**整机真实性打分**，两者并存不冲突
+
+## 剩余限制（如实记录）
+
+1. `usage` 轴目前只有一条规则 `FRESH_BOOT_ON_AGED_ROM`，且它是唯一直接读原始字段而非
+   投影标签的地方；后续应加 `usage_freshness` 标签，让 usage 轴也变成纯投影
+2. 行为轴内部权重**只标定到簇，没标定到数字**。六个计分分支现在**全部有真实阳性样本**
+   （各 1 份），但「有样本」只证明判定链路是通的，不证明数字对。敏感性实测证明
+   **band 对权重完全不敏感**（由 R5/R11 决定），而 **15 / 12 / 8 三者互相在 ±5 噪声内、
+   无法区分**——「15 > 12 > 8」没有证据支撑，只有「hook+debugger 重簇 > 其余轻簇」成立。
+   要分开这三个数字，每个信号需 ≥30 份独立样本；同一台 AVD 重复采集不算新样本。
+   见 `docs/SECURITY-SCORE.md` §9.3.1、§13 F13
+3. `FRESH_BOOT_ON_AGED_ROM` 误报风险被低估：恢复出厂、刷机测试、展柜机、企业统配机的
+   `bootCount` 都合法地很小。窗口已改为「距采样满 3 年」的相对判定，但 `bootCount` 本身
+   仍然脆弱；建议字段集 26 加 `uptime < 3 天` 限定并先降为 REVIEW
+4. `foreign-profile` 决定性目前是**单向**的：只有 `gs101` 登记了 `capacities` / `cmaMiB`，
+   所以只能识别「声明是别的 SoC、实测像 Tensor」，反向识别不了
+5. 单条发现靠分数本身跌不出 A 档（12 分 → 97、15 分 → 94、25 分 → 91），
+   所以 **R11「A 档要求零扣分」是唯一能表达「有一条不一致」的机制**，不是锦上添花
+6. 仿真器**已建成并跑通**（android-34 `google_apis` x86_64，AVD 在 `D:\AndroidAvd`），
+   五个变体、六份真实报告已上传并打分，实测输出冻成三份黄金文件。
+   **「5 分钟 5 种改装」的变体已经跑完**（见 `docs/EMULATOR-LAB.md` §7.3）。
+   仍未跑：`-writable-system` 的持久化语义、老 API 镜像、`arm64-v8a` 速度、
+   其它虚拟化平台（Android-x86 / Waydroid / redroid）的属性值
+7. `coverageLabel` 四档文案（充分可判 / 部分可判 / 勉强可判 / 证据不足）是实现自定的，
+   设计稿若有别的措辞需改 `score.go` 一处
+8. `behavior` 轴只计 6 个标签，`rom_verification` / `software_drm` 展示不计分。
+   这是有意的取舍（L3 会误伤阴性对照），代价是两个真实安全状态不参与定级
+9. 只剩 **U2（`initialSdk` 年份表）** 一项文档写了代码没有。它会改变判定，落地必须升
+   `sigmark-score/2` 并重跑全库回算，收益最小、优先级最低。`PROFILE_UNSET` 与前端
+   `version` 降级本轮已落地并有测试（§13 F12）
+
+## 未提交说明
+
+按约定不执行 `git commit` / `push` / `clean`，改动留在工作区由用户手动提交。

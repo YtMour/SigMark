@@ -2,7 +2,7 @@ import {bootEvidence,bootKeys,evaluateSecurity,type ReleaseReference} from './se
 import type {Report} from './reports';
 import {architectureEvidence,architectureKeys} from './architecture-evidence.ts';
 
-export const riskVersion='sigmark-observation-risk/2';
+export const riskVersion='sigmark-observation-risk/5';
 export type RiskLevel='red'|'yellow'|'gray'|'blue';
 type RuleState='critical'|'review'|'unknown'|'observed'|'expected'|'context';
 type Rule={code:string;title:string;state:RuleState;finding:string;next:string;fields:string[];required?:boolean};
@@ -34,7 +34,7 @@ export function assessRisk(row:Report, reference?:ReleaseReference, expectedUnlo
     bootState==='expected'?'保留实验基线和预期，继续检查其他保护项。':'核对当前 ROM、Bootloader 状态和所选基线。',bootKeys,true);
   const selinux=checks.get('selinux')!;
   add('SELINUX_MODE','SELinux 实时模式',selinux.state,selinux.finding,
-    '若是系统拒读，使用已连接设备的 ADB 观察作独立视角对照，保留两份读数。', ['system.selinux'], true);
+    '检查该字段的读取状态。重新采集后仍受限时，保留未确认。', selinux.fields, true);
   const lock=read('environment.keyguardSecure');
   add('LOCKSCREEN','锁屏凭证',lock==='是'?'observed':lock==='否'?'review':'unknown',
     lock==='是'?'系统报告当前用户已设锁屏凭证。':lock==='否'?'当前用户未配置安全锁屏。':'尚未确认锁屏凭证状态。',
@@ -46,12 +46,20 @@ export function assessRisk(row:Report, reference?:ReleaseReference, expectedUnlo
     '核对系统存储保护与实验镜像配置。',['environment.storageEncryption'],true);
   const patch=checks.get('patch')!;
   add('PATCH_AGE','系统补丁时效',patch.state,patch.finding,'核对系统更新和采样时间。',patch.fields,true);
+  const keyProbe=archive.get('environment.keyProtection');
+  if(keyProbe?.status==='ERROR'){
+    add('KEYSTORE_TEST','密钥自测','review','本次临时密钥自测未完成。',
+      '在手机端重试密钥自测。',['environment.keyProtection']);
+  }
   const debug=read('app.debuggerConnected');
   add('PROCESS_DEBUGGER','采集进程调试',debug==='是'?'review':debug==='否'?'observed':'unknown',
     debug==='是'?'采样时印迹进程连接调试器。':debug==='否'?'采样时印迹进程未连接调试器。':'缺少可用的进程调试器读数。',
     '先核对是否为预期联调；调试状态不是入侵证据。',['app.debuggerConnected']);
   const identity=checks.get('identity')!;
   add('IDENTITY_DECLARATION','报告声明一致性',identity.state,identity.finding,'核对采集器版本、报告投影和 ROM 声明。',identity.fields);
+  const appIdentity=checks.get('identity_fields')!;
+  add('APP_IDENTITY_CONSISTENCY',appIdentity.title,appIdentity.state,appIdentity.finding,
+    '在同一测试条件下用 App 复采；读数一致不等于设备身份已验证。',appIdentity.fields);
   const architecture=architectureEvidence(read(architectureKeys[0]),read(architectureKeys[1]),read(architectureKeys[2]));
   add('RUNTIME_ARCHITECTURE','运行架构一致性',architecture==='conflict'?'review':architecture==='compatible'?'observed':'unknown',
     architecture==='conflict'?'64 位进程与至少一项 32 位声明有冲突。此信号仅用于复核，不等于模拟器。':

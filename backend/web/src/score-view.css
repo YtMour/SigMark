@@ -1,0 +1,76 @@
+/* 设备安全打分：等级大字、分数小字、账本可展开。
+   320px 不许横向溢出：全部用 minmax(0,1fr) 与 overflow-wrap，不写死宽度。 */
+.score-panel { min-inline-size: 0; overflow-wrap: anywhere; }
+.score-body { display: grid; gap: .7rem; padding: clamp(.7rem, 2vw, 1.1rem); min-inline-size: 0; }
+.score-tag[data-tone="consistent"] { color: var(--mint); border-color: var(--mint); }
+.score-tag[data-tone="doubt"],.score-tag[data-tone="suspect"],.score-tag[data-tone="high"] { color: var(--amber); border-color: var(--amber); }
+.score-tag[data-tone="unknown"] { color: var(--muted); }
+
+/* 决定性项置顶警告 */
+.score-cap { min-inline-size: 0; padding: .6rem .75rem; border: 1px solid var(--amber);
+  border-inline-start-width: 3px; border-radius: var(--radius-control); background: var(--surface-recessed); }
+.score-cap h3 { margin: 0 0 .3rem; font-size: .95rem; color: var(--amber); }
+.score-cap p { margin-block: .2rem; }
+.score-cap ul { margin: .25rem 0; padding-inline-start: 1.1rem; }
+.score-cap li { margin-block: .2rem; }
+.score-cap code { color: var(--amber); }
+.score-cap li span { display: block; }
+
+/* band 是主产物：大字；分数是次产物：小字 + 「仅用于排序」限定 */
+.score-headline { display: flex; flex-wrap: wrap; align-items: baseline; gap: .2rem .9rem; min-inline-size: 0; }
+.score-band { font-size: clamp(1.55rem, 6vw, 2.1rem); line-height: 1.2; }
+.score-band[data-band="A"] { color: var(--mint); }
+.score-band[data-band="B"],.score-band[data-band="C"] { color: var(--amber); }
+.score-band[data-band="D"] { color: #ffaaa6; }
+.score-band[data-band="?"] { color: var(--muted); }
+.score-figure { display: inline-flex; align-items: baseline; gap: .35rem; margin: 0; color: var(--muted); }
+.score-figure b { font-size: 1rem; font-variant-numeric: tabular-nums; color: var(--muted); }
+.score-figure small { font-size: .76rem; border: 1px solid var(--line-subtle); border-radius: .35rem; padding: .02rem .32rem; }
+.score-meta { margin: 0; color: var(--muted); font-size: .85rem; }
+.score-note { margin: 0; color: var(--muted); }
+
+/* 三条轴各一行 */
+.score-axes { list-style: none; margin: 0; padding: 0; display: grid; gap: .45rem; min-inline-size: 0; }
+.score-axis { min-inline-size: 0; padding: .5rem .65rem; border: 1px solid var(--line-subtle);
+  border-radius: var(--radius-control); background: var(--surface-recessed); }
+.score-axis-head { display: grid; grid-template-columns: minmax(0,1fr) auto auto; gap: .15rem .7rem; align-items: baseline; }
+.score-axis-name { min-inline-size: 0; font-weight: 600; }
+.score-axis-score { font-variant-numeric: tabular-nums; }
+.score-axis-coverage { color: var(--muted); font-size: .83rem; }
+.score-axis[data-axis-counted="false"] .score-axis-score { color: var(--muted); }
+.score-axis-flag { margin: .25rem 0 0; color: var(--amber); font-size: .83rem; }
+
+/* 扣分账本：一条一行，可展开，不折叠成合计 */
+.score-ledger { margin-block-start: .3rem; }
+.score-ledger > summary { cursor: pointer; color: var(--mint); padding-block: .25rem; }
+.score-ledger > p { margin: .2rem 0; color: var(--muted); }
+.score-ledger ul { list-style: none; margin: .3rem 0 0; padding: 0; display: grid; gap: .45rem; min-inline-size: 0; }
+.score-deduction { min-inline-size: 0; padding-block-start: .4rem; border-block-start: 1px solid var(--line-subtle); }
+.score-deduction p { margin-block: .15rem; }
+.score-deduction-head b { font-variant-numeric: tabular-nums; color: var(--amber); }
+.score-deduction-keys { list-style: none; margin: .2rem 0; padding: 0; display: flex; flex-wrap: wrap; gap: .25rem; }
+.score-deduction-keys li { border: 1px solid var(--line-subtle); border-radius: .35rem; padding: .02rem .32rem; font-size: .78rem; }
+.score-deduction small { display: block; color: var(--muted); }
+
+/* undetermined：判断缺口，不是「这些通道正常」 */
+.score-undetermined { min-inline-size: 0; padding: .55rem .7rem; border: 1px dashed var(--border);
+  border-radius: var(--radius-control); }
+.score-undetermined h3 { margin: 0 0 .25rem; font-size: .92rem; }
+.score-undetermined p { margin-block: .2rem; }
+.score-undetermined ul { list-style: none; margin: .3rem 0; padding: 0; display: grid; gap: .3rem; }
+.score-undetermined li { min-inline-size: 0; }
+.score-undetermined-reason { margin-inline-start: .45rem; color: var(--muted); font-size: .85rem; }
+.score-undetermined-keys { display: flex; flex-wrap: wrap; gap: .25rem; margin-block-start: .2rem; }
+.score-undetermined-keys code { border: 1px solid var(--line-subtle); border-radius: .35rem; padding: .02rem .32rem; font-size: .78rem; }
+
+@media (max-width: 600px) {
+  .score-axis-head { grid-template-columns: minmax(0,1fr) auto; }
+  .score-axis-coverage { grid-column: 1 / -1; }
+}
+
+/* 版本不一致提示。用中性灰蓝而不是琥珀/红色：这不是「设备可疑」，是「界面过期了」。
+   用警示色会让人以为设备有问题，而真正该做的是刷新页面。 */
+.score-version { min-inline-size: 0; padding: .6rem .75rem; border: 1px solid var(--line);
+  border-inline-start-width: 3px; border-radius: var(--radius-control); background: var(--surface-recessed); }
+.score-version h3 { margin: 0 0 .3rem; font-size: .95rem; color: var(--muted); }
+.score-version p { margin-block: .2rem; }

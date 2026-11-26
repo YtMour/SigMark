@@ -23,32 +23,34 @@ test('patch rejects impossible dates and uses capture date, not viewer clock',()
 });
 
 test('identity declarations are only compared inside one observer, three pairs at a time',()=>{
-  const shape=[['system','board'],['system','boardPlatform'],['cpu','hardware'],['system','bootHardware'],
+  const shape=[['system','model'],['system','propertyModel'],['system','device'],['system','propertyDevice'],
     ['system','sku'],['system','hardwareSku']];
   const rows=values=>values.map((entry,index)=>Array.isArray(entry)?
     field(shape[index][0],shape[index][1],entry[0],entry[1]):field(shape[index][0],shape[index][1],entry));
   const same=['rk3588','rk3588','mt6985','MT6985','GR1YH','gr1yh'];
   const observed=check(rows(same),'identity_fields');
-  assert.equal(observed.title,'身份字段一致性');
+  assert.equal(observed.title,'App 身份声明核对');
   assert.equal(observed.state,'observed');
-  assert.match(observed.finding,/主板 Build=rk3588 \/ 属性=rk3588/);
-  assert.match(observed.finding,/不是独立验证/);
-  for(const [index,title] of [[0,'主板'],[2,'硬件'],[4,'SKU']]){
+  assert.match(observed.finding,/设备身份仍未验证/);
+  for(const [index,title] of [[0,'型号'],[2,'设备代号'],[4,'硬件 SKU']]){
     const conflicting=rows(same).map((row,position)=>position===index+1?{...row,value:'other-'+title}:row);
     const conflict=check(conflicting,'identity_fields');
     assert.equal(conflict.state,'review',title);
-    assert.match(conflict.finding,/同一观察者内部两组声明不一致，先核对 ROM 属性改写/);
-    assert.match(conflict.finding,new RegExp(title+' Build='),title);
+    assert.match(conflict.finding,new RegExp(title+'读数不一致'),title);
     assert.doesNotMatch(conflict.finding,/真伪|真假|伪造/);
   }
   const onePair=[['rk3588','AVAILABLE'],['rk3588','AVAILABLE'],['','UNAVAILABLE'],['','RESTRICTED'],
     ['','NOT_ARCHIVED'],['','NOT_ARCHIVED']];
-  assert.equal(check(rows(onePair),'identity_fields').state,'observed');
-  const onePairConflict=rows(onePair).map(row=>row.key==='boardPlatform'?{...row,value:'rk3588s'}:row);
+  assert.equal(check(rows(onePair),'identity_fields').state,'unknown');
+  assert.match(check(rows(onePair),'identity_fields').finding,/1 \/ 3/);
+  const onePairConflict=rows(onePair).map(row=>row.key==='propertyModel'?{...row,value:'rk3588s'}:row);
   assert.equal(check(onePairConflict,'identity_fields').state,'review');
   assert.equal(check(rows([['rk3588','AVAILABLE'],['','NOT_ARCHIVED']]),'identity_fields').state,'unknown');
   assert.equal(check([],'identity_fields').state,'unknown');
   assert.equal(check(rows(same.map(value=>[value,'RESTRICTED'])),'identity_fields').state,'unknown');
+  const oldDevice=check([...rows(same.slice(0,4)),field('system','api','29')],'identity_fields');
+  assert.equal(oldDevice.state,'observed');
+  assert.equal(oldDevice.fields.length,4);
 });
 
 test('security changes separate expected unlock, regressions and missing fields',()=>{
@@ -69,43 +71,43 @@ test('expecting unlock does not mask inconsistent lock evidence',()=>{
 });
 
 test('rule version and the field-set-17 checks exist without deciding root or injection',()=>{
-  assert.equal(ruleVersion,'rom-evidence/4');
+  assert.equal(ruleVersion,'rom-evidence/6');
   const ids=evaluateSecurity({parameters:[],model:'MI 8',androidApi:34}).map(row=>row.id);
   for(const id of ['hook','trace','profile','drm','rom','identity_fields'])assert(ids.includes(id),id);
 });
 
-test('inferred SELinux is stated as an inference and stays an observed reading',()=>{
+test('SELinux inference stays unconfirmed even when the old display value looks direct',()=>{
   const direct=field('system','selinux','Enforcing（强制模式）');
   const inferred=field('system','selinux','Enforcing（强制模式，推断）');
   const basis=field('system','selinuxEvidence','inferred_mac');
   const inference=check([inferred,basis],'selinux');
-  assert.equal(inference.state,'observed');
-  assert.match(inference.finding,/报告只能推断为强制模式：节点被策略拒绝读取，DAC 允许读取，permissive 下本应可读/);
-  assert.match(inference.finding,/推断/);
+  assert.equal(inference.state,'unknown');
+  assert.match(inference.finding,/实时模式未确认/);
   assert.equal(check([direct],'selinux').state,'observed');
   assert.doesNotMatch(check([direct],'selinux').finding,/推断/);
   assert.equal(check([field('system','selinux','Permissive（宽容模式）')],'selinux').state,'review');
-  assert.match(check([field('system','selinux','Enforcing'),basis],'selinux').finding,/推断/);
+  assert.equal(check([field('system','selinux','Enforcing'),basis],'selinux').state,'unknown');
+  assert.equal(check([field('system','selinux','未启用（推断）')],'selinux').state,'unknown');
 });
 
 test('a denied SELinux node is not downgraded when only the read basis is inferred',()=>{
   const restricted=check([{...field('system','selinux',null,'RESTRICTED'),reason:'ACCESS_DENIED',errno:13},field('system','selinuxEvidence','exact')],'selinux');
   assert.equal(restricted.state,'unknown');
-  assert.match(restricted.finding,/受限节点或应用进程域不能代替实时模式/);
+  assert.match(restricted.finding,/实时模式未确认/);
 });
 
-test('SELinux direct and inferred readings are the same mode, not a change',()=>{
+test('comparison requires direct SELinux readings from both reports',()=>{
   const direct=[field('system','selinux','Enforcing（强制模式）'),field('system','selinuxEvidence','exact')];
   const inferred=[field('system','selinux','Enforcing（强制模式，推断）'),field('system','selinuxEvidence','inferred_mac')];
   const rows=compareSecurity(direct,inferred);
   const mode=rows.find(row=>row.key==='system.selinux');
-  assert.equal(mode.verdict,'context');
-  assert.match(mode.note,/模式一致/);
-  assert.match(mode.note,/由直接读取变为推断/);
-  assert.match(compareSecurity(inferred,direct).find(row=>row.key==='system.selinux').note,/由推断变为直接读取/);
+  assert.equal(mode.verdict,'insufficient');
+  assert.match(mode.note,/缺少直接读数/);
+  assert.equal(compareSecurity(inferred,direct).find(row=>row.key==='system.selinux').verdict,'insufficient');
   assert.equal(rows.find(row=>row.key==='system.selinuxEvidence').verdict,'context');
   const permissive=[field('system','selinux','Permissive（宽容模式）'),field('system','selinuxEvidence','exact')];
   assert.equal(compareSecurity(direct,permissive).find(row=>row.key==='system.selinux').verdict,'review');
+  assert.equal(compareSecurity(inferred,permissive).find(row=>row.key==='system.selinux').verdict,'insufficient');
 });
 
 test('a restricted side is restricted, a missing side is not archived, never a change',()=>{
@@ -193,16 +195,18 @@ test('identity field rows compare as identity readings without judging the devic
 });
 
 
-test('identity conflicts are exposed as pairs for the reader banner',()=>{
+test('reader exposes only mismatches of equivalent App readings',()=>{
   const conflict=identityConflictsOf([
     field('system','board','mt6985'),field('system','boardPlatform','gs101'),
-    field('cpu','hardware','mtk'),field('system','bootHardware','MTK'),
+    field('cpu','hardware','mtk'),field('system','bootHardware','boot-hardware'),
+    field('system','model','Model A'),field('system','propertyModel','Model B'),
     field('system','sku','23078PND5G')]);
   assert.equal(conflict.length,1);
-  assert.deepEqual(conflict[0],{title:'主板',leftKey:'system.board',rightKey:'system.boardPlatform',left:'mt6985',right:'gs101'});
-  assert.equal(identityConflictsOf([field('system','board','mt6985')]).length,0);
+  assert.deepEqual(conflict[0],{title:'型号',leftKey:'system.model',rightKey:'system.propertyModel',left:'Model A',right:'Model B'});
   assert.equal(identityConflictsOf([
-    field('system','board','mt6985'),field('system','boardPlatform',null,'RESTRICTED')]).length,0);
+    field('system','model','Model A'),field('system','propertyModel','Model B','RESTRICTED')]).length,0);
   assert.equal(identityConflictsOf([
-    field('system','board','mt6985'),field('system','boardPlatform','MT6985')]).length,0);
+    field('system','model','Model A'),field('system','propertyModel',' UnKnOwN ')]).length,0);
+  const upgrade=compareSecurity([], [field('system','propertyModel','Model A')]).find(r=>r.key==='system.propertyModel');
+  assert.equal(upgrade.verdict,'not_archived');
 });

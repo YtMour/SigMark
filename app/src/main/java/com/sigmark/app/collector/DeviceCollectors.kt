@@ -115,8 +115,8 @@ private object SystemCollector : DeviceCollector {
         value("buildUser", "构建用户", "Build.USER") { Build.USER }
         value("buildHost", "构建主机", "Build.HOST") { Build.HOST }
         value("board", "主板代号", "Build.BOARD") { Build.BOARD }
-        // Independent read-only declarations. They are compared with the Build values
-        // above: a ROM that rewrites properties per context can make them disagree.
+        // These are declarations under the ordinary app identity. BOARD is not a
+        // platform identifier and HARDWARE is not a boot hardware identifier.
         fun declaredProperty(itemKey: String, property: String, label: String, pattern: Regex, lowercase: Boolean, note: String) {
             observation(itemKey, label, SafeReader.property(property).map { raw ->
                 val text = raw.trim()
@@ -127,11 +127,11 @@ private object SystemCollector : DeviceCollector {
             })
         }
         declaredProperty("boardPlatform", "ro.board.platform", "平台代号声明", Regex("[a-z0-9_.-]{1,32}"), true,
-            "只读属性，与 Build.BOARD 是两条独立来源；不一致时先核对 ROM 是否改写属性，不据此判定真伪。")
+            "只读平台声明，与 Build.BOARD 的含义不同，保留原值，不据此判断冲突。")
         declaredProperty("bootHardware", "ro.boot.hardware", "启动硬件声明", Regex("[a-z0-9_.-]{1,32}"), true,
-            "只读属性，与 Build.HARDWARE 是两条独立来源；不一致时先核对 ROM 是否改写属性。")
+            "只读启动硬件声明，与 Build.HARDWARE 的含义不同，保留原值。")
         declaredProperty("hardwareSku", "ro.boot.hardware.sku", "启动硬件 SKU", Regex("[A-Za-z0-9._-]{1,32}"), false,
-            "只读属性，与 Build.SKU（API 31+）是两条独立来源。")
+            "与 Build.SKU（API 31+）核对同一声明，可能共享底层数据。")
         if (Build.VERSION.SDK_INT >= 31) value("sku", "硬件 SKU", "Build.SKU") { Build.SKU }
         observation("baseOs", "基础系统版本", SafeReader.firstAvailable(
             { SafeReader.read("Build.VERSION.BASE_OS", "OEM 可选字段。") { normalizeValue(Build.VERSION.BASE_OS) } },
@@ -149,6 +149,13 @@ private object SystemCollector : DeviceCollector {
         value("brand", "品牌", "Build.BRAND") { Build.BRAND }
         value("model", "型号", "Build.MODEL", "应用进程视角") { Build.MODEL }
         value("device", "设备代号", "Build.DEVICE", "应用进程视角") { Build.DEVICE }
+        val identityNote = "当前 App 读取的只读属性；与 Build 核对同一声明，不是独立身份证据。"
+        observation("propertyModel", "型号属性",
+            SafeReader.property(SafeReader.Property.PRODUCT_MODEL)
+                .decodeProperty({ decodeProductIdentity(it, productModelPattern) }, "型号属性格式无效。").withNote(identityNote))
+        observation("propertyDevice", "设备代号属性",
+            SafeReader.property(SafeReader.Property.PRODUCT_DEVICE)
+                .decodeProperty({ decodeProductIdentity(it, productDevicePattern) }, "设备代号属性格式无效。").withNote(identityNote))
         value("product", "产品代号", "Build.PRODUCT") { Build.PRODUCT }
         observation("bootloader", "Bootloader", SafeReader.firstAvailable(
             { SafeReader.read("Build.BOOTLOADER") { normalizeValue(Build.BOOTLOADER) } },
@@ -172,6 +179,11 @@ private object SystemCollector : DeviceCollector {
             hint.copy(detail = "厂商属性，仅反映当前应用读取结果。") else hint)
     }
 }
+
+private val productModelPattern = Regex("""[\p{L}\p{N} ._+()\-]{1,91}""")
+private val productDevicePattern = Regex("""[A-Za-z0-9_.-]{1,64}""")
+internal fun decodeProductIdentity(raw: String, pattern: Regex): String? =
+    com.sigmark.app.security.usableIdentity(raw)?.takeIf(pattern::matches)
 
 private object CpuCollector : DeviceCollector {
     override val key = "cpu"
@@ -208,9 +220,20 @@ private object CpuCollector : DeviceCollector {
         value("pageSize", "内存页大小", "Os.sysconf(_SC_PAGESIZE)") {
             Os.sysconf(OsConstants._SC_PAGESIZE).takeIf { it > 0 }?.let { "$it B" }
         }
-        val cpuFields = SafeReader.node(SafeReader.Node.CPU_INFO).map(CpuInfoParser::fields)
+        val cpuInfo = SafeReader.node(SafeReader.Node.CPU_INFO)
+        val cpuFields = cpuInfo.map(CpuInfoParser::fields)
         observation("cpuInfo", "CPU 描述", cpuFields.map(CpuInfoParser::description))
         observation("features", "CPU 指令特性", cpuFields.map(CpuInfoParser::features))
+        // One row per distinct ARM core type, counted across all processor blocks. The
+        // deduplicated `fields` map above keeps only the first block, which hides a
+        // mixed big.LITTLE cluster and therefore the microarchitecture generation.
+        observation("cpuParts", "CPU 分块微架构签名",
+            cpuInfo.map(CpuInfoParser::partSignature).let { reading ->
+                if (reading.value != null) reading.copy(detail =
+                    "按 /proc/cpuinfo 全部分块的 CPU implementer/part 计数；格式 implementer:part×核心数。" +
+                        "这是内核报告的微架构标识，不是性能评分，也不单独判定 SoC 型号。")
+                else reading
+            })
         fun maxFrequency(path: SafeReader.Node) = SafeReader.node(path).map {
             it.trim().toLongOrNull()?.takeIf { khz -> khz > 0 }?.let { khz ->
                 String.format(Locale.US, "%.0f MHz", khz / 1000.0)
@@ -220,6 +243,17 @@ private object CpuCollector : DeviceCollector {
             { maxFrequency(SafeReader.Node.CPU_POLICY0_MAX) })
         observation("cpu0MaxFrequency", "CPU 0 / policy0 最高频率",
             if (frequency.value != null) frequency.copy(detail = "CPU 0 或 policy0 的样本，不代表整颗处理器峰值。") else frequency)
+        // Field set 24. cpu_capacity is written by the kernel from the actual core
+        // types in the device tree, so it survives a property-level disguise that
+        // rewrites sysconf's core count. The distinct values in core order form a
+        // small, comparable profile such as 160/498/1024.
+        observation("cpuCapacity", "CPU 算力权重（内核口径）",
+            SafeReader.cpuCapacitySignature().let { reading ->
+                if (reading.value != null) reading.copy(detail =
+                    "逐个读取 cpu_capacity 并按首次出现顺序去重；由内核按实际核心类型填入，" +
+                        "不是性能跑分，也不单独判定 SoC 型号。")
+                else reading
+            })
         sysfsObservations(key, Build.VERSION.SDK_INT)
     }
 }
@@ -232,6 +266,15 @@ private object MemoryCollector : DeviceCollector {
             context.getSystemService(ActivityManager::class.java)?.let { ActivityManager.MemoryInfo().also(it::getMemoryInfo) }
         }
         observation("totalRam", "总运行内存", memory.map { bytes(it.totalMem) }.copy(source = "ActivityManager.MemoryInfo.totalMem"))
+        // A second, independent channel for the same fact: the syscall answers from the
+        // kernel, while MemoryInfo is filled by the framework. They normally agree within
+        // a few percent; a large gap means at least one of them is not the real device.
+        value("physicalRam", "物理内存（内核口径）", "Os.sysconf(_SC_PHYS_PAGES) × _SC_PAGESIZE",
+            "直接按内核报告的内存页总数换算；与上面的框架读数互相独立。") {
+            val pages = Os.sysconf(OsConstants._SC_PHYS_PAGES)
+            val pageSize = Os.sysconf(OsConstants._SC_PAGESIZE)
+            if (pages > 0 && pageSize > 0 && pages <= Long.MAX_VALUE / pageSize) bytes(pages * pageSize) else null
+        }
         observation("availableRam", "可用运行内存", memory.map { bytes(it.availMem) }.copy(source = "ActivityManager.MemoryInfo.availMem"))
         observation("lowMemory", "低内存状态", memory.map { if (it.lowMemory) "是" else "否" }.copy(source = "ActivityManager.MemoryInfo.lowMemory"))
         observation("lowMemoryThreshold", "低内存阈值", memory.map { bytes(it.threshold) }.copy(source = "ActivityManager.MemoryInfo.threshold"))
@@ -239,6 +282,29 @@ private object MemoryCollector : DeviceCollector {
             .let { it.copy(detail = it.detail ?: "(总量 − 可用量) / 总量；包含系统对可回收内存的估计。") })
         observation("swap", "Swap 总量", SafeReader.node(SafeReader.Node.MEM_INFO).map { text ->
             text.lineSequence().firstOrNull { it.startsWith("SwapTotal:") }?.substringAfter(':')?.trim()
+        })
+        // Third channel for the same fact, read straight from the kernel node instead of
+        // a framework API or a libc call. A rewritten device description often covers the
+        // framework and the C library but not a direct /proc read.
+        observation("kernelMemTotal", "内核内存总量", SafeReader.node(SafeReader.Node.MEM_INFO).map { text ->
+            text.lineSequence().firstOrNull { it.startsWith("MemTotal:") }
+                ?.substringAfter(':')?.trim()?.removeSuffix("kB")?.trim()?.toLongOrNull()
+                ?.takeIf { it in 262_144L..268_435_456L }?.let { kb -> bytes(kb * 1024) }
+        }.let { reading ->
+            if (reading.value != null) reading.copy(detail = "/proc/meminfo 的 MemTotal，按 1 GiB = 1048576 KiB 换算。")
+            else reading
+        })
+        // Field set 24. CmaTotal is the contiguous pool the kernel reserved at boot for
+        // the display and camera pipelines; its size follows the SoC memory layout, not
+        // any property, and it is already in the meminfo page read above.
+        observation("cmaTotal", "连续内存池（内核预留）", SafeReader.node(SafeReader.Node.MEM_INFO).map { text ->
+            text.lineSequence().firstOrNull { it.startsWith("CmaTotal:") }
+                ?.substringAfter(':')?.trim()?.removeSuffix("kB")?.trim()?.toLongOrNull()
+                ?.takeIf { it in 1_024L..16_777_216L }?.let { kb -> String.format(Locale.ROOT, "%.0f MiB", kb / 1024.0) }
+        }.let { reading ->
+            if (reading.value != null) reading.copy(detail =
+                "/proc/meminfo 的 CmaTotal，按 1 MiB = 1024 KiB 换算；由内核在启动时按内存布局预留。")
+            else reading
         })
         value("internalTotal", "内部存储总量", "StatFs(dataDirectory)") {
             bytes(StatFs(Environment.getDataDirectory().path).totalBytes)

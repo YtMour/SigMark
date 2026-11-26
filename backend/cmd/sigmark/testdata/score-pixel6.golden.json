@@ -1,0 +1,74 @@
+{
+  "version": "sigmark-score/4",
+  "value": 82,
+  "band": "D",
+  "bandLabel": "高度可疑",
+  "coverage": 0.94,
+  "coverageLabel": "充分可判",
+  "decisive": true,
+  "axes": [
+    {
+      "code": "declaration",
+      "label": "声明一致性",
+      "weight": 40,
+      "score": 55,
+      "coverage": 1,
+      "deductions": [
+        {
+          "code": "FOREIGN_PROFILE",
+          "label": "hardware_declaration_conflict",
+          "axis": "declaration",
+          "points": 30,
+          "keys": [
+            "cpu.cpuCapacity",
+            "memory.cmaTotal"
+          ],
+          "detail": "实测 cpu.cpuCapacity=160/498/1024；memory.cmaTotal=652 MiB 与另一颗已登记 SoC 的画像值一致"
+        },
+        {
+          "code": "OVERLAY_CODENAME_MISMATCH",
+          "label": "hardware_declaration_conflict",
+          "axis": "declaration",
+          "points": 15,
+          "keys": [
+            "system.device",
+            "environment.overlayDeviceCodename"
+          ],
+          "detail": "system.device=corot 与 environment.overlayDeviceCodename=oriole 不一致"
+        }
+      ]
+    },
+    {
+      "code": "behavior",
+      "label": "行为风险",
+      "weight": 35,
+      "score": 100,
+      "coverage": 0.83,
+      "deductions": []
+    },
+    {
+      "code": "usage",
+      "label": "使用真实性",
+      "weight": 25,
+      "score": 100,
+      "coverage": 1,
+      "deductions": []
+    }
+  ],
+  "caps": [
+    {
+      "code": "DECISIVE_FOREIGN_PROFILE",
+      "band": "D",
+      "reason": "实测 cpu.cpuCapacity=160/498/1024；memory.cmaTotal=652 MiB 与另一颗已登记 SoC 的画像值一致"
+    }
+  ],
+  "undetermined": [
+    {
+      "axis": "behavior",
+      "keys": [
+        "system.selinux"
+      ],
+      "reason": "RESTRICTED"
+    }
+  ]
+}

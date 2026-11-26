@@ -178,6 +178,17 @@ var behaviorScoreTable = []struct {
 // hit, so one device is never charged twice for one cause (R2).
 const structuralVirtualPoints = 35
 
+// qemuBootFlagPoints prices the third virtualisation channel: system.bootQemu == "1".
+//
+// Same 35 as the other two because it is the same fact observed a third way, and the three
+// are mutually exclusive in scoring (see qemuBootFlagDeduction and structuralVirtualDeduction).
+// Charging 35 per channel would let one emulator collect 105 points for one cause.
+//
+// It is the weakest of the three, not the strongest, despite coming from the bootloader:
+// a property can be deleted, and a deleted property is indistinguishable from one that was
+// never set. So it can only add evidence — its absence proves nothing.
+const qemuBootFlagPoints = 35
+
 // behaviorDisplayOnlyLabels are the profile labels this axis reports but does not price.
 // Naming them is the whole point: an omission that is written down can be reviewed, and
 // TestScoreBehaviorAccountsForEveryLabel fails if a new label is added to the profile and
@@ -1088,6 +1099,17 @@ func behaviorAxis(labels []profileLabel, parameters []Parameter) (scoreAxis, []s
 	if deduction, ok := structuralVirtualDeduction(parameters, markerHit); ok {
 		axis.Deductions = append(axis.Deductions, deduction)
 		caps = append(caps, scoreCap{Code: "DECISIVE_VIRTUAL_BUILD", Band: bandD, Reason: deduction.Detail})
+		markerHit = true // one cause, one deduction: the qemu flag must not charge again.
+	}
+	// The QEMU boot flag is the third channel, and the last one to speak. It is the
+	// device's own bootloader telling the kernel it is under QEMU, which is why it is
+	// priced at the same 35 as the other two: it is the same fact, observed differently.
+	//
+	// It only speaks when neither of the other two did (R2), so a device that reports all
+	// three does not collect 105 points for one cause.
+	if deduction, ok := qemuBootFlagDeduction(parameters, markerHit); ok {
+		axis.Deductions = append(axis.Deductions, deduction)
+		caps = append(caps, scoreCap{Code: "DECISIVE_VIRTUAL_BUILD", Band: bandD, Reason: deduction.Detail})
 	}
 	finalizeScoreAxis(&axis, decided, total)
 	return axis, caps, undetermined
@@ -1104,7 +1126,17 @@ func virtualEvidenceConfirmed(labels []profileLabel, parameters []Parameter) boo
 	if marker, ok := scoreLabelByCode(labels, "virtual_build_markers"); ok && marker.State == "hit" {
 		return true
 	}
-	return len(structuralVirtualEvidence(structuralVirtualRead(parameters))) > 0
+	if len(structuralVirtualEvidence(structuralVirtualRead(parameters))) > 0 {
+		return true
+	}
+	// The boot flag is the third channel, and it must count here too. If it only priced
+	// the behaviour axis but did not confirm virtualisation, a device whose sole evidence
+	// is ro.boot.qemu=1 would be charged 35 points and then *also* charged 12 for a fresh
+	// boot on an aged image — the same cause billed twice, which is what R2 forbids.
+	if _, ok := qemuBootFlagDeduction(parameters, false); ok {
+		return true
+	}
+	return false
 }
 
 // structuralVirtualRead collects the two structural channel readings from the archive.
@@ -1163,6 +1195,46 @@ func structuralVirtualDeduction(parameters []Parameter, markerHit bool) (scoreDe
 		Keys:   keys,
 		Detail: detail,
 	}, true
+}
+
+// qemuBootFlagDeduction prices system.bootQemu == "1".
+//
+// This is the device's own bootloader telling the kernel it is running under QEMU. It is
+// the same fact as the other two channels, so it is worth the same 35 points, and it stays
+// silent when either of them already spoke (R2, one cause one deduction). A device that
+// reports all three must not collect 105 points for one cause.
+//
+// It is deliberately the *last* channel to speak, because it is the easiest to silence:
+// ro.boot.qemu is a property, and `resetprop` can delete it. But deletion is
+// indistinguishable from never having been set — a real handset and an emulator that wiped
+// the flag both read UNAVAILABLE. That asymmetry is why this channel can only add
+// evidence, never vouch for cleanliness: a missing flag is not a clean bill of health.
+//
+// The detail names the measurement rather than the verdict, so a reader can disagree.
+func qemuBootFlagDeduction(parameters []Parameter, alreadyPriced bool) (scoreDeduction, bool) {
+	if alreadyPriced {
+		return scoreDeduction{}, false
+	}
+	for _, p := range parameters {
+		if p.Group+"."+p.Key != "system.bootQemu" || p.Status != "AVAILABLE" || p.Value == nil {
+			continue
+		}
+		if strings.TrimSpace(*p.Value) != "1" {
+			// "0" is a real answer and means the bootloader did not claim QEMU. Anything
+			// else is a value we do not recognise, and an unrecognised value is not
+			// evidence — a channel that fires on surprises would fire on every new format.
+			return scoreDeduction{}, false
+		}
+		return scoreDeduction{
+			Code:   "QEMU_BOOT_FLAG",
+			Label:  "qemu_boot_flag",
+			Axis:   axisBehavior,
+			Points: qemuBootFlagPoints,
+			Keys:   []string{"system.bootQemu"},
+			Detail: "bootloader 自报 QEMU 启动（system.bootQemu=1）",
+		}, true
+	}
+	return scoreDeduction{}, false
 }
 
 var partitionYearPattern = regexp.MustCompile(`([0-9]{4})-[0-9]{2}-[0-9]{2}`)

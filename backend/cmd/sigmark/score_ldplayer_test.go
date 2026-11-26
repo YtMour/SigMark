@@ -26,16 +26,20 @@ import (
 func ldPlayerCapture() (map[string]string, map[string]string) {
 	values := map[string]string{
 		// --- declaration: a realme shape the emulator chose for itself ---
-		"system.model":           "RMX5010",
-		"system.propertyModel":   "RMX5010",
-		"system.device":          "unicorn",
-		"system.propertyDevice":  "unicorn",
-		"system.product":         "RMX5010",
-		"system.board":           "RMX5010",
-		"system.brand":           "realme",
-		"system.manufacturer":    "realme",
-		"system.boardPlatform":   "aosp-user",
-		"system.bootHardware":    "qcom",
+		"system.model":          "RMX5010",
+		"system.propertyModel":  "RMX5010",
+		"system.device":         "unicorn",
+		"system.propertyDevice": "unicorn",
+		"system.product":        "RMX5010",
+		"system.board":          "RMX5010",
+		"system.brand":          "realme",
+		"system.manufacturer":   "realme",
+		"system.boardPlatform":  "aosp-user",
+		"system.bootHardware":   "qcom",
+		// Field set 26. The real capture 9d5b546e reports this; this fixture was originally
+		// transcribed from 6642e350 (field set 25), which predates the field, so it was
+		// missing here — and that omission is exactly what the scrub test caught.
+		"system.bootQemu":        "1",
 		"system.socManufacturer": "AOSP",
 		"system.api":             "34",
 		"system.release":         "14",
